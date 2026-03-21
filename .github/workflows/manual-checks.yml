@@ -1,0 +1,59 @@
+name: Manual Checks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  manual:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run lint
+        run: uv run ruff check .
+
+      - name: Run format check
+        run: uv run ruff format --check .
+
+      - name: Django check
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.local
+          SECRET_KEY: test-secret-key
+          DEBUG: "1"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py check
+
+      - name: Check missing migrations
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.local
+          SECRET_KEY: test-secret-key
+          DEBUG: "1"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Run tests
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.local
+          SECRET_KEY: test-secret-key
+          DEBUG: "1"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py test
+
+      - name: Docker config check
+        run: docker compose config
