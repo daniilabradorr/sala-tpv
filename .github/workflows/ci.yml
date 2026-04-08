@@ -46,8 +46,8 @@ jobs:
 
       - name: Run tests
         env:
-          DJANGO_SETTINGS_MODULE: config.settings.local
+          DJANGO_SETTINGS_MODULE: config.settings.test
           SECRET_KEY: test-secret-key
-          DEBUG: "1"
+          DEBUG: "0"
           ALLOWED_HOSTS: 127.0.0.1,localhost
         run: uv run python manage.py test
