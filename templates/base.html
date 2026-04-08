@@ -1,0 +1,50 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Sala TPV{% endblock %}</title>
+
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="app-shell">
+        <header class="site-header">
+            <div class="container">
+                <div class="brand">
+                    <a href="/">Sala TPV</a>
+                </div>
+
+                <nav class="site-nav">
+                    <a href="/admin/">Admin</a>
+                    <a href="/health/">Health</a>
+                </nav>
+            </div>
+        </header>
+
+        <main class="site-main">
+            <div class="container">
+                {% block content %}
+                <section class="card">
+                    <h1>Base del proyecto lista</h1>
+                    <p>Django ya puede renderizar plantillas, cargar estáticos y usar HTMX.</p>
+                </section>
+                {% endblock %}
+            </div>
+        </main>
+
+        <footer class="site-footer">
+            <div class="container">
+                <small>Base técnica del TPV</small>
+            </div>
+        </footer>
+    </div>
+
+    <script src="{% static 'js/app.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
