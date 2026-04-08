@@ -32,7 +32,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    
     "apps.core",
     "apps.business_config",
     "apps.users",
@@ -116,8 +115,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-
-#logging
+# logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 LOGGING = {
