@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python from .python-version
         uses: actions/setup-python@v6
@@ -46,8 +46,8 @@ jobs:
 
       - name: Run tests
         env:
-          DJANGO_SETTINGS_MODULE: config.settings.local
+          DJANGO_SETTINGS_MODULE: config.settings.test
           SECRET_KEY: test-secret-key
-          DEBUG: "1"
+          DEBUG: "0"
           ALLOWED_HOSTS: 127.0.0.1,localhost
         run: uv run python manage.py test
