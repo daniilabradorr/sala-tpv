@@ -90,7 +90,7 @@ class POSSettings(TimeStampedModel):
     )
     allow_manual_price = models.BooleanField(
         "permitir precio manual",
-        default=False,
+        default=True,
     )
     allow_manual_discounts = models.BooleanField(
         "permitir descuentos manuales",
@@ -116,7 +116,7 @@ class POSSettings(TimeStampedModel):
     )
     require_pin_for_sensitive_actions = models.BooleanField(
         "requerir PIN en acciones sensibles",
-        default=True,
+        default=False,
     )
 
     class Meta:
