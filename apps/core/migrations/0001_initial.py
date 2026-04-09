@@ -32,8 +32,8 @@ class Migration(migrations.Migration):
                 ("is_active", models.BooleanField(default=True, verbose_name="activo")),
             ],
             options={
-                "verbose_name": "Empresa",
-                "verbose_name_plural": "Empresas",
+                "verbose_name": "empresa",
+                "verbose_name_plural": "empresas",
                 "ordering": ("name",),
                 "indexes": [
                     models.Index(
