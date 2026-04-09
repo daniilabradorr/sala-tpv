@@ -1,6 +1,7 @@
 """Este módulo proporciona funciones para validar que los objetos relacionados pertenecen
 a la misma empresa (business) en un contexto de aislamiento de datos.
 """
+
 from django.core.exceptions import ValidationError
 
 
