@@ -20,8 +20,8 @@ class Business(TimeStampedModel):
     objects = BusinessManager()
     
     class Meta:
-        verbose_name = "Empresa"
-        verbose_name_plural = "Empresas"
+        verbose_name = "empresa"
+        verbose_name_plural = "empresas"
         ordering = ("name",)
         indexes = [
             models.Index(fields=["is_active", "name"], name="core_biz_active_name_idx"),
