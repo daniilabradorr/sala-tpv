@@ -2,6 +2,7 @@ from django.db import models
 
 from apps.core.isolation import get_business_id
 
+
 class BusinessQuerySet(models.QuerySet):
     def active(self):
         return self.filter(is_active=True)
