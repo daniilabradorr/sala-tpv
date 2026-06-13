@@ -1,12 +1,3 @@
-
----
-
-## `.gitignore`
-
-```gitignore
-# =========================
-# Python
-# =========================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -29,36 +20,28 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# =========================
 # Entornos virtuales
-# =========================
 .venv/
 venv/
 env/
 ENV/
 
-# =========================
-# Django
-# =========================
+# Logs y base de datos local
 *.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-media/
 
-# Archivos estáticos recolectados
+# Archivos generados por Django
+media/
 staticfiles/
 
-# =========================
 # Variables de entorno
-# =========================
 .env
 .env.*
 !.env.example
 
-# =========================
-# Pytest / cobertura / cachés
-# =========================
+# Caches y cobertura
 .pytest_cache/
 .coverage
 .coverage.*
@@ -67,46 +50,32 @@ htmlcov/
 .nox/
 .cache/
 
-# =========================
-# Linters / type checkers
-# =========================
+# Herramientas de análisis
 .mypy_cache/
 .ruff_cache/
 .pyre/
 .pytype/
 
-# =========================
 # Jupyter
-# =========================
 .ipynb_checkpoints/
 
-# =========================
-# VS Code / JetBrains / editores
-# =========================
+# Editores / IDEs
 .vscode/
 .idea/
 *.iml
 
-# =========================
-# SO
-# =========================
+# Sistema operativo
 .DS_Store
 Thumbs.db
 
-# =========================
-# Docker
-# =========================
+# Docker / procesos
 *.pid
 docker-compose.override.yml
 
-# =========================
-# Node / frontend auxiliar
-# =========================
+# Node / frontend futuro
 node_modules/
 
-# =========================
-# Archivos temporales
-# =========================
+# Temporales
 *.tmp
 *.swp
 *.swo
