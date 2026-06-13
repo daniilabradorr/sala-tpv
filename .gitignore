@@ -1,8 +1,3 @@
-
----
-
-
-```gitignore
 __pycache__/
 *.py[cod]
 *$py.class
@@ -25,26 +20,28 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-
+# Entornos virtuales
 .venv/
 venv/
 env/
 ENV/
 
-
+# Logs y base de datos local
 *.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+
+# Archivos generados por Django
 media/
-
-
 staticfiles/
 
+# Variables de entorno
 .env
 .env.*
 !.env.example
 
+# Caches y cobertura
 .pytest_cache/
 .coverage
 .coverage.*
@@ -53,30 +50,32 @@ htmlcov/
 .nox/
 .cache/
 
+# Herramientas de análisis
 .mypy_cache/
 .ruff_cache/
 .pyre/
 .pytype/
 
-
+# Jupyter
 .ipynb_checkpoints/
 
+# Editores / IDEs
 .vscode/
 .idea/
 *.iml
 
-
+# Sistema operativo
 .DS_Store
 Thumbs.db
 
-
+# Docker / procesos
 *.pid
 docker-compose.override.yml
 
-
+# Node / frontend futuro
 node_modules/
 
-
+# Temporales
 *.tmp
 *.swp
 *.swo
