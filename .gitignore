@@ -1,12 +1,8 @@
 
 ---
 
-## `.gitignore`
 
 ```gitignore
-# =========================
-# Python
-# =========================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -29,36 +25,26 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# =========================
-# Entornos virtuales
-# =========================
+
 .venv/
 venv/
 env/
 ENV/
 
-# =========================
-# Django
-# =========================
+
 *.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
 media/
 
-# Archivos estáticos recolectados
+
 staticfiles/
 
-# =========================
-# Variables de entorno
-# =========================
 .env
 .env.*
 !.env.example
 
-# =========================
-# Pytest / cobertura / cachés
-# =========================
 .pytest_cache/
 .coverage
 .coverage.*
@@ -67,46 +53,30 @@ htmlcov/
 .nox/
 .cache/
 
-# =========================
-# Linters / type checkers
-# =========================
 .mypy_cache/
 .ruff_cache/
 .pyre/
 .pytype/
 
-# =========================
-# Jupyter
-# =========================
+
 .ipynb_checkpoints/
 
-# =========================
-# VS Code / JetBrains / editores
-# =========================
 .vscode/
 .idea/
 *.iml
 
-# =========================
-# SO
-# =========================
+
 .DS_Store
 Thumbs.db
 
-# =========================
-# Docker
-# =========================
+
 *.pid
 docker-compose.override.yml
 
-# =========================
-# Node / frontend auxiliar
-# =========================
+
 node_modules/
 
-# =========================
-# Archivos temporales
-# =========================
+
 *.tmp
 *.swp
 *.swo
