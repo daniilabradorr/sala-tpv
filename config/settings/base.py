@@ -100,7 +100,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
-AUTH_USER_MODEL = 'apps.users.CustomUser'
+AUTH_USER_MODEL = "apps.users.CustomUser"
 
 
 LANGUAGE_CODE = "es-es"

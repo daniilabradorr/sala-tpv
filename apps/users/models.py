@@ -8,10 +8,12 @@ from .managers import CustomUserManager
 
 import uuid
 
+
 class RoleChoices(models.TextChoices):
     OWNER = "owner", "Owner"
     MANAGER = "manager", "Manager"
     CASHIER = "cashier", "Cashier"
+
 
 # Create your models here.
 class CustomUser(AbstractBaseUser, PermissionsMixin):
@@ -34,14 +36,14 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True, blank= True)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['firts_name', 'last_name', 'rol', 'phone']
-    
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["firts_name", "last_name", "rol", "phone"]
+
     objects = CustomUserManager()
-    
+
     class Meta:
         verbose_name = "usuario"
         verbose_name_plural = "usuarios"
@@ -50,24 +52,21 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["business", "role"], name="users_biz_role_idx"),
             models.Index(fields=["is_active", "email"], name="users_active_email_idx"),
         ]
-    
-    
+
     def __str__(self):
         full_name = f"{self.first_name} {self.last_name}".strip()
         return full_name or self.email
-    
-    
+
     def clean(self):
         super().clean()
         """aqui ahora lo que quiero hacer es que phone
         tenga un formato correcto."""
 
         if self.phone and not self.phone.isdigit():
-            raise ValidationError("ERROR: El número de teléfono debe contener solo dígitos.")
-    
+            raise ValidationError(
+                "ERROR: El número de teléfono debe contener solo dígitos."
+            )
 
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
-    
-    
