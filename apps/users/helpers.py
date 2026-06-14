@@ -73,7 +73,7 @@ def can_sell_in_store(user, store):
 
     if user.is_superuser:
         return True
-    
+
     if is_owner(user) and (user.business_id == store.business_id):
         return True
 
@@ -97,7 +97,6 @@ def can_open_cash_register(user, store):
     if user.is_superuser:
         return True
 
-    
     if is_owner(user) and (user.business_id == store.business_id):
         return True
 
@@ -120,7 +119,7 @@ def can_close_cash_register(user, store):
 
     if user.is_superuser:
         return True
-    
+
     if is_owner(user) and (user.business_id == store.business_id):
         return True
 
