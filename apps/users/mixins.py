@@ -3,6 +3,7 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 
 from apps.stores.models import Stores
+from apps.users.models import CustomUser
 from apps.users.helpers import (
     is_owner,
     is_owner_or_manager,
@@ -15,6 +16,35 @@ from apps.users.helpers import (
     can_open_cash_register,
     can_close_cash_register,
 )
+
+
+class BusinessUserQuerysetMixin:
+    """
+    Mixin para vistas de usuarios.
+    Evita que un owner/manager de un negocio vea usuarios de otro negocio.
+    El superusuario puede ver todos.
+    """
+
+    # esto se hace para el rendimiento delas consultas, para que no haga muchas consultas a la base de datos
+
+    def get_queryset(self):
+        """Retorna el queryset de usuarios filtrado por negocio del usuario logueado.
+        Si el usuario es superusuario, retorna todos los usuarios.
+
+        que hace select_related y prefetch_related para optimizar las consultas a la base de datos.
+        select_related: para traer la relación de negocio en la misma consulta.
+        prefetch_related: para traer la relación de accesos a tiendas en una sola consulta.
+        """
+        qs = (
+            CustomUser.objects.select_related("business")
+            .prefetch_related("store_accesses__store")
+            .order_by("email")
+        )
+
+        if self.request.user.is_superuser:
+            return qs
+
+        return qs.filter(business=self.request.user.business)
 
 
 # ============================================================================
