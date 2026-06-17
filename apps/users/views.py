@@ -70,14 +70,14 @@ class UserProfileUpdateView(LoginRequiredMixin, UpdateView):
 # ahora las vistas para cambiar la contraseña y el pin de seguridad del usuario
 class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
     template_name = "users/password_change.html"
-    suceess_url = reverse_lazy("users:profile")
+    success_url = reverse_lazy("users:profile")
 
     def form_valid(self, form):
         messages.success(self.request, "Contraseña actualizada correctamente.")
         return super().form_valid(form)
 
 
-class UserPinChangeView(FormView):
+class UserPinChangeView(LoginRequiredMixin, FormView):
     template_name = "users/pin_change.html"
     form_class = UserPinChangeForm
     success_url = reverse_lazy("users:profile")
@@ -94,9 +94,7 @@ class UserPinChangeView(FormView):
 
 
 # ahora la gestion de susuarios del negocio, solo accesible para manager o owner del negocio, y el superusuario
-class UserListView(
-    LoginRequiredMixin, ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, ListView
-):
+class UserListView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, ListView):
     model = CustomUser
     template_name = "users/user_list.html"
     context_object_name = "users"
@@ -104,7 +102,6 @@ class UserListView(
 
 
 class UserDetailView(
-    LoginRequiredMixin,
     ManagerOrOwnerRequiredMixin,
     BusinessUserQuerysetMixin,
     DetailView,
@@ -118,6 +115,16 @@ class UserCreateView(ManagerOrOwnerRequiredMixin, CreateView):
     model = CustomUser
     form_class = UserCreateForm
     template_name = "users/user_create.html"
+
+    def get_form_kwargs(self):
+        # para mandar al form el business del usuario logueado, para que el nuevo usuario se cree en el mismo negocio
+        # y asi no puede poner otro negocio, ni el superusuario puede poner otro negocio, porque el form lo ignora y pone el del usuario logueado
+        kwargs = super().get_form_kwargs()
+
+        if not self.request.user.is_superuser:
+            kwargs["business"] = self.request.user.business
+
+        return kwargs
 
     def form_valid(self, form):
         new_user = form.save(commit=False)
