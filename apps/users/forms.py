@@ -53,6 +53,13 @@ class UserCreateForm(forms.ModelForm):
             "role",
         ]
 
+    def __init__(self, *args, business=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business
+
+        if self.business:
+            self.instance.business = self.business
+
     def clean(self):
         cleaned_data = super().clean()
 
