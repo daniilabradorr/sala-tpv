@@ -1,61 +1,27 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 
-from apps.core.models import Business
+from apps.core.models import Business, TimeStampedModel
 
 
-class Stores(models.Model):
+class Stores(TimeStampedModel):
     """
-    Modelo temporal/mínimo de tiendas.
-
-    IMPORTANTE:
-    Este modelo está hecho como versión puente para que el módulo users funcione
-    mientras todavía no hemos desarrollado el módulo stores completo.
-
-    Ahora mismo users necesita que Store tenga:
-    - business
-    - name
-    - code
-    - is_active
-
-    ¿Por qué business permite null=True temporalmente?
-    ----------------------------------------------------
-    Porque ya existía una migración antigua de Stores solo con el campo name.
-
-    Antes teníamos:
-
-        class Stores(models.Model):
-            name = models.CharField(max_length=100, unique=True)
-
-    Ahora estamos añadiendo business.
-
-    Si business fuera obligatorio desde el primer momento:
-
-        business = models.ForeignKey(Business, on_delete=models.CASCADE)
-
-    Django preguntaría:
-
-        "¿Qué business pongo a las tiendas antiguas?"
-
-    Aunque hayas borrado db.sqlite3, las migraciones antiguas siguen existiendo,
-    por eso makemigrations sigue detectando que estamos añadiendo un campo
-    obligatorio a una tabla/modelo que ya existía.
-
-    Por eso ahora lo dejamos temporalmente así:
-
-        null=True
-        blank=True
-
-    Pero funcionalmente, en el TPV real, una tienda SIEMPRE debe pertenecer
-    a un negocio.
-
-    Más adelante, cuando desarrollemos stores bien, cambiaremos esto a:
-
-        null=False
-        blank=False
-
-    y haremos una migración limpia después de asegurarnos de que todas las
-    tiendas tienen business.
+    Modelo para representar una tienda asociada a un negocio.
+    Cada tienda tiene un nombre, un código único dentro del negocio, y puede tener
+    información de contacto y ubicación.
+    Attributes:
+        business (ForeignKey): Relación con el modelo Business.
+        name (CharField): Nombre de la tienda.
+        code (CharField): Código único de la tienda dentro del negocio.
+        adress_line_1 (CharField): Dirección principal de la tienda.
+        adress_line_2 (CharField): Dirección secundaria de la tienda.
+        postal_code (CharField): Código postal de la tienda.
+        city (CharField): Ciudad donde se encuentra la tienda.
+        province (CharField): Provincia donde se encuentra la tienda.
+        country_code (CharField): Código de país ISO de la tienda.
+        phone_store (CharField): Teléfono de contacto de la tienda.
+        email_store (CharField): Correo electrónico de contacto de la tienda.
+        is_active (BooleanField): Indica si la tienda está activa o no.
     """
 
     business = models.ForeignKey(
@@ -107,10 +73,53 @@ class Stores(models.Model):
         default="",
     )
 
+    adress_line_1 = models.CharField(
+        "Dirección Principal", max_length=150, blank=True, null=True
+    )
+    adress_line_2 = models.CharField(
+        "Dirección Secundaria", max_length=150, blank=True, null=True
+    )
+
+    postal_code = models.CharField(
+        "Código Postal", max_length=10, blank=True, null=True
+    )
+    city = models.CharField("Ciudad", max_length=120, blank=True, null=True)
+    province = models.CharField("Provincia", max_length=120, blank=True, null=True)
+
+    country_code = models.CharField(
+        "Código país ISO", max_length=4, blank=False, null=False, default="ES"
+    )
+
+    phone_store = models.CharField(
+        "Teléfono de la tienda", max_length=12, blank=True, null=True
+    )
+    email_store = models.CharField(
+        "email de la tienda", max_length=120, blank=True, null=True
+    )
     is_active = models.BooleanField(
         "Activa",
+        blank=False,
+        # pongo default True para que las tiendas antiguas no se queden inactivas al migrar
         default=True,
+        # deberia de ser unica  pero no obligatoriamente, ya que puede haber tiendas inactivas con el mismo nombre y codigo
     )
+    # no pongo created_at y updated_at porque hereda de TimeStampedModel
+
+    @property
+    def contact_phone(self):
+        if self.phone_store:
+            return self.phone_store
+        if self.business and self.business.profile:
+            return self.business.profile.phone
+        return ""
+
+    @property
+    def contact_email(self):
+        if self.email_store:
+            return self.email_store
+        if self.business and self.business.profile:
+            return self.business.profile.email
+        return ""
 
     class Meta:
         verbose_name = "tienda"

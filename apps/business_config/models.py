@@ -22,8 +22,8 @@ class BusinessProfile(TimeStampedModel):
     legal_name = models.CharField("razón social", max_length=150)
     tax_identifier = models.CharField("NIF/CIF", max_length=20, blank=True)
     trade_name = models.CharField("nombre comercial", max_length=150, blank=True)
-    phone = models.CharField("teléfono", max_length=30, blank=True)
-    email = models.EmailField("email", blank=True)
+    phone = models.CharField("teléfono", max_length=30, blank=False)
+    email = models.EmailField("email", blank=False)
     website = models.URLField("web", blank=True)
 
     address_line_1 = models.CharField("dirección", max_length=255, blank=True)
