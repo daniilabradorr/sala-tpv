@@ -1,5 +1,8 @@
+import re
+
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.utils.text import slugify
 
 from apps.core.models import Business, TimeStampedModel
 
@@ -73,29 +76,21 @@ class Stores(TimeStampedModel):
         default="",
     )
 
-    adress_line_1 = models.CharField(
-        "Dirección Principal", max_length=150, blank=True, null=True
-    )
-    adress_line_2 = models.CharField(
-        "Dirección Secundaria", max_length=150, blank=True, null=True
+    address_line_1 = models.CharField("Dirección Principal", max_length=150, blank=True)
+    address_line_2 = models.CharField(
+        "Dirección Secundaria", max_length=150, blank=True
     )
 
-    postal_code = models.CharField(
-        "Código Postal", max_length=10, blank=True, null=True
-    )
-    city = models.CharField("Ciudad", max_length=120, blank=True, null=True)
-    province = models.CharField("Provincia", max_length=120, blank=True, null=True)
+    postal_code = models.CharField("Código Postal", max_length=10, blank=True)
+    city = models.CharField("Ciudad", max_length=120, blank=True)
+    province = models.CharField("Provincia", max_length=120, blank=True)
 
     country_code = models.CharField(
-        "Código país ISO", max_length=4, blank=False, null=False, default="ES"
+        "Código país ISO", max_length=2, blank=False, null=False, default="ES"
     )
 
-    phone_store = models.CharField(
-        "Teléfono de la tienda", max_length=12, blank=True, null=True
-    )
-    email_store = models.CharField(
-        "email de la tienda", max_length=120, blank=True, null=True
-    )
+    phone_store = models.CharField("Teléfono de la tienda", max_length=30, blank=True)
+    email_store = models.EmailField("email de la tienda", max_length=120, blank=True)
     is_active = models.BooleanField(
         "Activa",
         blank=False,
@@ -109,16 +104,24 @@ class Stores(TimeStampedModel):
     def contact_phone(self):
         if self.phone_store:
             return self.phone_store
-        if self.business and self.business.profile:
-            return self.business.profile.phone
+
+        profile = getattr(self.business, "profile", None)
+
+        if profile:
+            return profile.phone
+
         return ""
 
     @property
     def contact_email(self):
         if self.email_store:
             return self.email_store
-        if self.business and self.business.profile:
-            return self.business.profile.email
+
+        profile = getattr(self.business, "profile", None)
+
+        if profile:
+            return profile.email
+
         return ""
 
     class Meta:
@@ -201,28 +204,78 @@ class Stores(TimeStampedModel):
         if self.name:
             self.name = self.name.strip()
 
+        # normalizo code a mayúsculas y elimino espacios
         if self.code:
             self.code = self.code.strip().upper()
+
+        if self.address_line_1:
+            self.address_line_1 = self.address_line_1.strip()
+
+        if self.address_line_2:
+            self.address_line_2 = self.address_line_2.strip()
+
+        if self.postal_code:
+            self.postal_code = self.postal_code.strip()
+
+        if self.city:
+            self.city = self.city.strip()
+
+        if self.province:
+            self.province = self.province.strip()
+
+        if self.country_code:
+            self.country_code = self.country_code.strip().upper()
+        else:
+            self.country_code = "ES"
+
+        if self.phone_store:
+            self.phone_store = self.phone_store.strip()
+
+        if self.email_store:
+            self.email_store = self.email_store.strip().lower()
+
+        # Generar código automáticamente si está vacío
+        if not self.code and self.name and self.business_id:
+            business_slug = slugify(self.business.name)[:4].upper()
+            store_slug = slugify(self.name)[:4].upper()
+            self.code = f"{business_slug}-{store_slug}"
 
         if not self.name:
             errors["name"] = "El nombre de la tienda es obligatorio."
 
-        # NO validamos todavía:
-        #
-        # if not self.business_id:
-        #     errors["business"] = "La tienda debe pertenecer a un negocio."
-        #
-        # Esto lo activaremos más adelante cuando stores esté bien implementado
-        # y hayamos hecho una migración de datos para rellenar business en todas
-        # las tiendas existentes.
+        if not self.business_id:
+            errors["business"] = "La tienda debe pertenecer a un negocio."
 
-        # NO validamos todavía:
-        #
-        # if not self.code:
-        #     errors["code"] = "El código de tienda es obligatorio."
-        #
-        # Esto también lo activaremos más adelante.
-        # Ahora code tiene default="" para evitar problemas de migración.
+        if not self.code:
+            errors["code"] = "El código de tienda es obligatorio."
+
+        if self.code and not re.fullmatch(r"[A-Z0-9_-]+", self.code):
+            errors["code"] = (
+                "El código de tienda solo puede contener letras mayúsculas, "
+                "números, guiones y guiones bajos."
+            )
+
+        if not self.country_code:
+            errors["country_code"] = "El código de país es obligatorio."
+
+        elif len(self.country_code) != 2 or not self.country_code.isalpha():
+            errors["country_code"] = (
+                "El código de país debe tener 2 letras. Ejemplo: ES."
+            )
+
+        if self.postal_code and self.country_code == "ES":
+            if len(self.postal_code) != 5 or not self.postal_code.isdigit():
+                errors["postal_code"] = (
+                    "El código postal debe tener exactamente 5 caracteres "
+                    "y contener solo dígitos."
+                )
+
+        if self.phone_store:
+            if not re.fullmatch(r"[0-9+\-\s()]{6,30}", self.phone_store):
+                errors["phone_store"] = (
+                    "El teléfono de la tienda solo puede contener números, "
+                    "espacios, +, guiones o paréntesis."
+                )
 
         if errors:
             raise ValidationError(errors)
@@ -231,11 +284,10 @@ class Stores(TimeStampedModel):
         """
         Ejecutamos full_clean antes de guardar.
 
+        El código se genera automáticamente dentro de clean() si no existe.
+
         Esto mantiene el mismo estilo que ya tienes en otros modelos del proyecto,
         como CustomUser y UserStoreAccess.
-
-        Así, aunque se cree una tienda desde shell, admin o código interno,
-        se aplican las validaciones del modelo.
         """
         self.full_clean()
         return super().save(*args, **kwargs)
