@@ -55,6 +55,11 @@ class StoreCreateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, CreateVie
 
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["business"] = self.request.user.business
+        return kwargs
+
     def form_valid(self, form):
         """
         Asignamos siempre el negocio desde el usuario autenticado.

@@ -1,7 +1,7 @@
 from django import forms
 from django.forms import modelformset_factory
 
-from app.stores.models import Store
+from apps.stores.models import Store
 
 class StoreCreateForm(forms.ModelForm):
     """Formulario para crear una tienda
@@ -21,6 +21,13 @@ class StoreCreateForm(forms.ModelForm):
             "phone_store",
             "email_store",
         ]
+        
+    def __init__(self, *args, business=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business
+
+        if self.business:
+            self.instance.business = self.business
 
 class StoreUpdateForm(forms.ModelForm):
     """Formulrio para actualizar una tienda.
