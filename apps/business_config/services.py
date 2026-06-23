@@ -16,6 +16,9 @@ def bootstrap_business_configuration(business):
             "legal_name": business.name,
             "trade_name": business.name,
             "brand_name": business.name,
+            # ahora mismo esto lo dejo demomento, en cuanto se haga onboarding de negocio quitarlo hardcodeado y que se pida al usuario, pero para pruebas de momento lo dejo asi
+            "phone": "000000000",
+            "email": f"business-{business.pk}@example.com",
             "country_code": "ES",  # España
             "currency_code": "EUR",  # Euro
             "receipt_footer": "Gracias por su visita.",

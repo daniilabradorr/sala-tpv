@@ -54,9 +54,7 @@ class StoresAdmin(admin.ModelAdmin):
         "contact_email",
     )
 
-    list_select_related = (
-        "business",
-    )
+    list_select_related = ("business",)
 
     date_hierarchy = "created_at"
 
