@@ -1,61 +1,30 @@
+import re
+
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.utils.text import slugify
 
-from apps.core.models import Business
+from apps.core.models import Business, TimeStampedModel
 
 
-class Stores(models.Model):
+class Stores(TimeStampedModel):
     """
-    Modelo temporal/mínimo de tiendas.
-
-    IMPORTANTE:
-    Este modelo está hecho como versión puente para que el módulo users funcione
-    mientras todavía no hemos desarrollado el módulo stores completo.
-
-    Ahora mismo users necesita que Store tenga:
-    - business
-    - name
-    - code
-    - is_active
-
-    ¿Por qué business permite null=True temporalmente?
-    ----------------------------------------------------
-    Porque ya existía una migración antigua de Stores solo con el campo name.
-
-    Antes teníamos:
-
-        class Stores(models.Model):
-            name = models.CharField(max_length=100, unique=True)
-
-    Ahora estamos añadiendo business.
-
-    Si business fuera obligatorio desde el primer momento:
-
-        business = models.ForeignKey(Business, on_delete=models.CASCADE)
-
-    Django preguntaría:
-
-        "¿Qué business pongo a las tiendas antiguas?"
-
-    Aunque hayas borrado db.sqlite3, las migraciones antiguas siguen existiendo,
-    por eso makemigrations sigue detectando que estamos añadiendo un campo
-    obligatorio a una tabla/modelo que ya existía.
-
-    Por eso ahora lo dejamos temporalmente así:
-
-        null=True
-        blank=True
-
-    Pero funcionalmente, en el TPV real, una tienda SIEMPRE debe pertenecer
-    a un negocio.
-
-    Más adelante, cuando desarrollemos stores bien, cambiaremos esto a:
-
-        null=False
-        blank=False
-
-    y haremos una migración limpia después de asegurarnos de que todas las
-    tiendas tienen business.
+    Modelo para representar una tienda asociada a un negocio.
+    Cada tienda tiene un nombre, un código único dentro del negocio, y puede tener
+    información de contacto y ubicación.
+    Attributes:
+        business (ForeignKey): Relación con el modelo Business.
+        name (CharField): Nombre de la tienda.
+        code (CharField): Código único de la tienda dentro del negocio.
+        adress_line_1 (CharField): Dirección principal de la tienda.
+        adress_line_2 (CharField): Dirección secundaria de la tienda.
+        postal_code (CharField): Código postal de la tienda.
+        city (CharField): Ciudad donde se encuentra la tienda.
+        province (CharField): Provincia donde se encuentra la tienda.
+        country_code (CharField): Código de país ISO de la tienda.
+        phone_store (CharField): Teléfono de contacto de la tienda.
+        email_store (CharField): Correo electrónico de contacto de la tienda.
+        is_active (BooleanField): Indica si la tienda está activa o no.
     """
 
     business = models.ForeignKey(
@@ -107,10 +76,53 @@ class Stores(models.Model):
         default="",
     )
 
+    address_line_1 = models.CharField("Dirección Principal", max_length=150, blank=True)
+    address_line_2 = models.CharField(
+        "Dirección Secundaria", max_length=150, blank=True
+    )
+
+    postal_code = models.CharField("Código Postal", max_length=10, blank=True)
+    city = models.CharField("Ciudad", max_length=120, blank=True)
+    province = models.CharField("Provincia", max_length=120, blank=True)
+
+    country_code = models.CharField(
+        "Código país ISO", max_length=2, blank=False, null=False, default="ES"
+    )
+
+    phone_store = models.CharField("Teléfono de la tienda", max_length=30, blank=True)
+    email_store = models.EmailField("email de la tienda", max_length=120, blank=True)
     is_active = models.BooleanField(
         "Activa",
+        blank=False,
+        # pongo default True para que las tiendas antiguas no se queden inactivas al migrar
         default=True,
+        # deberia de ser unica  pero no obligatoriamente, ya que puede haber tiendas inactivas con el mismo nombre y codigo
     )
+    # no pongo created_at y updated_at porque hereda de TimeStampedModel
+
+    @property
+    def contact_phone(self):
+        if self.phone_store:
+            return self.phone_store
+
+        profile = getattr(self.business, "profile", None)
+
+        if profile:
+            return profile.phone
+
+        return ""
+
+    @property
+    def contact_email(self):
+        if self.email_store:
+            return self.email_store
+
+        profile = getattr(self.business, "profile", None)
+
+        if profile:
+            return profile.email
+
+        return ""
 
     class Meta:
         verbose_name = "tienda"
@@ -192,28 +204,78 @@ class Stores(models.Model):
         if self.name:
             self.name = self.name.strip()
 
+        # normalizo code a mayúsculas y elimino espacios
         if self.code:
             self.code = self.code.strip().upper()
+
+        if self.address_line_1:
+            self.address_line_1 = self.address_line_1.strip()
+
+        if self.address_line_2:
+            self.address_line_2 = self.address_line_2.strip()
+
+        if self.postal_code:
+            self.postal_code = self.postal_code.strip()
+
+        if self.city:
+            self.city = self.city.strip()
+
+        if self.province:
+            self.province = self.province.strip()
+
+        if self.country_code:
+            self.country_code = self.country_code.strip().upper()
+        else:
+            self.country_code = "ES"
+
+        if self.phone_store:
+            self.phone_store = self.phone_store.strip()
+
+        if self.email_store:
+            self.email_store = self.email_store.strip().lower()
+
+        # Generar código automáticamente si está vacío
+        if not self.code and self.name and self.business_id:
+            business_slug = slugify(self.business.name)[:4].upper()
+            store_slug = slugify(self.name)[:4].upper()
+            self.code = f"{business_slug}-{store_slug}"
 
         if not self.name:
             errors["name"] = "El nombre de la tienda es obligatorio."
 
-        # NO validamos todavía:
-        #
-        # if not self.business_id:
-        #     errors["business"] = "La tienda debe pertenecer a un negocio."
-        #
-        # Esto lo activaremos más adelante cuando stores esté bien implementado
-        # y hayamos hecho una migración de datos para rellenar business en todas
-        # las tiendas existentes.
+        if not self.business_id:
+            errors["business"] = "La tienda debe pertenecer a un negocio."
 
-        # NO validamos todavía:
-        #
-        # if not self.code:
-        #     errors["code"] = "El código de tienda es obligatorio."
-        #
-        # Esto también lo activaremos más adelante.
-        # Ahora code tiene default="" para evitar problemas de migración.
+        if not self.code:
+            errors["code"] = "El código de tienda es obligatorio."
+
+        if self.code and not re.fullmatch(r"[A-Z0-9_-]+", self.code):
+            errors["code"] = (
+                "El código de tienda solo puede contener letras mayúsculas, "
+                "números, guiones y guiones bajos."
+            )
+
+        if not self.country_code:
+            errors["country_code"] = "El código de país es obligatorio."
+
+        elif len(self.country_code) != 2 or not self.country_code.isalpha():
+            errors["country_code"] = (
+                "El código de país debe tener 2 letras. Ejemplo: ES."
+            )
+
+        if self.postal_code and self.country_code == "ES":
+            if len(self.postal_code) != 5 or not self.postal_code.isdigit():
+                errors["postal_code"] = (
+                    "El código postal debe tener exactamente 5 caracteres "
+                    "y contener solo dígitos."
+                )
+
+        if self.phone_store:
+            if not re.fullmatch(r"[0-9+\-\s()]{6,30}", self.phone_store):
+                errors["phone_store"] = (
+                    "El teléfono de la tienda solo puede contener números, "
+                    "espacios, +, guiones o paréntesis."
+                )
 
         if errors:
             raise ValidationError(errors)
@@ -222,11 +284,10 @@ class Stores(models.Model):
         """
         Ejecutamos full_clean antes de guardar.
 
+        El código se genera automáticamente dentro de clean() si no existe.
+
         Esto mantiene el mismo estilo que ya tienes en otros modelos del proyecto,
         como CustomUser y UserStoreAccess.
-
-        Así, aunque se cree una tienda desde shell, admin o código interno,
-        se aplican las validaciones del modelo.
         """
         self.full_clean()
         return super().save(*args, **kwargs)
