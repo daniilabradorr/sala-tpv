@@ -1,6 +1,6 @@
 from django.urls import path
 
-from apps.users.views import (
+from apps.stores.views import (
     ListStoresView,
     StoreDetailView,
     StoreCreateView,

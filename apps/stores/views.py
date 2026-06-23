@@ -10,14 +10,13 @@ from django.views.generic import (
     UpdateView,
 )
 from django.shortcuts import redirect, get_object_or_404
-from django.contrib.auth.mixins import LoginRequiredMixin
 
 from apps.users.mixins import ManagerOrOwnerRequiredMixin
 from apps.stores.models import Stores
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 
 
-class ListStoresView(LoginRequiredMixin, ListView):
+class ListStoresView(ListView):
     model = Stores
     template_name = "stores/list_stores.html"
     context_object_name = "stores"
@@ -28,7 +27,7 @@ class ListStoresView(LoginRequiredMixin, ListView):
         return queryset.filter(business=self.request.user.business)
 
 
-class StoreDetailView(LoginRequiredMixin, DetailView):
+class StoreDetailView(DetailView):
     model = Stores
     template_name = "stores/store_detail.html"
     context_object_name = "store"
@@ -38,7 +37,7 @@ class StoreDetailView(LoginRequiredMixin, DetailView):
         return queryset.filter(business=self.request.user.business)
 
 
-class StoreCreateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, CreateView):
+class StoreCreateView(ManagerOrOwnerRequiredMixin, CreateView):
     model = Stores
     form_class = StoreCreateForm
     template_name = "stores/store_create.html"
@@ -54,6 +53,11 @@ class StoreCreateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, CreateVie
             raise PermissionDenied("El usuario no tiene un negocio asociado.")
 
         return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["business"] = self.request.user.business
+        return kwargs
 
     def form_valid(self, form):
         """
@@ -74,7 +78,7 @@ class StoreCreateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, CreateVie
         return reverse("stores:store_detail", kwargs={"pk": self.object.pk})
 
 
-class StoreUpdateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, UpdateView):
+class StoreUpdateView(ManagerOrOwnerRequiredMixin, UpdateView):
     model = Stores
     form_class = StoreUpdateForm
     template_name = "stores/store_update.html"
@@ -94,7 +98,7 @@ class StoreUpdateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, UpdateVie
         return reverse("stores:store_detail", kwargs={"pk": self.object.pk})
 
 
-class StoreDeactivateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, View):
+class StoreDeactivateView(ManagerOrOwnerRequiredMixin, View):
     """
     Desactiva una tienda sin borrarla de la base de datos.
 
@@ -120,7 +124,7 @@ class StoreDeactivateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, View)
         return redirect("stores:store_detail", pk=store.pk)
 
 
-class StoreActivateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, View):
+class StoreActivateView(ManagerOrOwnerRequiredMixin, View):
     """
     Reactiva una tienda previamente desactivada.
     """
@@ -143,7 +147,7 @@ class StoreActivateView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, View):
         return redirect("stores:store_detail", pk=store.pk)
 
 
-class StoreDeleteView(LoginRequiredMixin, ManagerOrOwnerRequiredMixin, DeleteView):
+class StoreDeleteView(ManagerOrOwnerRequiredMixin, DeleteView):
     """
     Elimina una tienda de la base de datos.
 
