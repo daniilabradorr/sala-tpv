@@ -1,14 +1,13 @@
 from django import forms
-from django.forms import modelformset_factory
 
-from apps.stores.models import Store
+from apps.stores.models import Stores
+
 
 class StoreCreateForm(forms.ModelForm):
-    """Formulario para crear una tienda
-    """
-    
+    """Formulario para crear una tienda"""
+
     class Meta:
-        model = Store
+        model = Stores
         fields = [
             "name",
             # por defecto voy a dejar que se genere automaticamente el código de tienda,
@@ -21,7 +20,7 @@ class StoreCreateForm(forms.ModelForm):
             "phone_store",
             "email_store",
         ]
-        
+
     def __init__(self, *args, business=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.business = business
@@ -29,11 +28,12 @@ class StoreCreateForm(forms.ModelForm):
         if self.business:
             self.instance.business = self.business
 
+
 class StoreUpdateForm(forms.ModelForm):
-    """Formulrio para actualizar una tienda.
-    """
+    """Formulrio para actualizar una tienda."""
+
     class Meta:
-        model = Store
+        model = Stores
         fields = [
             "name",
             # para editar, dejo que edite el codifgo interno de la tienda,
