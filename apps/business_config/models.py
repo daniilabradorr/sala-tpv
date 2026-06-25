@@ -12,7 +12,7 @@ from apps.business_config.helpers import (
 )
 from apps.core.models import Business, TimeStampedModel
 
-#lo dejo comentado ya que el dia de mañana si se hace a más paises para que sea un enum el currency code
+# lo dejo comentado ya que el dia de mañana si se hace a más paises para que sea un enum el currency code
 """
 class CurrencyCode(models.TextChoices):
     EUR = "EUR", "Euro"
@@ -22,6 +22,7 @@ class CurrencyCode(models.TextChoices):
     CHF = "CHF", "Franco suizo"
 """
 
+
 class BusinessProfile(TimeStampedModel):
     business = models.OneToOneField(
         Business,
@@ -29,20 +30,28 @@ class BusinessProfile(TimeStampedModel):
         related_name="profile",
     )
     legal_name = models.CharField("razón social", max_length=150, blank=False)
-    tax_identifier = models.CharField("NIF/CIF", max_length=20, blank=False)#lo hago obligatorio para que no se pueda crear un perfil de negocio sin NIF/CIF
-    trade_name = models.CharField("nombre comercial", max_length=150, blank=True)#nombre comercial , no es lo mismo que nombre legal o rrazon social, es el nombre con el que se conoce al negocio, puede ser diferente al nombre legal
+    tax_identifier = models.CharField(
+        "NIF/CIF", max_length=20, blank=False
+    )  # lo hago obligatorio para que no se pueda crear un perfil de negocio sin NIF/CIF
+    trade_name = models.CharField(
+        "nombre comercial", max_length=150, blank=True
+    )  # nombre comercial , no es lo mismo que nombre legal o rrazon social, es el nombre con el que se conoce al negocio, puede ser diferente al nombre legal
     phone = models.CharField("teléfono", max_length=30, blank=False)
     email = models.EmailField("email", blank=False)
     website = models.URLField("web", blank=True)
 
     address_line_1 = models.CharField("dirección", max_length=255, blank=False)
-    address_line_2 = models.CharField("dirección extra", max_length=255, blank=True)#esta no la hago obligatorio
+    address_line_2 = models.CharField(
+        "dirección extra", max_length=255, blank=True
+    )  # esta no la hago obligatorio
     postal_code = models.CharField("código postal", max_length=12, blank=False)
     city = models.CharField("ciudad", max_length=100, blank=False)
     province = models.CharField("provincia", max_length=100, blank=False)
     country_code = models.CharField("país", max_length=2, default="ES", blank=False)
 
-    currency_code = models.CharField("moneda", max_length=3, default="EUR", blank=False)#la moneda que se usara
+    currency_code = models.CharField(
+        "moneda", max_length=3, default="EUR", blank=False
+    )  # la moneda que se usara
     brand_name = models.CharField("marca", max_length=150, blank=True)
     logo_url = models.URLField("logo", blank=True)
 

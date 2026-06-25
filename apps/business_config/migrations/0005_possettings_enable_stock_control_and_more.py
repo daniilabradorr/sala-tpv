@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("business_config", "0004_alter_businessprofile_email_and_more"),
     ]

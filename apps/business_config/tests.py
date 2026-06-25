@@ -24,7 +24,7 @@ class BusinessConfigBootstrapTests(TestCase):
 
         self.assertEqual(BusinessProfile.objects.filter(business=business).count(), 1)
         self.assertEqual(POSSettings.objects.filter(business=business).count(), 1)
-    
+
     def test_bootstrap_creates_required_fiscal_profile_fields(self):
         business = Business.objects.create(name="Sala Centro")
         profile = business.profile
@@ -34,7 +34,7 @@ class BusinessConfigBootstrapTests(TestCase):
         self.assertTrue(profile.postal_code)
         self.assertTrue(profile.city)
         self.assertTrue(profile.province)
-    
+
     def test_bootstrap_creates_pos_settings_with_stock_control_and_pin_enabled(self):
         business = Business.objects.create(name="Sala Centro")
         settings = business.pos_settings
@@ -157,17 +157,16 @@ class POSSettingsValidationTests(TestCase):
         settings.save()
 
         self.assertFalse(settings.sale_requires_open_cash_register())
-    
+
     def test_enable_stock_control_is_true_by_default(self):
         settings = self.business.pos_settings
 
         self.assertTrue(settings.enable_stock_control)
-    
+
     def test_require_pin_for_sensitive_actions_is_true_by_default(self):
         settings = self.business.pos_settings
 
         self.assertTrue(settings.require_pin_for_sensitive_actions)
-
 
 
 class BusinessProfileValidationTests(TestCase):

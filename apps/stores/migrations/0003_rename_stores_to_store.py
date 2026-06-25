@@ -3,9 +3,9 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("stores", "0002_alter_stores_options_stores_business_stores_code_and_more"),
+        ("users", "0002_customuser_date_joined_customuser_pin_hash_and_more"),
     ]
 
     operations = [

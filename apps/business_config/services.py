@@ -14,13 +14,13 @@ def bootstrap_business_configuration(business):
         business=business,
         defaults={
             "legal_name": business.name,
-            "tax_identifier": "PENDIENTE",#lo dejo asi porque todavia esta pendiente
+            "tax_identifier": "PENDIENTE",  # lo dejo asi porque todavia esta pendiente
             "trade_name": business.name,
             "brand_name": business.name,
             # ahora mismo esto lo dejo demomento, en cuanto se haga onboarding de negocio quitarlo hardcodeado y que se pida al usuario, pero para pruebas de momento lo dejo asi
             "phone": "000000000",
             "email": f"business-{business.pk}@example.com",
-            #phone y email cuando impleetemos onboarding hay que quitaro
+            # phone y email cuando impleetemos onboarding hay que quitaro
             "address_line_1": "pendiente de onboarding",
             "postal_code": "00000",
             "city": "Pendiente",
