@@ -24,6 +24,23 @@ class BusinessConfigBootstrapTests(TestCase):
 
         self.assertEqual(BusinessProfile.objects.filter(business=business).count(), 1)
         self.assertEqual(POSSettings.objects.filter(business=business).count(), 1)
+    
+    def test_bootstrap_creates_required_fiscal_profile_fields(self):
+        business = Business.objects.create(name="Sala Centro")
+        profile = business.profile
+
+        self.assertTrue(profile.tax_identifier)
+        self.assertTrue(profile.address_line_1)
+        self.assertTrue(profile.postal_code)
+        self.assertTrue(profile.city)
+        self.assertTrue(profile.province)
+    
+    def test_bootstrap_creates_pos_settings_with_stock_control_and_pin_enabled(self):
+        business = Business.objects.create(name="Sala Centro")
+        settings = business.pos_settings
+
+        self.assertTrue(settings.enable_stock_control)
+        self.assertTrue(settings.require_pin_for_sensitive_actions)
 
 
 class BusinessProfileTaxTests(TestCase):
@@ -116,6 +133,7 @@ class POSSettingsValidationTests(TestCase):
         settings = POSSettings(
             business=self.business,
             prices_include_tax=True,
+            enable_stock_control=True,
             allow_sale_without_stock=False,
             allow_manual_price=False,
             allow_manual_discounts=False,
@@ -139,3 +157,48 @@ class POSSettingsValidationTests(TestCase):
         settings.save()
 
         self.assertFalse(settings.sale_requires_open_cash_register())
+    
+    def test_enable_stock_control_is_true_by_default(self):
+        settings = self.business.pos_settings
+
+        self.assertTrue(settings.enable_stock_control)
+    
+    def test_require_pin_for_sensitive_actions_is_true_by_default(self):
+        settings = self.business.pos_settings
+
+        self.assertTrue(settings.require_pin_for_sensitive_actions)
+
+
+
+class BusinessProfileValidationTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name="Sala Centro")
+        self.profile = self.business.profile
+
+    def test_tax_identifier_is_required(self):
+        self.profile.tax_identifier = ""
+
+        with self.assertRaises(ValidationError) as context:
+            self.profile.full_clean()
+
+        self.assertIn("tax_identifier", context.exception.message_dict)
+
+    def test_fiscal_address_fields_are_required(self):
+        required_fields = [
+            "address_line_1",
+            "postal_code",
+            "city",
+            "province",
+        ]
+
+        for field in required_fields:
+            with self.subTest(field=field):
+                profile = self.business.profile
+                original_value = getattr(profile, field)
+                setattr(profile, field, "")
+
+                with self.assertRaises(ValidationError) as context:
+                    profile.full_clean()
+
+                self.assertIn(field, context.exception.message_dict)
+                setattr(profile, field, original_value)

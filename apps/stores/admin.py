@@ -1,9 +1,9 @@
 from django.contrib import admin
 
-from apps.stores.models import Stores
+from apps.stores.models import Store
 
 
-@admin.register(Stores)
+@admin.register(Store)
 class StoresAdmin(admin.ModelAdmin):
     """
     Admin de tiendas/sedes del negocio.

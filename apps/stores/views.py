@@ -12,12 +12,12 @@ from django.views.generic import (
 from django.shortcuts import redirect, get_object_or_404
 
 from apps.users.mixins import ManagerOrOwnerRequiredMixin
-from apps.stores.models import Stores
+from apps.stores.models import Store
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 
 
 class ListStoresView(ListView):
-    model = Stores
+    model = Store
     template_name = "stores/list_stores.html"
     context_object_name = "stores"
     paginate_by = 10
@@ -28,7 +28,7 @@ class ListStoresView(ListView):
 
 
 class StoreDetailView(DetailView):
-    model = Stores
+    model = Store
     template_name = "stores/store_detail.html"
     context_object_name = "store"
 
@@ -38,7 +38,7 @@ class StoreDetailView(DetailView):
 
 
 class StoreCreateView(ManagerOrOwnerRequiredMixin, CreateView):
-    model = Stores
+    model = Store
     form_class = StoreCreateForm
     template_name = "stores/store_create.html"
 
@@ -79,7 +79,7 @@ class StoreCreateView(ManagerOrOwnerRequiredMixin, CreateView):
 
 
 class StoreUpdateView(ManagerOrOwnerRequiredMixin, UpdateView):
-    model = Stores
+    model = Store
     form_class = StoreUpdateForm
     template_name = "stores/store_update.html"
 
@@ -108,7 +108,7 @@ class StoreDeactivateView(ManagerOrOwnerRequiredMixin, View):
 
     def post(self, request, pk):
         store = get_object_or_404(
-            Stores,
+            Store,
             pk=pk,
             business=request.user.business,
         )
@@ -131,7 +131,7 @@ class StoreActivateView(ManagerOrOwnerRequiredMixin, View):
 
     def post(self, request, pk):
         store = get_object_or_404(
-            Stores,
+            Store,
             pk=pk,
             business=request.user.business,
         )
@@ -156,7 +156,7 @@ class StoreDeleteView(ManagerOrOwnerRequiredMixin, DeleteView):
     Para tiendas reales con histórico, es mejor desactivar.
     """
 
-    model = Stores
+    model = Store
     template_name = "stores/store_confirm_delete.html"
     context_object_name = "store"
     success_url = reverse_lazy("stores:store_list")

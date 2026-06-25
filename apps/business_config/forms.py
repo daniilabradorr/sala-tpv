@@ -37,7 +37,7 @@ class POSSettingsForm(forms.ModelForm):
         model = POSSettings
         fields = [
             "prices_include_tax",
-            "enable_stock_control"
+            "enable_stock_control",
             "allow_sale_without_stock",
             "allow_manual_price",
             "allow_manual_discounts",

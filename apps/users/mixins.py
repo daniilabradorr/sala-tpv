@@ -2,7 +2,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 
-from apps.stores.models import Stores
+from apps.stores.models import Store
 from apps.users.models import CustomUser
 from apps.users.helpers import (
     is_owner,
@@ -211,7 +211,7 @@ class BaseStorePermissionMixin(LoginRequiredMixin):
         """
         Recupera la tienda desde los parámetros URL.
 
-        Retorna: Objeto Stores si existe
+        Retorna: Objeto Store si existe
         Levanta: PermissionDenied si no se indica la tienda en la URL
         """
         store_id = self.kwargs.get(self.store_kwarg)
@@ -219,7 +219,7 @@ class BaseStorePermissionMixin(LoginRequiredMixin):
         if not store_id:
             raise PermissionDenied("No se ha indicado la tienda.")
 
-        return get_object_or_404(Stores, pk=store_id)
+        return get_object_or_404(Store, pk=store_id)
 
     def dispatch(self, request, *args, **kwargs):
         """

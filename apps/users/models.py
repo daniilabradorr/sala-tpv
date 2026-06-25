@@ -8,7 +8,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 
 from apps.core.models import Business
-from apps.stores.models import Stores
+from apps.stores.models import Store
 from .managers import CustomUserManager
 
 
@@ -27,8 +27,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         blank=True,
     )
 
-    stores = models.ManyToManyField(
-        Stores,
+    store = models.ManyToManyField(
+        Store,
         through="UserStoreAccess",
         through_fields=("user", "store"),
         related_name="users",
@@ -136,7 +136,7 @@ class UserStoreAccess(models.Model):
     )
 
     store = models.ForeignKey(
-        Stores,
+        Store,
         on_delete=models.CASCADE,
         related_name="user_accesses",
     )

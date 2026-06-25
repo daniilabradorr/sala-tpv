@@ -1,5 +1,5 @@
 from apps.core.models import Business
-from apps.stores.models import Stores
+from apps.stores.models import Store
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
 
@@ -17,7 +17,7 @@ def create_store(
     code="TST",
     is_active=True,
 ):
-    return Stores.objects.create(
+    return Store.objects.create(
         business=business,
         name=name,
         code=code,

@@ -1,13 +1,13 @@
 from django import forms
 
-from apps.stores.models import Stores
+from apps.stores.models import Store
 
 
 class StoreCreateForm(forms.ModelForm):
     """Formulario para crear una tienda"""
 
     class Meta:
-        model = Stores
+        model = Store
         fields = [
             "name",
             # por defecto voy a dejar que se genere automaticamente el código de tienda,
@@ -33,7 +33,7 @@ class StoreUpdateForm(forms.ModelForm):
     """Formulrio para actualizar una tienda."""
 
     class Meta:
-        model = Stores
+        model = Store
         fields = [
             "name",
             # para editar, dejo que edite el codifgo interno de la tienda,
