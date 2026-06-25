@@ -2,10 +2,10 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.core.models import Business
-from apps.stores.models import Stores
+from apps.stores.models import Store
 
 
-class StoresModelTests(TestCase):
+class StoreModelTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(
             name="Negocio Test",
@@ -13,7 +13,7 @@ class StoresModelTests(TestCase):
         )
 
     def test_store_str_returns_name_and_code(self):
-        store = Stores.objects.create(
+        store = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
@@ -22,7 +22,7 @@ class StoresModelTests(TestCase):
         self.assertEqual(str(store), "Tienda Centro (CENTRO)")
 
     def test_store_str_returns_only_name_when_code_is_empty_before_validation(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="",
@@ -31,7 +31,7 @@ class StoresModelTests(TestCase):
         self.assertEqual(str(store), "Tienda Centro")
 
     def test_store_generates_code_automatically_when_empty(self):
-        store = Stores.objects.create(
+        store = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="",
@@ -41,7 +41,7 @@ class StoresModelTests(TestCase):
         self.assertNotEqual(store.code, "")
 
     def test_store_normalizes_text_fields(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="  Tienda Centro  ",
             code=" centro_1 ",
@@ -67,7 +67,7 @@ class StoresModelTests(TestCase):
         self.assertEqual(store.email_store, "centro@test.com")
 
     def test_store_requires_business(self):
-        store = Stores(
+        store = Store(
             name="Tienda Centro",
             code="CENTRO",
         )
@@ -78,7 +78,7 @@ class StoresModelTests(TestCase):
         self.assertIn("business", context.exception.message_dict)
 
     def test_store_requires_name(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="",
             code="CENTRO",
@@ -90,7 +90,7 @@ class StoresModelTests(TestCase):
         self.assertIn("name", context.exception.message_dict)
 
     def test_store_rejects_invalid_code(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="CODIGO INVALIDO",
@@ -102,7 +102,7 @@ class StoresModelTests(TestCase):
         self.assertIn("code", context.exception.message_dict)
 
     def test_store_rejects_invalid_country_code(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
@@ -115,7 +115,7 @@ class StoresModelTests(TestCase):
         self.assertIn("country_code", context.exception.message_dict)
 
     def test_store_rejects_invalid_spanish_postal_code(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
@@ -129,7 +129,7 @@ class StoresModelTests(TestCase):
         self.assertIn("postal_code", context.exception.message_dict)
 
     def test_store_rejects_invalid_phone(self):
-        store = Stores(
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
@@ -142,13 +142,13 @@ class StoresModelTests(TestCase):
         self.assertIn("phone_store", context.exception.message_dict)
 
     def test_store_code_must_be_unique_per_business(self):
-        Stores.objects.create(
+        Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
         )
 
-        duplicate = Stores(
+        duplicate = Store(
             business=self.business,
             name="Tienda Norte",
             code="CENTRO",
@@ -163,13 +163,13 @@ class StoresModelTests(TestCase):
             slug="otro-negocio",
         )
 
-        Stores.objects.create(
+        Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
         )
 
-        store = Stores(
+        store = Store(
             business=other_business,
             name="Tienda Centro",
             code="CENTRO",
@@ -180,7 +180,7 @@ class StoresModelTests(TestCase):
         self.assertEqual(store.code, "CENTRO")
 
     def test_contact_phone_prefers_store_phone(self):
-        store = Stores.objects.create(
+        store = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",
@@ -190,7 +190,7 @@ class StoresModelTests(TestCase):
         self.assertEqual(store.contact_phone, "600111222")
 
     def test_contact_email_prefers_store_email(self):
-        store = Stores.objects.create(
+        store = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
             code="CENTRO",

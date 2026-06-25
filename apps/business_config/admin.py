@@ -77,6 +77,7 @@ class POSSettingsAdmin(admin.ModelAdmin):
     list_display = (
         "business",
         "prices_include_tax",
+        "enable_stock_control",
         "allow_sale_without_stock",
         "allow_manual_price",
         "allow_manual_discounts",
@@ -88,6 +89,7 @@ class POSSettingsAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "prices_include_tax",
+        "enable_stock_control",
         "allow_sale_without_stock",
         "allow_manual_price",
         "allow_manual_discounts",
@@ -106,6 +108,7 @@ class POSSettingsAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "prices_include_tax",
+                    "enable_stock_control",
                     "allow_sale_without_stock",
                     "allow_manual_price",
                     "allow_manual_discounts",

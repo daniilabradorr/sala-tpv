@@ -7,7 +7,7 @@ from django.utils.text import slugify
 from apps.core.models import Business, TimeStampedModel
 
 
-class Stores(TimeStampedModel):
+class Store(TimeStampedModel):
     """
     Modelo para representar una tienda asociada a un negocio.
     Cada tienda tiene un nombre, un código único dentro del negocio, y puede tener
@@ -31,13 +31,6 @@ class Stores(TimeStampedModel):
         Business,
         on_delete=models.CASCADE,
         related_name="stores",
-        # TEMPORAL:
-        # Permitimos NULL en base de datos para que Django pueda crear la migración
-        # sin pedir un valor por defecto para tiendas antiguas.
-        null=True,
-        # TEMPORAL:
-        # Permitimos dejarlo vacío en formularios/admin durante esta fase puente.
-        blank=True,
     )
 
     name = models.CharField(
