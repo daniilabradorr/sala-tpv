@@ -19,6 +19,7 @@ def bootstrap_business_configuration(business):
             # ahora mismo esto lo dejo demomento, en cuanto se haga onboarding de negocio quitarlo hardcodeado y que se pida al usuario, pero para pruebas de momento lo dejo asi
             "phone": "000000000",
             "email": f"business-{business.pk}@example.com",
+            #phone y email cuando impleetemos onboarding hay que quitaro
             "country_code": "ES",  # España
             "currency_code": "EUR",  # Euro
             "receipt_footer": "Gracias por su visita.",
@@ -31,13 +32,14 @@ def bootstrap_business_configuration(business):
         business=business,
         defaults={
             "prices_include_tax": True,
+            "enable_stock_control": True,
             "allow_sale_without_stock": False,
             "allow_manual_price": True,
             "allow_manual_discounts": True,
             "max_manual_discount_percent": Decimal("20.00"),
             "require_open_cash_register": True,
             "allow_split_payments": True,
-            "require_pin_for_sensitive_actions": False,
+            "require_pin_for_sensitive_actions": True,
         },
     )
 
