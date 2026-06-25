@@ -21,7 +21,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 
 from apps.users.mixins import BusinessUserQuerysetMixin, ManagerOrOwnerRequiredMixin
 from apps.users.models import CustomUser, UserStoreAccess
-from apps.stores.models import Stores
+from apps.stores.models import Store
 
 
 # Create your views here.
@@ -338,7 +338,7 @@ class UserStoreAccessManageView(
         """
         for form in formset.forms:
             if "store" in form.fields:
-                form.fields["store"].queryset = Stores.objects.filter(
+                form.fields["store"].queryset = Store.objects.filter(
                     business=target_user.business,
                     is_active=True,
                 ).order_by("name")

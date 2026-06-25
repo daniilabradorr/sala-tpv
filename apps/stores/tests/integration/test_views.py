@@ -1,7 +1,7 @@
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.stores.models import Stores
+from apps.stores.models import Store
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import (
     create_business,
@@ -144,7 +144,7 @@ class StoreViewsIntegrationTests(TestCase):
             },
         )
 
-        new_store = Stores.objects.get(name="Tienda Nueva")
+        new_store = Store.objects.get(name="Tienda Nueva")
 
         self.assertRedirects(
             response,

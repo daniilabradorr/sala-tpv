@@ -14,11 +14,17 @@ def bootstrap_business_configuration(business):
         business=business,
         defaults={
             "legal_name": business.name,
+            "tax_identifier": "PENDIENTE",  # lo dejo asi porque todavia esta pendiente
             "trade_name": business.name,
             "brand_name": business.name,
             # ahora mismo esto lo dejo demomento, en cuanto se haga onboarding de negocio quitarlo hardcodeado y que se pida al usuario, pero para pruebas de momento lo dejo asi
             "phone": "000000000",
             "email": f"business-{business.pk}@example.com",
+            # phone y email cuando impleetemos onboarding hay que quitaro
+            "address_line_1": "pendiente de onboarding",
+            "postal_code": "00000",
+            "city": "Pendiente",
+            "province": "Pendiente",
             "country_code": "ES",  # España
             "currency_code": "EUR",  # Euro
             "receipt_footer": "Gracias por su visita.",
@@ -31,13 +37,14 @@ def bootstrap_business_configuration(business):
         business=business,
         defaults={
             "prices_include_tax": True,
+            "enable_stock_control": True,
             "allow_sale_without_stock": False,
             "allow_manual_price": True,
             "allow_manual_discounts": True,
             "max_manual_discount_percent": Decimal("20.00"),
             "require_open_cash_register": True,
             "allow_split_payments": True,
-            "require_pin_for_sensitive_actions": False,
+            "require_pin_for_sensitive_actions": True,
         },
     )
 
