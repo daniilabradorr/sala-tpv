@@ -63,6 +63,12 @@ class Category(TimeStampedModel):
                 name="unique_category_slug_per_business",
             )
         ]
+        indexes = [
+            models.Index(
+                fields=["business", "is_active", "sort_order", "name"],
+                name="idx_cat_bus_active_ord",  # "idx_category_business_active_order",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -508,6 +514,12 @@ class Tax(TimeStampedModel):
                 name="unique_default_tax_per_business",
             ),
         ]
+        indexes = [
+            models.Index(
+                fields=["business", "is_active"],
+                name="idx_tax_business_active",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.rate}%)"
@@ -836,6 +848,16 @@ class Product(TimeStampedModel):
                 fields=["business", "barcode"],
                 condition=Q(barcode__isnull=False),
                 name="unique_product_barcode_per_business",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["business", "is_active", "name"],
+                name="idx_prod_bus_act_name",  # "idx_product_business_active_name",
+            ),
+            models.Index(
+                fields=["business", "category", "is_active"],
+                name="idx_prod_bus_cat_act",  # "idx_product_business_category_active",
             ),
         ]
 
