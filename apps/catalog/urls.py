@@ -1,0 +1,134 @@
+from django.urls import path
+
+from apps.catalog.views import (
+    CatalogDashboardView,
+    CategoryListView,
+    CategoryDetailView,
+    CategoryCreateView,
+    CategoryUpdateView,
+    CategoryActivateView,
+    CategoryDeactivateView,
+    TaxListView,
+    TaxDetailView,
+    TaxCreateView,
+    TaxUpdateView,
+    TaxActivateView,
+    TaxDeactivateView,
+    TaxSetDefaultView,
+    ProductListView,
+    ProductDetailView,
+    ProductCreateView,
+    ProductUpdateView,
+    ProductActivateView,
+    ProductDeactivateView,
+)
+
+
+app_name = "catalog"
+
+urlpatterns = [
+    # Dashboard del catálogo
+    path(
+        "",
+        CatalogDashboardView.as_view(),
+        name="dashboard",
+    ),
+    # Categorías
+    path(
+        "categories/",
+        CategoryListView.as_view(),
+        name="category_list",
+    ),
+    path(
+        "categories/create/",
+        CategoryCreateView.as_view(),
+        name="category_create",
+    ),
+    path(
+        "categories/<int:pk>/",
+        CategoryDetailView.as_view(),
+        name="category_detail",
+    ),
+    path(
+        "categories/<int:pk>/edit/",
+        CategoryUpdateView.as_view(),
+        name="category_update",
+    ),
+    path(
+        "categories/<int:pk>/activate/",
+        CategoryActivateView.as_view(),
+        name="category_activate",
+    ),
+    path(
+        "categories/<int:pk>/deactivate/",
+        CategoryDeactivateView.as_view(),
+        name="category_deactivate",
+    ),
+    # Impuestos
+    path(
+        "taxes/",
+        TaxListView.as_view(),
+        name="tax_list",
+    ),
+    path(
+        "taxes/create/",
+        TaxCreateView.as_view(),
+        name="tax_create",
+    ),
+    path(
+        "taxes/<int:pk>/",
+        TaxDetailView.as_view(),
+        name="tax_detail",
+    ),
+    path(
+        "taxes/<int:pk>/edit/",
+        TaxUpdateView.as_view(),
+        name="tax_update",
+    ),
+    path(
+        "taxes/<int:pk>/activate/",
+        TaxActivateView.as_view(),
+        name="tax_activate",
+    ),
+    path(
+        "taxes/<int:pk>/deactivate/",
+        TaxDeactivateView.as_view(),
+        name="tax_deactivate",
+    ),
+    path(
+        "taxes/<int:pk>/set-default/",
+        TaxSetDefaultView.as_view(),
+        name="tax_set_default",
+    ),
+    # Productos y servicios
+    path(
+        "products/",
+        ProductListView.as_view(),
+        name="product_list",
+    ),
+    path(
+        "products/create/",
+        ProductCreateView.as_view(),
+        name="product_create",
+    ),
+    path(
+        "products/<int:pk>/",
+        ProductDetailView.as_view(),
+        name="product_detail",
+    ),
+    path(
+        "products/<int:pk>/edit/",
+        ProductUpdateView.as_view(),
+        name="product_update",
+    ),
+    path(
+        "products/<int:pk>/activate/",
+        ProductActivateView.as_view(),
+        name="product_activate",
+    ),
+    path(
+        "products/<int:pk>/deactivate/",
+        ProductDeactivateView.as_view(),
+        name="product_deactivate",
+    ),
+]

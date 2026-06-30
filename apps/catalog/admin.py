@@ -225,6 +225,7 @@ class ProductAdmin(admin.ModelAdmin):
         "category",
         "tax",
         "base_price",
+        "sort_order",
         "cost_price",
         "unit",
         "track_stock",
@@ -234,7 +235,10 @@ class ProductAdmin(admin.ModelAdmin):
 
     list_display_links = ("name",)
 
-    list_editable = ("is_active",)
+    list_editable = (
+        "is_active",
+        "sort_order",
+    )
 
     list_filter = (
         "business",
@@ -258,6 +262,8 @@ class ProductAdmin(admin.ModelAdmin):
     ordering = (
         "business",
         "name",
+        "category",
+        "sort_order",
     )
 
     readonly_fields = (
@@ -305,6 +311,10 @@ class ProductAdmin(admin.ModelAdmin):
                     "track_stock",
                 )
             },
+        ),
+        (
+            "Visualización",
+            {"fields": ("sort_order",)},
         ),
         (
             "Estado",

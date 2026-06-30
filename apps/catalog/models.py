@@ -755,6 +755,15 @@ class Product(TimeStampedModel):
         help_text="Nombre visible en catálogo, venta y ticket.",
     )
 
+    sort_order = models.PositiveIntegerField(
+        "Orden visual",
+        default=0,
+        help_text=(
+            "Orden en el que se muestra el producto dentro de su categoría. "
+            "Los números más bajos aparecen antes."
+        ),
+    )
+
     sku = models.CharField(
         "Código interno del producto",
         max_length=80,
@@ -838,7 +847,7 @@ class Product(TimeStampedModel):
     class Meta:
         verbose_name = "Producto"
         verbose_name_plural = "Productos"
-        ordering = ["name"]
+        ordering = ["sort_order", "name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["business", "sku"],
@@ -856,8 +865,8 @@ class Product(TimeStampedModel):
                 name="idx_prod_bus_act_name",  # "idx_product_business_active_name",
             ),
             models.Index(
-                fields=["business", "category", "is_active"],
-                name="idx_prod_bus_cat_act",  # "idx_product_business_category_active",
+                fields=["business", "category", "is_active", "sort_order", "name"],
+                name="idx_prod_bus_cat_sort",
             ),
         ]
 
