@@ -296,3 +296,46 @@ class CanCloseCashRegisterMixin(BaseStorePermissionMixin):
 
     permission_checker = staticmethod(can_close_cash_register)
     permission_denied_message = "No tienes permiso para cerrar caja en esta tienda."
+
+
+class BusinessRequiredMixin(LoginRequiredMixin):
+    """
+    Valida que el usuario autenticado tenga un negocio asociado.
+
+    Útil para:
+    - dashboards de negocio
+    - vistas de creación
+    - acciones POST
+    - cualquier vista donde se necesite request.user.business
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_superuser:
+            return super().dispatch(request, *args, **kwargs)
+
+        if not getattr(request.user, "business_id", None):
+            raise PermissionDenied("El usuario no tiene un negocio asociado.")
+
+        return super().dispatch(request, *args, **kwargs)
+
+
+class BusinessScopedQuerysetMixin(BusinessRequiredMixin):
+    """
+    Mixin genérico para vistas con modelos que tienen campo business.
+
+    Evita que un usuario vea, edite o acceda a objetos de otro negocio.
+
+    Requisitos:
+    - El modelo de la vista debe tener un campo business.
+    - El usuario autenticado debe tener business asociado.
+    """
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if self.request.user.is_superuser:
+            return queryset
+
+        return queryset.filter(
+            business=self.request.user.business,
+        )
