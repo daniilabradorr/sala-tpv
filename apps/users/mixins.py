@@ -310,6 +310,9 @@ class BusinessRequiredMixin(LoginRequiredMixin):
     """
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
+
         if request.user.is_superuser:
             return super().dispatch(request, *args, **kwargs)
 

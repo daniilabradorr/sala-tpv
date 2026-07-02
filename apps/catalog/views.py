@@ -1,5 +1,4 @@
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -46,7 +45,6 @@ class PageTitleMixin:
 
 class CatalogDashboardView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessRequiredMixin,
     TemplateView,
 ):
@@ -75,7 +73,6 @@ class CatalogDashboardView(
 
 class CategoryListView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     ListView,
 ):
@@ -101,7 +98,6 @@ class CategoryListView(
 
 class CategoryDetailView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     DetailView,
 ):
@@ -283,7 +279,6 @@ class CategoryDeactivateView(
 
 class TaxListView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     ListView,
 ):
@@ -309,7 +304,6 @@ class TaxListView(
 
 class TaxDetailView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     DetailView,
 ):
@@ -547,7 +541,6 @@ class TaxSetDefaultView(
 
 class ProductListView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     ListView,
 ):
@@ -578,7 +571,6 @@ class ProductListView(
 
 class ProductDetailView(
     PageTitleMixin,
-    LoginRequiredMixin,
     BusinessScopedQuerysetMixin,
     DetailView,
 ):
