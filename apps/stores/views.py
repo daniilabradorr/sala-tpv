@@ -11,12 +11,16 @@ from django.views.generic import (
 )
 from django.shortcuts import redirect, get_object_or_404
 
-from apps.users.mixins import ManagerOrOwnerRequiredMixin
+from apps.users.mixins import (
+    BaseStorePermissionMixin,
+    BusinessRequiredMixin,
+    ManagerOrOwnerRequiredMixin,
+)
 from apps.stores.models import Store
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 
 
-class ListStoresView(ListView):
+class ListStoresView(BusinessRequiredMixin, ListView):
     model = Store
     template_name = "stores/list_stores.html"
     context_object_name = "stores"
@@ -27,7 +31,7 @@ class ListStoresView(ListView):
         return queryset.filter(business=self.request.user.business)
 
 
-class StoreDetailView(DetailView):
+class StoreDetailView(BaseStorePermissionMixin, DetailView):
     model = Store
     template_name = "stores/store_detail.html"
     context_object_name = "store"
