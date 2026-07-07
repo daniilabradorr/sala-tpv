@@ -522,7 +522,10 @@ class StockAdjustmentLine(TimeStampedModel):
 
         errors = {}
 
-        if self.adjustment_id and self.adjustment.status != StockAdjustment.STATUS_DRAFT:
+        if (
+            self.adjustment_id
+            and self.adjustment.status != StockAdjustment.STATUS_DRAFT
+        ):
             errors["adjustment"] = (
                 "Solo se pueden editar líneas de ajustes en borrador."
             )
@@ -869,7 +872,9 @@ class StockMovement(TimeStampedModel):
 
         if self.product_id:
             if self.product.is_service:
-                errors["product"] = "No se pueden crear movimientos de stock para servicios."
+                errors["product"] = (
+                    "No se pueden crear movimientos de stock para servicios."
+                )
 
             if not self.product.track_stock:
                 errors["product"] = (
