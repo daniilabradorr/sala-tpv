@@ -61,6 +61,33 @@ def _validate_positive_quantity(quantity):
     return quantity
 
 
+def _validate_inventory_item_creation(*, business, store, product):
+    """Valida reglas esenciales para crear una ficha de inventario."""
+
+    if business is None:
+        raise ValidationError("No se ha indicado el negocio.")
+
+    if store.business_id != business.id:
+        raise ValidationError("La tienda debe pertenecer al mismo negocio.")
+
+    if product.business_id != business.id:
+        raise ValidationError("El producto debe pertenecer al mismo negocio.")
+
+    if not store.is_active:
+        raise ValidationError("No puedes crear inventario en una tienda inactiva.")
+
+    if not product.is_active:
+        raise ValidationError("No puedes crear inventario para un producto inactivo.")
+
+    if product.is_service:
+        raise ValidationError("No se puede controlar stock de un servicio.")
+
+    if not product.track_stock:
+        raise ValidationError(
+            "No se puede crear inventario para un producto que no controla stock."
+        )
+
+
 def _create_stock_movement(
     *,
     inventory_item,
@@ -136,28 +163,7 @@ def create_inventory_item(
     El stock inicial se cargará con create_initial_stock().
     """
 
-    if business is None:
-        raise ValidationError("No se ha indicado el negocio.")
-
-    if store.business_id != business.id:
-        raise ValidationError("La tienda debe pertenecer al mismo negocio.")
-
-    if product.business_id != business.id:
-        raise ValidationError("El producto debe pertenecer al mismo negocio.")
-
-    if not store.is_active:
-        raise ValidationError("No puedes crear inventario en una tienda inactiva.")
-
-    if not product.is_active:
-        raise ValidationError("No puedes crear inventario para un producto inactivo.")
-
-    if product.is_service:
-        raise ValidationError("No se puede controlar stock de un servicio.")
-
-    if not product.track_stock:
-        raise ValidationError(
-            "No se puede crear inventario para un producto que no controla stock."
-        )
+    _validate_inventory_item_creation(business=business, store=store, product=product)
 
     exists = InventoryItem.objects.filter(
         business=business,
@@ -198,6 +204,8 @@ def get_or_create_inventory_item(
     Útil para compras futuras o integraciones,
     pero para pantallas manuales preferimos create_inventory_item().
     """
+
+    _validate_inventory_item_creation(business=business, store=store, product=product)
 
     inventory_item, _created = InventoryItem.objects.get_or_create(
         business=business,
@@ -353,6 +361,11 @@ def increase_stock(
             .get(pk=inventory_item.pk)
         )
 
+        if not locked_item.is_active:
+            raise ValidationError(
+                "No se puede modificar una ficha de inventario inactiva."
+            )
+
         stock_before = locked_item.current_stock
         stock_after = stock_before + quantity
 
@@ -396,6 +409,7 @@ def decrease_stock(
     reason="",
     notes="",
     operation_id=None,
+    allow_negative=False,
 ):
     """Reduce stock y crea movimiento de salida."""
 
@@ -411,7 +425,12 @@ def decrease_stock(
             .get(pk=inventory_item.pk)
         )
 
-        if locked_item.available_stock < quantity:
+        if not locked_item.is_active:
+            raise ValidationError(
+                "No se puede modificar una ficha de inventario inactiva."
+            )
+
+        if not allow_negative and locked_item.available_stock < quantity:
             raise ValidationError("No hay stock disponible suficiente.")
 
         stock_before = locked_item.current_stock
