@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import F, Q
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.catalog.models import Product
@@ -101,10 +101,6 @@ class InventoryItem(TimeStampedModel):
                 name="uniq_invitem_bus_store_prod",
             ),
             models.CheckConstraint(
-                condition=Q(current_stock__gte=0),
-                name="chk_invitem_cur_gte_0",
-            ),
-            models.CheckConstraint(
                 condition=Q(reserved_stock__gte=0),
                 name="chk_invitem_res_gte_0",
             ),
@@ -115,10 +111,6 @@ class InventoryItem(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(maximum_stock__isnull=True) | Q(maximum_stock__gte=0),
                 name="chk_invitem_max_gte_0",
-            ),
-            models.CheckConstraint(
-                condition=Q(reserved_stock__lte=F("current_stock")),
-                name="chk_invitem_res_lte_cur",
             ),
         ]
         indexes = [
@@ -154,7 +146,7 @@ class InventoryItem(TimeStampedModel):
         """
         Indica si el producto está por debajo del mínimo configurado.
         """
-        return self.current_stock <= self.minimum_stock
+        return self.available_stock <= self.minimum_stock
 
     def clean(self):
         """
@@ -181,20 +173,8 @@ class InventoryItem(TimeStampedModel):
                     "No se puede crear inventario para un producto que no controla stock."
                 )
 
-        if self.current_stock is not None and self.current_stock < Decimal("0.000"):
-            errors["current_stock"] = "El stock actual no puede ser negativo."
-
         if self.reserved_stock is not None and self.reserved_stock < Decimal("0.000"):
             errors["reserved_stock"] = "El stock reservado no puede ser negativo."
-
-        if (
-            self.current_stock is not None
-            and self.reserved_stock is not None
-            and self.reserved_stock > self.current_stock
-        ):
-            errors["reserved_stock"] = (
-                "El stock reservado no puede ser mayor que el stock actual."
-            )
 
         if self.minimum_stock is not None and self.minimum_stock < Decimal("0.000"):
             errors["minimum_stock"] = "El stock mínimo no puede ser negativo."
@@ -496,10 +476,6 @@ class StockAdjustmentLine(TimeStampedModel):
                 name="uniq_stadjline_adj_item",
             ),
             models.CheckConstraint(
-                condition=Q(system_stock__gte=0),
-                name="chk_stadjline_sys_gte_0",
-            ),
-            models.CheckConstraint(
                 condition=Q(counted_stock__gte=0),
                 name="chk_stadjline_cnt_gte_0",
             ),
@@ -558,9 +534,6 @@ class StockAdjustmentLine(TimeStampedModel):
 
         if self.system_stock is None:
             errors["system_stock"] = "El stock en sistema es obligatorio."
-
-        elif self.system_stock < Decimal("0.000"):
-            errors["system_stock"] = "El stock en sistema no puede ser negativo."
 
         if self.counted_stock is None:
             errors["counted_stock"] = "El stock contado es obligatorio."
@@ -793,14 +766,6 @@ class StockMovement(TimeStampedModel):
                 name="chk_stmov_qty_gt_0",
             ),
             models.CheckConstraint(
-                condition=Q(stock_before__gte=0),
-                name="chk_stmov_before_gte_0",
-            ),
-            models.CheckConstraint(
-                condition=Q(stock_after__gte=0),
-                name="chk_stmov_after_gte_0",
-            ),
-            models.CheckConstraint(
                 condition=Q(unit_cost__isnull=True) | Q(unit_cost__gte=0),
                 name="chk_stmov_cost_gte_0",
             ),
@@ -895,11 +860,11 @@ class StockMovement(TimeStampedModel):
         if self.quantity is None or self.quantity <= Decimal("0.000"):
             errors["quantity"] = "La cantidad del movimiento debe ser mayor que cero."
 
-        if self.stock_before is None or self.stock_before < Decimal("0.000"):
-            errors["stock_before"] = "El stock anterior no puede ser negativo."
+        if self.stock_before is None:
+            errors["stock_before"] = "El stock anterior es obligatorio."
 
-        if self.stock_after is None or self.stock_after < Decimal("0.000"):
-            errors["stock_after"] = "El stock posterior no puede ser negativo."
+        if self.stock_after is None:
+            errors["stock_after"] = "El stock posterior es obligatorio."
 
         if self.unit_cost is not None and self.unit_cost < Decimal("0.00"):
             errors["unit_cost"] = "El coste unitario no puede ser negativo."
@@ -925,10 +890,7 @@ class StockMovement(TimeStampedModel):
         ):
             expected_stock = self.stock_before - self.quantity
 
-            if expected_stock < Decimal("0.000"):
-                errors["quantity"] = "La salida no puede dejar el stock en negativo."
-
-            elif self.stock_after != expected_stock:
+            if self.stock_after != expected_stock:
                 errors["stock_after"] = (
                     "En una salida, el stock posterior debe ser stock_before - quantity."
                 )
