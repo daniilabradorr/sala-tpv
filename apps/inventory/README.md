@@ -414,7 +414,16 @@ El ajuste esta pensado en dos fases: preparar y aplicar.
 
 1. Crear `StockAdjustment` en `draft`.
 2. Agregar `StockAdjustmentLine`.
-3. Revisar diferencias.
+3. Actualizar lineas si hace falta.
+4. Revisar diferencias.
+
+Los servicios que preparan lineas tambien protegen la regla de ficha activa:
+
+- `add_stock_adjustment_line(...)` rechaza `InventoryItem` inactivo.
+- `update_stock_adjustment_line(...)` rechaza `InventoryItem` inactivo.
+- Esta proteccion vive en `services.py`, no solo en los formularios.
+- No se pueden dejar borradores nuevos asociados a fichas inactivas usando los
+  servicios directamente.
 
 ### Fase B: aplicar (si cambia stock)
 
@@ -560,6 +569,13 @@ Cobertura esperada por tipo:
 - restricciones de estados de ajustes,
 - salidas con y sin `allow_negative`,
 - rechazo de modificaciones sobre fichas inactivas,
+- rechazo de fichas inactivas al crear lineas de ajuste,
+- rechazo de fichas inactivas al actualizar lineas de ajuste,
+- recuperacion desde stock negativo,
+- rollback de `decrease_stock` si falla la creacion del movimiento,
+- confirmacion valida de ajuste desde stock negativo,
+- ajustes obsoletos,
+- rollback completo de ajustes con varias lineas,
 - validaciones de `get_or_create_inventory_item`.
 
 ### Tests de URLs
@@ -622,6 +638,19 @@ Resultado:
 - no se crea StockMovement
 ```
 
+### Ejemplo E: recuperacion desde stock negativo
+
+```txt
+Stock inicial del sistema: -3
+Entrada de mercancia: 10
+
+Resultado:
+- current_stock = 7
+- StockMovement.stock_before = -3
+- StockMovement.quantity = 10
+- StockMovement.stock_after = 7
+```
+
 ---
 
 ## 17) Checklist de arquitectura para contribuir
@@ -632,8 +661,20 @@ Antes de mergear cambios en `inventory`, conviene verificar:
 - [ ] Ningun formulario modifica stock directamente.
 - [ ] Toda escritura de stock pasa por `services.py`.
 - [ ] Cada cambio de stock crea `StockMovement`.
+- [ ] `add_stock_adjustment_line` rechaza fichas inactivas.
+- [ ] `update_stock_adjustment_line` rechaza fichas inactivas.
+- [ ] `confirm_stock_adjustment` rechaza fichas inactivas.
+- [ ] La confirmacion comprueba `current_stock == system_stock`.
+- [ ] Un ajuste obsoleto no sobrescribe movimientos posteriores.
+- [ ] Si falla una linea, se revierte toda la confirmacion.
+- [ ] `increase_stock` puede recuperar un stock negativo.
+- [ ] `decrease_stock` revierte `current_stock` si falla `StockMovement`.
 - [ ] Las salidas que puedan dejar stock negativo pasan `allow_negative=True` de forma explicita.
-- [ ] Ningun servicio de `inventory` consulta `POSSettings`.
+- [ ] `allow_negative` mantiene `False` como valor predeterminado.
+- [ ] Inventory no consulta `POSSettings`.
+- [ ] Las operaciones criticas usan `transaction.atomic()`.
+- [ ] Las modificaciones criticas usan `select_for_update()`.
+- [ ] `quantity` permanece positiva.
 - [ ] `selectors.py` se mantiene de solo lectura.
 - [ ] Se respeta aislamiento por `business`.
 - [ ] Hay tests para el flujo afectado.

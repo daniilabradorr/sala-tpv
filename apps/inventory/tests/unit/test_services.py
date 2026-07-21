@@ -1,12 +1,13 @@
 """Tests unitarios de servicios de inventory."""
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.inventory.models import StockAdjustment, StockMovement
+from apps.inventory.models import StockAdjustment, StockAdjustmentLine, StockMovement
 from apps.inventory.services import (
     add_stock_adjustment_line,
     cancel_stock_adjustment,
@@ -17,6 +18,7 @@ from apps.inventory.services import (
     decrease_stock,
     get_or_create_inventory_item,
     increase_stock,
+    update_stock_adjustment_line,
 )
 from apps.inventory.tests.factories import (
     create_business,
@@ -401,6 +403,8 @@ class InventoryServicesTests(TestCase):
         line.refresh_from_db()
         self.assertEqual(self.item.current_stock, Decimal("7.000"))
         self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertIsNone(adjustment.confirmed_at)
+        self.assertIsNone(adjustment.confirmed_by)
         self.assertEqual(line.system_stock, Decimal("-3.000"))
         self.assertFalse(
             StockMovement.objects.filter(stock_adjustment_line=line).exists()
@@ -435,6 +439,8 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(self.item.current_stock, Decimal("3.000"))
         self.assertFalse(self.item.is_active)
         self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertIsNone(adjustment.confirmed_at)
+        self.assertIsNone(adjustment.confirmed_by)
         self.assertFalse(
             StockMovement.objects.filter(stock_adjustment_line=line).exists()
         )
@@ -491,8 +497,184 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(first_item.current_stock, Decimal("4.000"))
         self.assertEqual(second_item.current_stock, Decimal("7.000"))
         self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertIsNone(adjustment.confirmed_at)
+        self.assertIsNone(adjustment.confirmed_by)
+        first_line.refresh_from_db()
+        second_line.refresh_from_db()
+        self.assertEqual(first_line.inventory_item_id, first_item.id)
+        self.assertEqual(first_line.system_stock, Decimal("4.000"))
+        self.assertEqual(first_line.counted_stock, Decimal("9.000"))
+        self.assertEqual(second_line.inventory_item_id, second_item.id)
+        self.assertEqual(second_line.system_stock, Decimal("6.000"))
+        self.assertEqual(second_line.counted_stock, Decimal("2.000"))
+        self.assertTrue(StockAdjustmentLine.objects.filter(pk=first_line.pk).exists())
+        self.assertTrue(StockAdjustmentLine.objects.filter(pk=second_line.pk).exists())
         self.assertFalse(
             StockMovement.objects.filter(
                 stock_adjustment_line__in=[first_line, second_line]
             ).exists()
         )
+
+    def test_add_stock_adjustment_line_rejects_inactive_inventory_item(self):
+        """No permite crear líneas de ajuste para fichas inactivas."""
+        self.item.current_stock = Decimal("6.000")
+        self.item.is_active = False
+        self.item.save(update_fields=["current_stock", "is_active", "updated_at"])
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.user,
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "No se puede modificar una ficha de inventario inactiva.",
+        ):
+            add_stock_adjustment_line(
+                adjustment=adjustment,
+                inventory_item=self.item,
+                counted_stock=Decimal("8.000"),
+            )
+
+        self.item.refresh_from_db()
+        adjustment.refresh_from_db()
+        self.assertEqual(self.item.current_stock, Decimal("6.000"))
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(
+            StockAdjustmentLine.objects.filter(adjustment=adjustment).exists()
+        )
+        self.assertFalse(
+            StockMovement.objects.filter(inventory_item=self.item).exists()
+        )
+
+    def test_update_stock_adjustment_line_rejects_inactive_inventory_item(self):
+        """No permite actualizar una línea usando una ficha inactiva."""
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.user,
+        )
+        line = add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("2.000"),
+            notes="Original",
+        )
+        original_values = {
+            "inventory_item_id": line.inventory_item_id,
+            "product_id": line.product_id,
+            "system_stock": line.system_stock,
+            "counted_stock": line.counted_stock,
+            "notes": line.notes,
+        }
+        inactive_product = create_inventory_product(
+            business=self.business,
+            name="Producto ajuste inactivo",
+        )
+        inactive_item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=inactive_product,
+            current_stock=Decimal("5.000"),
+            is_active=False,
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "No se puede modificar una ficha de inventario inactiva.",
+        ):
+            update_stock_adjustment_line(
+                line=line,
+                inventory_item=inactive_item,
+                counted_stock=Decimal("4.000"),
+                notes="Nuevo valor",
+            )
+
+        line.refresh_from_db()
+        adjustment.refresh_from_db()
+        self.assertEqual(line.inventory_item_id, original_values["inventory_item_id"])
+        self.assertEqual(line.product_id, original_values["product_id"])
+        self.assertEqual(line.system_stock, original_values["system_stock"])
+        self.assertEqual(line.counted_stock, original_values["counted_stock"])
+        self.assertEqual(line.notes, original_values["notes"])
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(
+            StockMovement.objects.filter(stock_adjustment_line=line).exists()
+        )
+
+    def test_increase_stock_recovers_inventory_from_negative_stock(self):
+        """Una entrada puede recuperar una ficha que estaba en stock negativo."""
+        self.item.current_stock = Decimal("-3.000")
+        self.item.save(update_fields=["current_stock", "updated_at"])
+
+        updated_item, movement = increase_stock(
+            inventory_item=self.item,
+            quantity=Decimal("10.000"),
+            movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
+            user=self.user,
+        )
+
+        self.item.refresh_from_db()
+        self.assertEqual(updated_item.current_stock, Decimal("7.000"))
+        self.assertEqual(self.item.current_stock, Decimal("7.000"))
+        self.assertEqual(movement.quantity, Decimal("10.000"))
+        self.assertEqual(movement.stock_before, Decimal("-3.000"))
+        self.assertEqual(movement.stock_after, Decimal("7.000"))
+        self.assertTrue(movement.is_incoming)
+
+    def test_decrease_stock_rolls_back_when_movement_creation_fails(self):
+        """Rollback real: current_stock se revierte si falla crear movimiento."""
+        self.item.current_stock = Decimal("10.000")
+        self.item.save(update_fields=["current_stock", "updated_at"])
+
+        with patch(
+            "apps.inventory.services._create_stock_movement",
+            side_effect=ValidationError("Error creando movimiento"),
+        ):
+            with self.assertRaises(ValidationError):
+                decrease_stock(
+                    inventory_item=self.item,
+                    quantity=Decimal("3.000"),
+                    movement_type=StockMovement.TYPE_SALE,
+                    user=self.user,
+                )
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.current_stock, Decimal("10.000"))
+        self.assertFalse(
+            StockMovement.objects.filter(inventory_item=self.item).exists()
+        )
+
+    def test_confirm_stock_adjustment_from_negative_stock_creates_incoming_movement(
+        self,
+    ):
+        """Confirmar ajuste válido desde stock negativo crea movimiento de entrada."""
+        self.item.current_stock = Decimal("-3.000")
+        self.item.save(update_fields=["current_stock", "updated_at"])
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.user,
+        )
+        line = add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("2.000"),
+        )
+
+        confirmed = confirm_stock_adjustment(adjustment=adjustment, user=self.user)
+
+        self.item.refresh_from_db()
+        line.refresh_from_db()
+        movement = StockMovement.objects.get(stock_adjustment_line=line)
+        self.assertEqual(confirmed.status, StockAdjustment.STATUS_CONFIRMED)
+        self.assertEqual(self.item.current_stock, Decimal("2.000"))
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_ADJUSTMENT_IN)
+        self.assertEqual(movement.quantity, Decimal("5.000"))
+        self.assertEqual(movement.stock_before, Decimal("-3.000"))
+        self.assertEqual(movement.stock_after, Decimal("2.000"))
+        self.assertEqual(line.system_stock, Decimal("-3.000"))
+        self.assertEqual(line.difference, Decimal("5.000"))

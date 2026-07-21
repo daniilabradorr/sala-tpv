@@ -49,7 +49,7 @@ class InventoryModelsTests(TestCase):
         self.assertEqual(item.available_stock, Decimal("7.000"))
 
     def test_inventory_item_needs_restock_property(self):
-        """needs_restock debe ser True cuando current_stock <= minimum_stock."""
+        """needs_restock debe ser True cuando available_stock <= minimum_stock."""
         item = create_inventory_item(
             business=self.business,
             store=self.store,

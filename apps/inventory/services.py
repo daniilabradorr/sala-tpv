@@ -531,6 +531,9 @@ def add_stock_adjustment_line(
             "El stock afectado debe pertenecer a la misma tienda que el ajuste."
         )
 
+    if not inventory_item.is_active:
+        raise ValidationError("No se puede modificar una ficha de inventario inactiva.")
+
     exists = StockAdjustmentLine.objects.filter(
         adjustment=adjustment,
         inventory_item=inventory_item,
@@ -580,6 +583,9 @@ def update_stock_adjustment_line(
         raise ValidationError(
             "El stock afectado debe pertenecer a la misma tienda que el ajuste."
         )
+
+    if not inventory_item.is_active:
+        raise ValidationError("No se puede modificar una ficha de inventario inactiva.")
 
     duplicate_queryset = StockAdjustmentLine.objects.filter(
         adjustment=adjustment,
