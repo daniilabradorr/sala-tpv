@@ -673,6 +673,18 @@ def confirm_stock_adjustment(
             if inventory_item.store_id != locked_adjustment.store_id:
                 raise ValidationError("Una línea del ajuste pertenece a otra tienda.")
 
+            if not inventory_item.is_active:
+                raise ValidationError(
+                    "No se puede confirmar un ajuste sobre una ficha de inventario "
+                    "inactiva."
+                )
+
+            if inventory_item.current_stock != line.system_stock:
+                raise ValidationError(
+                    "El stock ha cambiado desde que se preparó el ajuste. "
+                    "Actualiza la línea y realiza de nuevo el recuento."
+                )
+
             stock_before = inventory_item.current_stock
             stock_after = line.counted_stock
 

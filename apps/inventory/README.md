@@ -420,11 +420,31 @@ El ajuste esta pensado en dos fases: preparar y aplicar.
 
 1. Confirmar ajuste.
 2. Servicio valida estado y lineas.
-3. Servicio aplica `counted_stock` sobre cada `InventoryItem`.
-4. Servicio crea `StockMovement` por diferencia.
-5. Ajuste pasa a `confirmed`.
+3. Servicio bloquea cada `InventoryItem` con `select_for_update()`.
+4. Servicio comprueba que la ficha siga activa.
+5. Servicio comprueba que el stock actual siga coincidiendo con el
+   `system_stock` guardado en la linea.
+6. Servicio aplica `counted_stock` sobre cada `InventoryItem`.
+7. Servicio crea `StockMovement` por diferencia.
+8. Ajuste pasa a `confirmed`.
 
 Si se cancela en `draft`, pasa a `cancelled` y no toca stock.
+
+La comprobacion de `system_stock` evita confirmar recuentos obsoletos.
+
+Ejemplo:
+
+```txt
+1) Se prepara una linea con system_stock = -3 y counted_stock = 2
+2) Antes de confirmar, entra mercancia y current_stock pasa a 7
+3) Al confirmar, el servicio detecta que 7 != -3
+4) Resultado: se lanza ValidationError, no se modifica stock y no se crea movimiento
+```
+
+La comprobacion de ficha activa evita modificar inventario que fue desactivado
+despues de preparar el ajuste. Si cualquier linea falla durante la confirmacion,
+la transaccion completa se revierte: no quedan cambios parciales ni movimientos
+huérfanos.
 
 ---
 
