@@ -30,6 +30,7 @@ En una operacion real, no basta con saber que producto existe: hay que saber cua
 
 - centraliza el stock actual por producto y tienda,
 - permite ajustes cuando el conteo real no coincide con el sistema,
+- permite salidas que dejen stock negativo solo cuando el servicio recibe una decision explicita,
 - registra cada cambio con historial auditado.
 
 Ejemplo corto:
@@ -128,6 +129,32 @@ Responsabilidades clave:
 - calcular propiedades (`available_stock`, `needs_restock`),
 - evitar duplicados por `business + store + product`.
 
+Reglas actuales importantes:
+
+- `current_stock` puede ser negativo. Esto permite representar casos reales como una venta permitida sin stock suficiente.
+- `reserved_stock` no puede ser negativo.
+- `minimum_stock` no puede ser negativo.
+- `maximum_stock` puede estar vacio, pero si se informa no puede ser negativo.
+- `maximum_stock` no puede ser menor que `minimum_stock`.
+- `available_stock` se calcula en memoria como:
+
+```txt
+available_stock = current_stock - reserved_stock
+```
+
+- `needs_restock` usa `available_stock`, no `current_stock` directamente.
+
+Ejemplo:
+
+```txt
+current_stock = 10
+reserved_stock = 8
+minimum_stock = 3
+available_stock = 2
+
+needs_restock = True, porque 2 <= 3
+```
+
 ## `StockAdjustment`
 
 Cabecera de un ajuste de inventario.
@@ -141,6 +168,17 @@ Linea de ajuste para un `InventoryItem` concreto.
 
 - `product`, `system_stock` y `difference` se derivan internamente.
 - Usuario introduce sobre todo `inventory_item`, `counted_stock` y notas.
+- `system_stock` puede ser negativo si el sistema ya estaba en negativo.
+- `counted_stock` no puede ser negativo porque representa el conteo fisico real.
+- `difference` se calcula siempre como `counted_stock - system_stock`.
+
+Ejemplo valido:
+
+```txt
+system_stock = -3
+counted_stock = 2
+difference = 5
+```
 
 ## `StockMovement`
 
@@ -149,10 +187,26 @@ Registro auditable de cada cambio de stock.
 Incluye, como minimo conceptual:
 
 - tipo de movimiento,
-- cantidad,
+- cantidad siempre positiva,
 - `stock_before`,
 - `stock_after`,
 - contexto y usuario.
+
+Reglas actuales importantes:
+
+- `quantity` siempre es positiva.
+- El tipo de movimiento indica si la cantidad entra o sale.
+- `stock_before` y `stock_after` pueden ser negativos.
+- Para una entrada, `stock_after` debe ser `stock_before + quantity`.
+- Para una salida, `stock_after` debe ser `stock_before - quantity`.
+
+Ejemplo valido de salida:
+
+```txt
+stock_before = 2
+quantity = 5
+stock_after = -3
+```
 
 ---
 
@@ -263,9 +317,96 @@ Flujo:
 6. El servicio crea `StockMovement` tipo inicial.
 7. La vista informa resultado y redirige.
 
+La carga inicial no debe usarse como atajo para corregir stock despues de que ya existen movimientos. Para correcciones posteriores se debe usar un ajuste.
+
 ---
 
-## 11) Flujo de ajustes de stock
+## 11) Entradas, salidas y stock negativo opcional
+
+Las operaciones base de stock viven en `services.py`.
+
+### Entradas con `increase_stock(...)`
+
+`increase_stock(...)` aumenta `current_stock` y crea un `StockMovement` de entrada.
+
+Reglas principales:
+
+- la cantidad debe ser mayor que cero,
+- `movement_type` debe ser un tipo de entrada,
+- la ficha de inventario debe estar activa,
+- se bloquea el `InventoryItem` con `select_for_update()`,
+- todo ocurre dentro de `transaction.atomic()`,
+- se guarda `stock_before`,
+- se calcula `stock_after = stock_before + quantity`,
+- se actualiza `current_stock`,
+- se crea `StockMovement`.
+
+Si la ficha esta inactiva, el servicio lanza `ValidationError` y no modifica stock.
+
+### Salidas con `decrease_stock(...)`
+
+`decrease_stock(...)` reduce `current_stock` y crea un `StockMovement` de salida.
+
+El servicio acepta el parametro:
+
+```python
+allow_negative=False
+```
+
+El valor por defecto es `False` para evitar permitir stock negativo por accidente.
+
+Comportamiento:
+
+- con `allow_negative=False`, una salida que supere el stock disponible se bloquea,
+- con `allow_negative=True`, la salida se permite aunque no haya stock suficiente,
+- si la operacion se completa, siempre se crea un `StockMovement`,
+- `quantity` sigue siendo positiva,
+- el tipo de movimiento sigue determinando si es entrada o salida,
+- no se usan cantidades negativas para representar salidas.
+
+Ejemplo:
+
+```python
+from decimal import Decimal
+
+from apps.inventory.models import StockMovement
+from apps.inventory.services import decrease_stock
+
+decrease_stock(
+    inventory_item=item,
+    quantity=Decimal("5.000"),
+    movement_type=StockMovement.TYPE_SALE,
+    allow_negative=True,
+)
+```
+
+Si antes habia 2 unidades:
+
+```txt
+stock_before = 2
+quantity = 5
+stock_after = -3
+current_stock = -3
+```
+
+### Quien decide si se permite vender sin stock
+
+`inventory` no consulta `POSSettings`.
+
+La decision de permitir o no vender sin stock corresponde al flujo que llama al servicio. Por ejemplo, en un flujo futuro de ventas, `sales` podra leer su configuracion y pasar explicitamente:
+
+```python
+allow_negative=pos_settings.allow_sale_without_stock
+```
+
+Esto mantiene separadas las responsabilidades:
+
+- `sales` decide si una venta concreta puede continuar sin stock suficiente,
+- `inventory` aplica la operacion de stock de forma segura y auditable.
+
+---
+
+## 12) Flujo de ajustes de stock
 
 El ajuste esta pensado en dos fases: preparar y aplicar.
 
@@ -287,7 +428,59 @@ Si se cancela en `draft`, pasa a `cancelled` y no toca stock.
 
 ---
 
-## 12) Por que `StockMovement` es auditoria (y no se edita ni borra)
+## 13) Selectors de stock bajo y sin stock
+
+Los selectors usan stock disponible, no solo stock fisico.
+
+La regla actual es:
+
+```txt
+available = current_stock - reserved_stock
+```
+
+### Stock bajo
+
+Un item se considera con stock bajo cuando:
+
+```txt
+available > 0
+available <= minimum_stock
+```
+
+Ejemplo:
+
+```txt
+current_stock = 10
+reserved_stock = 8
+minimum_stock = 3
+available = 2
+
+Resultado: stock bajo
+```
+
+### Sin stock
+
+Un item se considera sin stock cuando:
+
+```txt
+available <= 0
+```
+
+Ejemplo:
+
+```txt
+current_stock = 2
+reserved_stock = 2
+available = 0
+
+Resultado: sin stock
+```
+
+Un mismo `InventoryItem` no debe contarse a la vez como stock bajo y como sin stock en los indicadores del dashboard.
+
+---
+
+## 14) Por que `StockMovement` es auditoria (y no se edita ni borra)
 
 `StockMovement` es el libro de hechos del inventario.
 No es un dato operativo para "corregir a mano".
@@ -303,12 +496,13 @@ Esto mantiene:
 
 ---
 
-## 13) Pruebas del modulo
+## 15) Pruebas del modulo
 
 En el estado actual del repositorio existen estos archivos:
 
 - `tests/unit/test_models.py`
 - `tests/unit/test_forms.py`
+- `tests/unit/test_selectors.py`
 - `tests/unit/test_services.py`
 - `tests/unit/test_urls.py`
 - `tests/integration/test_views.py`
@@ -320,7 +514,9 @@ Cobertura esperada por tipo:
 
 - propiedades (`available_stock`, `needs_restock`),
 - validaciones de dominio,
-- coherencia de estados.
+- coherencia de estados,
+- ajustes con `system_stock` negativo,
+- rechazo de `counted_stock` negativo.
 
 ### Tests de formularios
 
@@ -331,8 +527,9 @@ Cobertura esperada por tipo:
 
 ### Tests de selectors
 
-- no hay archivo dedicado aun en esta version.
-- recomendable anadir `tests/unit/test_selectors.py` para proteger filtros y consultas de dashboard/listados.
+- filtros de stock bajo usando `available`,
+- filtros de sin stock usando `available <= 0`,
+- indicadores del dashboard sin doble conteo entre stock bajo y sin stock.
 
 ### Tests de services
 
@@ -340,7 +537,10 @@ Cobertura esperada por tipo:
 - reglas de negocio,
 - cambios de stock,
 - generacion de movimientos,
-- restricciones de estados de ajustes.
+- restricciones de estados de ajustes,
+- salidas con y sin `allow_negative`,
+- rechazo de modificaciones sobre fichas inactivas,
+- validaciones de `get_or_create_inventory_item`.
 
 ### Tests de URLs
 
@@ -356,7 +556,7 @@ Cobertura esperada por tipo:
 
 ---
 
-## 14) Ejemplos sencillos
+## 16) Ejemplos sencillos
 
 ### Ejemplo A: crear item y cargar stock inicial
 
@@ -380,9 +580,31 @@ Resultado:
 - se registra StockMovement de salida por 3
 ```
 
+### Ejemplo C: venta permitida sin stock suficiente
+
+```txt
+Sistema dice 2, venta intenta sacar 5
+-> El llamador decide permitir stock negativo
+-> Llama decrease_stock(..., allow_negative=True)
+Resultado:
+- current_stock pasa a -3
+- StockMovement guarda before=2, quantity=5 y after=-3
+```
+
+### Ejemplo D: venta bloqueada por defecto
+
+```txt
+Sistema dice 2, venta intenta sacar 5
+-> decrease_stock(...) se llama sin allow_negative
+Resultado:
+- se lanza ValidationError
+- current_stock sigue en 2
+- no se crea StockMovement
+```
+
 ---
 
-## 15) Checklist de arquitectura para contribuir
+## 17) Checklist de arquitectura para contribuir
 
 Antes de mergear cambios en `inventory`, conviene verificar:
 
@@ -390,6 +612,8 @@ Antes de mergear cambios en `inventory`, conviene verificar:
 - [ ] Ningun formulario modifica stock directamente.
 - [ ] Toda escritura de stock pasa por `services.py`.
 - [ ] Cada cambio de stock crea `StockMovement`.
+- [ ] Las salidas que puedan dejar stock negativo pasan `allow_negative=True` de forma explicita.
+- [ ] Ningun servicio de `inventory` consulta `POSSettings`.
 - [ ] `selectors.py` se mantiene de solo lectura.
 - [ ] Se respeta aislamiento por `business`.
 - [ ] Hay tests para el flujo afectado.
