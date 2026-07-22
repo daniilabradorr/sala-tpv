@@ -393,10 +393,15 @@ class CustomerAccountServiceTests(TestCase):
             user=self.user,
             notes="minus",
         )
+
+        self.account.refresh_from_db()
         self.account.is_blocked = True
-        self.account.customer.is_active = False
-        self.account.save()
-        self.account.customer.save()
+        self.account.save(update_fields=["is_blocked", "updated_at"])
+
+        customer = self.account.customer
+        customer.is_active = False
+        customer.save(update_fields=["is_active", "updated_at"])
+
         CustomerAccountService.create_adjustment(
             business=self.business,
             account=self.account,
@@ -404,6 +409,7 @@ class CustomerAccountServiceTests(TestCase):
             user=self.user,
             notes="inactive ok",
         )
+
         self.account.refresh_from_db()
         self.assertEqual(self.account.balance, Decimal("4.00"))
 
