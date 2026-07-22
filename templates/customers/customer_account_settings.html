@@ -1,1 +1,36 @@
-{% extends "base.html" %}{% block title %}Cuenta de {{ customer.name }}{% endblock %}{% block content %}<section class="card"><h1>Cuenta de {{ customer.name }}</h1><p>Saldo actual: {{ customer.account.balance }}</p><form method="post">{% csrf_token %}{{ form.non_field_errors }}{% for field in form %}<div class="form-group">{{ field.label_tag }}{{ field }}{{ field.help_text }}{{ field.errors }}</div>{% endfor %}<button class="btn" type="submit">Guardar</button></form></section>{% endblock %}
+{% extends "base.html" %}
+
+{% block title %}Cuenta de {{ customer.name }}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h1>Cuenta de {{ customer.name }}</h1>
+
+    {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        </ul>
+    {% endif %}
+
+    <dl>
+        <dt>Cliente</dt><dd>{{ customer.name }}</dd>
+        <dt>Saldo actual</dt><dd>{{ customer.account.balance }}</dd>
+        <dt>Crédito disponible</dt><dd>{{ customer.account.available_credit }}</dd>
+    </dl>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <div class="form-group">
+                {{ field.label_tag }}
+                {{ field }}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {{ field.errors }}
+            </div>
+        {% endfor %}
+        <button class="btn" type="submit">Guardar</button>
+        <a class="btn" href="{% url 'customers:customer_detail' customer.pk %}">Cancelar</a>
+    </form>
+</section>
+{% endblock %}

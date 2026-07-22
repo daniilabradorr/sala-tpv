@@ -24,15 +24,25 @@ class CustomerBaseForm(forms.ModelForm):
             "province",
         ]
         widgets = {
-            field: forms.TextInput(attrs={"class": "form-control"})
-            for field in fields
-            if field != "customer_type"
+            "customer_type": forms.Select(attrs={"class": "form-select"}),
+            "name": forms.TextInput(attrs={"class": "form-control"}),
+            "legal_name": forms.TextInput(attrs={"class": "form-control"}),
+            "tax_identifier": forms.TextInput(attrs={"class": "form-control"}),
+            "country_code": forms.TextInput(
+                attrs={"class": "form-control", "maxlength": "2"}
+            ),
+            "foreign_id_type": forms.TextInput(attrs={"class": "form-control"}),
+            "foreign_id": forms.TextInput(attrs={"class": "form-control"}),
+            "email": forms.EmailInput(attrs={"class": "form-control"}),
+            "phone": forms.TextInput(attrs={"class": "form-control"}),
+            "address_line_1": forms.TextInput(attrs={"class": "form-control"}),
+            "postal_code": forms.TextInput(attrs={"class": "form-control"}),
+            "city": forms.TextInput(attrs={"class": "form-control"}),
+            "province": forms.TextInput(attrs={"class": "form-control"}),
         }
-        widgets["customer_type"] = forms.Select(attrs={"class": "form-select"})
-        widgets["email"] = forms.EmailInput(attrs={"class": "form-control"})
         help_texts = {
             "country_code": "Código ISO de dos letras.",
-            "tax_identifier": "NIF/CIF nacional si aplica.",
+            "tax_identifier": "NIF/CIF/NIE nacional si aplica.",
             "foreign_id": "Requiere informar también el tipo de documento extranjero.",
         }
 

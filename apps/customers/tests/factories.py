@@ -5,20 +5,32 @@ from apps.customers.models import (
     Customer,
     CustomerAccount,
     CustomerAccountEntry,
-    CustomerAccountEntryTypeChoices,
+    EntryTypeChoices,
+    CustomerTypeChoices,
 )
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_business, create_user
 
 
+def unique_slug(prefix="customers"):
+    return f"{prefix}-{uuid4().hex[:8]}"
+
+
 def create_customer(
-    *, business=None, name=None, tax_identifier="", is_active=True, **kwargs
+    *,
+    business=None,
+    name=None,
+    tax_identifier="",
+    customer_type=CustomerTypeChoices.PERSON,
+    is_active=True,
+    **kwargs,
 ):
-    business = business or create_business(slug=f"biz-{uuid4().hex[:8]}")
+    business = business or create_business(slug=unique_slug())
     return Customer.objects.create(
         business=business,
         name=name or f"Cliente {uuid4().hex[:6]}",
         tax_identifier=tax_identifier,
+        customer_type=customer_type,
         is_active=is_active,
         **kwargs,
     )
@@ -32,7 +44,7 @@ def create_account(
     credit_limit=Decimal("100.00"),
     is_blocked=False,
 ):
-    business = business or create_business(slug=f"biz-{uuid4().hex[:8]}")
+    business = business or create_business(slug=unique_slug())
     customer = customer or create_customer(business=business)
     return CustomerAccount.objects.create(
         business=business,
@@ -48,7 +60,7 @@ def create_entry(
     business,
     account,
     amount=Decimal("10.00"),
-    entry_type=CustomerAccountEntryTypeChoices.CHARGE,
+    entry_type=EntryTypeChoices.CHARGE,
     balance_after=Decimal("10.00"),
     created_by=None,
     notes="",
@@ -64,10 +76,13 @@ def create_entry(
     )
 
 
-def create_customer_user(*, business, role=RoleChoices.CASHIER, password="testpass123"):
+def create_customer_user(
+    *, business, role=RoleChoices.CASHIER, password="testpass123", **extra_fields
+):
     return create_user(
         business=business,
         email=f"{role}-{uuid4().hex[:8]}@customers.test",
         password=password,
         role=role,
+        **extra_fields,
     )

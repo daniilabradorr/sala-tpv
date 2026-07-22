@@ -13,23 +13,23 @@ class CustomerFormTests(TestCase):
     def test_fields_and_validation(self):
         b = create_business(slug="forms")
         form = CustomerCreateForm(
-            data={"customer_type": "individual", "name": "Ana", "country_code": "ES"},
+            data={"customer_type": "person", "name": "Ana", "country_code": "ES"},
             business=b,
         )
         self.assertTrue(form.is_valid(), form.errors)
         for field in ["business", "credit_limit", "is_blocked", "balance"]:
             self.assertNotIn(field, form.fields)
         bad = CustomerCreateForm(
-            data={"customer_type": "individual", "name": "Ana", "country_code": "ESP"},
+            data={"customer_type": "person", "name": "Ana", "country_code": "ESP"},
             business=b,
         )
         self.assertFalse(bad.is_valid())
         partial = CustomerCreateForm(
             data={
-                "customer_type": "foreign",
+                "customer_type": "person",
                 "name": "Ana",
                 "country_code": "FR",
-                "foreign_id": "X",
+                "person_id": "X",
             },
             business=b,
         )
@@ -58,7 +58,7 @@ class CustomerFormTests(TestCase):
         self.assertTrue(same.is_valid(), same.errors)
         customer = create_customer(business=b, name="Old")
         update = CustomerUpdateForm(
-            data={"customer_type": "individual", "name": "New", "country_code": "ES"},
+            data={"customer_type": "person", "name": "New", "country_code": "ES"},
             instance=customer,
             business=b,
         )
