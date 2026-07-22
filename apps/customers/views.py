@@ -58,7 +58,7 @@ class CustomerListView(BusinessRequiredMixin, ListView):
                 "query": self.request.GET.get("q", ""),
                 "status": self.request.GET.get("status", "active"),
                 "customer_type": self.request.GET.get("customer_type", ""),
-                "customer_types": CustomerTypeChoices.choices,
+                "customer_type_choices": CustomerTypeChoices.choices,
             }
         )
         return context
@@ -75,7 +75,8 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["entries"] = get_customer_account_entries(
+        context["account"] = self.object.account
+        context["account_entries"] = get_customer_account_entries(
             business=_get_business(self.request), account=self.object.account, limit=20
         )
         return context
@@ -99,9 +100,9 @@ class CustomerCreateView(BusinessRequiredMixin, View):
         form = CustomerCreateForm(request.POST, business=business)
         if form.is_valid():
             try:
-                customer = CustomerService.create_customer(
+                customer, _account = CustomerService.create_customer(
                     business=business,
-                    data=form.cleaned_data,
+                    customer_data=form.cleaned_data,
                     credit_limit=Decimal("0.00"),
                     is_blocked=False,
                 )
@@ -136,7 +137,9 @@ class CustomerUpdateView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, Vie
         if form.is_valid():
             try:
                 customer = CustomerService.update_customer(
-                    business=business, customer=customer, data=form.cleaned_data
+                    business=business,
+                    customer=customer,
+                    customer_data=form.cleaned_data,
                 )
             except ValidationError as error:
                 add_service_errors(form, error)

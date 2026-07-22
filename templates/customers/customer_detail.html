@@ -1,1 +1,75 @@
-{% extends "base.html" %}{% block title %}{{ customer.name }}{% endblock %}{% block content %}<section class="card"><h1>{{ customer.name }}</h1><p>Estado: {% if customer.is_active %}Activo{% else %}Inactivo{% endif %}</p><h2>Fiscal</h2><p>Nombre fiscal: {{ customer.fiscal_name }}</p><p>NIF: {{ customer.tax_identifier }}</p><p>País: {{ customer.country_code }}</p><p>ID extranjero: {{ customer.foreign_id_type }} {{ customer.foreign_id }}</p><h2>Contacto</h2><p>{{ customer.email }} {{ customer.phone }}</p><p>{{ customer.address_line_1 }} {{ customer.postal_code }} {{ customer.city }} {{ customer.province }}</p><h2>Cuenta</h2><p>Saldo: {{ customer.account.balance }}</p><p>Límite: {{ customer.account.credit_limit }}</p><p>Crédito disponible: {{ customer.account.available_credit }}</p><p>Bloqueada: {{ customer.account.is_blocked|yesno:"Sí,No" }}</p><a class="btn" href="{% url 'customers:customer_update' customer.pk %}">Editar</a><a class="btn" href="{% url 'customers:customer_account_settings' customer.pk %}">Configurar cuenta</a>{% if customer.is_active %}<form method="post" action="{% url 'customers:customer_deactivate' customer.pk %}">{% csrf_token %}<button class="btn" type="submit">Desactivar</button></form>{% else %}<form method="post" action="{% url 'customers:customer_reactivate' customer.pk %}">{% csrf_token %}<button class="btn" type="submit">Reactivar</button></form>{% endif %}<h2>Últimos movimientos</h2><table><tbody>{% for entry in entries %}<tr><td>{{ entry.created_at }}</td><td>{{ entry.get_entry_type_display }}</td><td>{{ entry.amount }}</td><td>{{ entry.balance_after }}</td><td>{{ entry.notes }}</td></tr>{% empty %}<tr><td>No hay movimientos.</td></tr>{% endfor %}</tbody></table></section>{% endblock %}
+{% extends "base.html" %}
+
+{% block title %}{{ customer.name }}{% endblock %}
+
+{% block content %}
+<section class="card">
+    {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        </ul>
+    {% endif %}
+
+    <h1>{{ customer.name }}</h1>
+    <p>Estado: {% if customer.is_active %}Activo{% else %}Inactivo{% endif %}</p>
+
+    <h2>Datos fiscales</h2>
+    <dl>
+        <dt>Nombre fiscal</dt><dd>{{ customer.fiscal_name }}</dd>
+        <dt>NIF/CIF/NIE</dt><dd>{{ customer.tax_identifier|default:"—" }}</dd>
+        <dt>País</dt><dd>{{ customer.country_code }}</dd>
+        <dt>Identificación extranjera</dt><dd>{{ customer.foreign_id_type }} {{ customer.foreign_id }}</dd>
+    </dl>
+
+    <h2>Contacto</h2>
+    <dl>
+        <dt>Email</dt><dd>{{ customer.email|default:"—" }}</dd>
+        <dt>Teléfono</dt><dd>{{ customer.phone|default:"—" }}</dd>
+        <dt>Dirección</dt><dd>{{ customer.address_line_1 }} {{ customer.postal_code }} {{ customer.city }} {{ customer.province }}</dd>
+    </dl>
+
+    <h2>Cuenta</h2>
+    <dl>
+        <dt>Saldo</dt><dd>{{ account.balance }}</dd>
+        <dt>Límite de crédito</dt><dd>{{ account.credit_limit }}</dd>
+        <dt>Crédito disponible</dt><dd>{{ account.available_credit }}</dd>
+        <dt>Bloqueada</dt><dd>{{ account.is_blocked|yesno:"Sí,No" }}</dd>
+    </dl>
+
+    {% if request.user.role == "owner" or request.user.role == "manager" or request.user.is_superuser %}
+        <p>
+            <a class="btn" href="{% url 'customers:customer_update' customer.pk %}">Editar</a>
+            <a class="btn" href="{% url 'customers:customer_account_settings' customer.pk %}">Configurar cuenta</a>
+        </p>
+        {% if customer.is_active %}
+            <form method="post" action="{% url 'customers:customer_deactivate' customer.pk %}">
+                {% csrf_token %}
+                <button class="btn" type="submit">Desactivar</button>
+            </form>
+        {% else %}
+            <form method="post" action="{% url 'customers:customer_reactivate' customer.pk %}">
+                {% csrf_token %}
+                <button class="btn" type="submit">Reactivar</button>
+            </form>
+        {% endif %}
+    {% endif %}
+
+    <h2>Últimos movimientos</h2>
+    <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Importe</th><th>Saldo posterior</th><th>Notas</th></tr></thead>
+        <tbody>
+            {% for entry in account_entries %}
+                <tr>
+                    <td>{{ entry.created_at }}</td>
+                    <td>{{ entry.get_entry_type_display }}</td>
+                    <td>{{ entry.amount }}</td>
+                    <td>{{ entry.balance_after }}</td>
+                    <td>{{ entry.notes }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="5">No hay movimientos.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

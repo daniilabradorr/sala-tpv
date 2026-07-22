@@ -50,7 +50,7 @@ class CustomerViewTests(TestCase):
         )
         response = self.client.post(
             reverse("customers:customer_create"),
-            {"customer_type": "individual", "name": "Nuevo", "country_code": "ES"},
+            {"customer_type": "person", "name": "Nuevo", "country_code": "ES"},
         )
         self.assertEqual(response.status_code, 302)
         c = Customer.objects.get(name="Nuevo")
@@ -151,7 +151,7 @@ class CustomerViewTests(TestCase):
         self.assertEqual(
             self.client.post(
                 reverse("customers:customer_create"),
-                {"customer_type": "individual", "name": "", "country_code": "ES"},
+                {"customer_type": "person", "name": "", "country_code": "ES"},
             ).status_code,
             200,
         )
