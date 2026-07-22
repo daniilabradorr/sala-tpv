@@ -1,461 +1,206 @@
-"""Views del módulo customers.
-
-Regla general:
-
-- Las views reciben la intención del usuario.
-- Los forms validan los datos de entrada.
-- Los services realizan escrituras y lógica de negocio.
-- Las views no modifican balances directamente.
-- Las views no crean CustomerAccountEntry directamente.
-- Todas las consultas quedan aisladas por Business.
-"""
+from decimal import Decimal
 
 from django.contrib import messages
-from django.core.exceptions import ValidationError
-from django.core.paginator import Paginator
-from django.db.models import Q
-from django.shortcuts import get_object_or_404, redirect, render
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.shortcuts import redirect, render
 from django.views import View
+from django.views.generic import ListView, DetailView
 
 from apps.customers.forms import (
+    CustomerAccountSettingsForm,
     CustomerCreateForm,
     CustomerUpdateForm,
 )
-from apps.customers.models import (
-    Customer,
-    CustomerTypeChoices,
+from apps.customers.models import CustomerTypeChoices
+from apps.customers.selectors import (
+    get_customer_account_entries,
+    get_customer_detail,
+    get_customers_for_business,
 )
-from apps.customers.services import CustomerService
-from apps.users.mixins import (
-    BusinessRequiredMixin,
-    ManagerOrOwnerRequiredMixin,
-)
+from apps.customers.services import CustomerAccountService, CustomerService
+from apps.users.mixins import BusinessRequiredMixin, ManagerOrOwnerRequiredMixin
 
 
-# ==========================================================
-# Helpers internos
-# ==========================================================
+def _get_business(request):
+    business = getattr(request.user, "business", None)
+    if business is None:
+        raise PermissionDenied("La interfaz de clientes requiere un negocio asociado.")
+    return business
 
 
-def _customer_queryset(*, business):
-    """Queryset base de clientes del negocio.
-
-    En una siguiente revisión puede moverse a selectors.py.
-    """
-
-    return (
-        Customer.objects.filter(
-            business=business,
-        )
-        .select_related(
-            "business",
-            "account",
-        )
-        .order_by(
-            "name",
-            "pk",
-        )
-    )
+def add_service_errors(form, error):
+    if hasattr(error, "error_dict"):
+        for field, errors in error.message_dict.items():
+            for message in errors:
+                form.add_error(field if field in form.fields else None, message)
+    else:
+        form.add_error(None, error.message if hasattr(error, "message") else str(error))
 
 
-def _add_validation_error_to_form(form, error):
-    """Añade un ValidationError de servicio al formulario."""
-
-    if hasattr(error, "message_dict"):
-        for field, field_errors in error.message_dict.items():
-            target_field = field if field in form.fields else None
-
-            for message in field_errors:
-                form.add_error(target_field, message)
-
-        return
-
-    if hasattr(error, "messages"):
-        for message in error.messages:
-            form.add_error(None, message)
-
-        return
-
-    form.add_error(None, str(error))
-
-
-# ==========================================================
-# Listado
-# ==========================================================
-
-
-class CustomerListView(BusinessRequiredMixin, View):
-    """Lista clientes del negocio actual."""
-
+class CustomerListView(BusinessRequiredMixin, ListView):
     template_name = "customers/customer_list.html"
+    context_object_name = "customers"
     paginate_by = 25
 
-    def get(self, request):
-        """Muestra clientes con búsqueda y filtros básicos."""
-
-        customers = _customer_queryset(
-            business=request.user.business,
+    def get_queryset(self):
+        business = _get_business(self.request)
+        return get_customers_for_business(
+            business=business,
+            query=self.request.GET.get("q", ""),
+            status=self.request.GET.get("status", "active"),
+            customer_type=self.request.GET.get("customer_type", ""),
         )
 
-        query = request.GET.get("q", "").strip()
-        status = request.GET.get("status", "active").strip()
-        customer_type = request.GET.get(
-            "customer_type",
-            "",
-        ).strip()
-
-        if query:
-            customers = customers.filter(
-                Q(name__icontains=query)
-                | Q(legal_name__icontains=query)
-                | Q(tax_identifier__icontains=query)
-                | Q(foreign_id__icontains=query)
-                | Q(phone__icontains=query)
-                | Q(email__icontains=query)
-            )
-
-        if status == "inactive":
-            customers = customers.filter(is_active=False)
-
-        elif status == "all":
-            pass
-
-        else:
-            status = "active"
-            customers = customers.filter(is_active=True)
-
-        valid_customer_types = {value for value, _label in CustomerTypeChoices.choices}
-
-        if customer_type in valid_customer_types:
-            customers = customers.filter(
-                customer_type=customer_type,
-            )
-        else:
-            customer_type = ""
-
-        paginator = Paginator(
-            customers,
-            self.paginate_by,
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "query": self.request.GET.get("q", ""),
+                "status": self.request.GET.get("status", "active"),
+                "customer_type": self.request.GET.get("customer_type", ""),
+                "customer_types": CustomerTypeChoices.choices,
+            }
         )
-
-        page_obj = paginator.get_page(
-            request.GET.get("page"),
-        )
-
-        context = {
-            "customers": page_obj.object_list,
-            "page_obj": page_obj,
-            "paginator": paginator,
-            "is_paginated": page_obj.has_other_pages(),
-            "query": query,
-            "status": status,
-            "customer_type": customer_type,
-            "customer_type_choices": CustomerTypeChoices.choices,
-        }
-
-        return render(
-            request,
-            self.template_name,
-            context,
-        )
+        return context
 
 
-# ==========================================================
-# Detalle
-# ==========================================================
-
-
-class CustomerDetailView(BusinessRequiredMixin, View):
-    """Muestra la ficha, cuenta y movimientos de un cliente."""
-
+class CustomerDetailView(BusinessRequiredMixin, DetailView):
     template_name = "customers/customer_detail.html"
-    latest_entries_limit = 20
+    context_object_name = "customer"
 
-    def get(self, request, pk):
-        """Renderiza el detalle del cliente."""
-
-        customer = get_object_or_404(
-            _customer_queryset(
-                business=request.user.business,
-            ),
-            pk=pk,
+    def get_object(self, queryset=None):
+        return get_customer_detail(
+            business=_get_business(self.request), pk=self.kwargs["pk"]
         )
 
-        account = getattr(
-            customer,
-            "account",
-            None,
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["entries"] = get_customer_account_entries(
+            business=_get_business(self.request), account=self.object.account, limit=20
         )
-
-        account_entries = []
-
-        if account:
-            account_entries = account.entries.select_related(
-                "created_by",
-            ).order_by(
-                "-created_at",
-                "-pk",
-            )[: self.latest_entries_limit]
-
-        context = {
-            "customer": customer,
-            "account": account,
-            "account_entries": account_entries,
-        }
-
-        return render(
-            request,
-            self.template_name,
-            context,
-        )
-
-
-# ==========================================================
-# Creación
-# ==========================================================
+        return context
 
 
 class CustomerCreateView(BusinessRequiredMixin, View):
-    """Crea un cliente y su cuenta en una sola operación."""
-
     template_name = "customers/customer_form.html"
 
     def get(self, request):
-        """Muestra el formulario de creación."""
-
-        form = CustomerCreateForm(
-            business=request.user.business,
-        )
-
-        context = {
-            "form": form,
-            "is_create": True,
-        }
-
         return render(
             request,
             self.template_name,
-            context,
+            {
+                "form": CustomerCreateForm(business=_get_business(request)),
+                "is_create": True,
+            },
         )
 
     def post(self, request):
-        """Procesa la creación del cliente."""
-
-        form = CustomerCreateForm(
-            request.POST,
-            business=request.user.business,
-        )
-
-        if not form.is_valid():
-            return render(
-                request,
-                self.template_name,
-                {
-                    "form": form,
-                    "is_create": True,
-                },
-            )
-
-        try:
-            customer, _account = CustomerService.create_customer(
-                business=request.user.business,
-                customer_data=form.cleaned_data,
-                credit_limit=form.cleaned_data["credit_limit"],
-                is_blocked=form.cleaned_data["is_blocked"],
-            )
-
-        except ValidationError as error:
-            _add_validation_error_to_form(
-                form,
-                error,
-            )
-
-            return render(
-                request,
-                self.template_name,
-                {
-                    "form": form,
-                    "is_create": True,
-                },
-            )
-
-        messages.success(
-            request,
-            "Cliente creado correctamente.",
-        )
-
-        return redirect(
-            "customers:customer_detail",
-            pk=customer.pk,
-        )
+        business = _get_business(request)
+        form = CustomerCreateForm(request.POST, business=business)
+        if form.is_valid():
+            try:
+                customer = CustomerService.create_customer(
+                    business=business,
+                    data=form.cleaned_data,
+                    credit_limit=Decimal("0.00"),
+                    is_blocked=False,
+                )
+            except ValidationError as error:
+                add_service_errors(form, error)
+            else:
+                messages.success(request, "Cliente creado correctamente.")
+                return redirect("customers:customer_detail", pk=customer.pk)
+        return render(request, self.template_name, {"form": form, "is_create": True})
 
 
-# ==========================================================
-# Edición
-# ==========================================================
-
-
-class CustomerUpdateView(
-    ManagerOrOwnerRequiredMixin,
-    BusinessRequiredMixin,
-    View,
-):
-    """Actualiza la ficha de un cliente.
-
-    En esta primera versión, únicamente owner y manager pueden
-    modificar la ficha completa.
-    """
-
+class CustomerUpdateView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
     template_name = "customers/customer_form.html"
 
-    def get_customer(self, request, pk):
-        """Obtiene el cliente dentro del negocio actual."""
-
-        return get_object_or_404(
-            _customer_queryset(
-                business=request.user.business,
-            ),
-            pk=pk,
-        )
-
     def get(self, request, pk):
-        """Muestra el formulario de edición."""
-
-        customer = self.get_customer(
-            request,
-            pk,
-        )
-
-        form = CustomerUpdateForm(
-            instance=customer,
-            business=request.user.business,
-        )
-
-        context = {
-            "customer": customer,
-            "form": form,
-            "is_create": False,
-        }
-
+        customer = get_customer_detail(business=_get_business(request), pk=pk)
         return render(
             request,
             self.template_name,
-            context,
+            {
+                "form": CustomerUpdateForm(
+                    instance=customer, business=_get_business(request)
+                ),
+                "customer": customer,
+            },
         )
 
     def post(self, request, pk):
-        """Procesa la actualización del cliente."""
-
-        customer = self.get_customer(
-            request,
-            pk,
-        )
-
-        form = CustomerUpdateForm(
-            request.POST,
-            instance=customer,
-            business=request.user.business,
-        )
-
-        if not form.is_valid():
-            return render(
-                request,
-                self.template_name,
-                {
-                    "customer": customer,
-                    "form": form,
-                    "is_create": False,
-                },
-            )
-
-        try:
-            customer = CustomerService.update_customer(
-                business=request.user.business,
-                customer=customer,
-                customer_data=form.cleaned_data,
-            )
-
-        except ValidationError as error:
-            _add_validation_error_to_form(
-                form,
-                error,
-            )
-
-            return render(
-                request,
-                self.template_name,
-                {
-                    "customer": customer,
-                    "form": form,
-                    "is_create": False,
-                },
-            )
-
-        messages.success(
-            request,
-            "Cliente actualizado correctamente.",
-        )
-
-        return redirect(
-            "customers:customer_detail",
-            pk=customer.pk,
-        )
+        business = _get_business(request)
+        customer = get_customer_detail(business=business, pk=pk)
+        form = CustomerUpdateForm(request.POST, instance=customer, business=business)
+        if form.is_valid():
+            try:
+                customer = CustomerService.update_customer(
+                    business=business, customer=customer, data=form.cleaned_data
+                )
+            except ValidationError as error:
+                add_service_errors(form, error)
+            else:
+                messages.success(request, "Cliente actualizado correctamente.")
+                return redirect("customers:customer_detail", pk=customer.pk)
+        return render(request, self.template_name, {"form": form, "customer": customer})
 
 
-# ==========================================================
-# Desactivación
-# ==========================================================
-
-
-class CustomerDeactivateView(
-    ManagerOrOwnerRequiredMixin,
-    BusinessRequiredMixin,
-    View,
-):
-    """Desactiva un cliente sin borrar su histórico."""
-
+class CustomerDeactivateView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        """Procesa la desactivación del cliente."""
-
-        customer = get_object_or_404(
-            _customer_queryset(
-                business=request.user.business,
-            ),
-            pk=pk,
+        customer = get_customer_detail(business=_get_business(request), pk=pk)
+        CustomerService.deactivate_customer(
+            business=_get_business(request), customer=customer
         )
+        messages.success(request, "Cliente desactivado correctamente.")
+        return redirect("customers:customer_detail", pk=pk)
 
-        try:
-            customer = CustomerService.deactivate_customer(
-                business=request.user.business,
-                customer=customer,
-            )
 
-        except ValidationError as error:
-            if hasattr(error, "messages"):
-                for message in error.messages:
-                    messages.error(
-                        request,
-                        message,
-                    )
-            else:
-                messages.error(
-                    request,
-                    str(error),
-                )
+class CustomerReactivateView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    http_method_names = ["post"]
 
-            return redirect(
-                "customers:customer_detail",
-                pk=customer.pk,
-            )
+    def post(self, request, pk):
+        customer = get_customer_detail(business=_get_business(request), pk=pk)
+        CustomerService.reactivate_customer(
+            business=_get_business(request), customer=customer
+        )
+        messages.success(request, "Cliente reactivado correctamente.")
+        return redirect("customers:customer_detail", pk=pk)
 
-        messages.success(
+
+class CustomerAccountSettingsView(
+    ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View
+):
+    template_name = "customers/customer_account_settings.html"
+
+    def get(self, request, pk):
+        customer = get_customer_detail(business=_get_business(request), pk=pk)
+        return render(
             request,
-            "Cliente desactivado correctamente.",
+            self.template_name,
+            {
+                "customer": customer,
+                "form": CustomerAccountSettingsForm(instance=customer.account),
+            },
         )
 
-        return redirect(
-            "customers:customer_detail",
-            pk=customer.pk,
-        )
+    def post(self, request, pk):
+        business = _get_business(request)
+        customer = get_customer_detail(business=business, pk=pk)
+        form = CustomerAccountSettingsForm(request.POST, instance=customer.account)
+        if form.is_valid():
+            try:
+                CustomerAccountService.update_account_settings(
+                    business=business,
+                    account=customer.account,
+                    credit_limit=form.cleaned_data["credit_limit"],
+                    is_blocked=form.cleaned_data["is_blocked"],
+                )
+            except ValidationError as error:
+                add_service_errors(form, error)
+            else:
+                messages.success(request, "Configuración de cuenta actualizada.")
+                return redirect("customers:customer_detail", pk=customer.pk)
+        return render(request, self.template_name, {"customer": customer, "form": form})
