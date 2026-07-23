@@ -29,7 +29,7 @@ class CustomerFormTests(TestCase):
                 "customer_type": "person",
                 "name": "Ana",
                 "country_code": "FR",
-                "person_id": "X",
+                "foreign_id": "X",
             },
             business=b,
         )
