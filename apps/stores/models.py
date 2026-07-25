@@ -271,17 +271,11 @@ class Store(TimeStampedModel):
         if self.email_store:
             self.email_store = self.email_store.strip().lower()
 
-        if self.business_id and self.name and not self.code:
-            self.code = self.generate_unique_code()
-
         if not self.name:
             errors["name"] = "El nombre de la tienda es obligatorio."
 
         if not self.business_id:
             errors["business"] = "La tienda debe pertenecer a un negocio."
-
-        if not self.code:
-            errors["code"] = "El código de tienda es obligatorio."
 
         if self.code and len(self.code) > 20:
             errors["code"] = "El código de tienda no puede superar 20 caracteres."

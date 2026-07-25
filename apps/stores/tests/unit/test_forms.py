@@ -53,17 +53,16 @@ class StoreCreateFormTests(TestCase):
 
         self.assertEqual(store.business, self.business)
 
-    def test_store_create_form_generates_code_automatically(self):
-        """
-        Verifica que el código de tienda se genere automáticamente
-        desde el modelo cuando no viene en el formulario.
-        """
+    def test_store_create_form_generates_code_only_when_saved(self):
+        """Valida que is_valid no genere code y save sí lo genere."""
         form = StoreCreateForm(
             data=self.valid_data(),
             business=self.business,
         )
 
         self.assertTrue(form.is_valid(), form.errors.as_data())
+        self.assertFalse(form.instance.code)
+
         store = form.save()
 
         self.assertTrue(store.code)
