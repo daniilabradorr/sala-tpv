@@ -167,6 +167,26 @@ class UserHelpersTests(TestCase):
         """Verifica que los propietarios no puedan acceder a tiendas de otro negocio."""
         self.assertFalse(can_access_store(self.owner, self.other_store))
 
+    def test_manager_cannot_access_store_from_other_business(self):
+        create_store_access(
+            business=self.business,
+            user=self.manager,
+            store=self.store,
+            is_active=True,
+        )
+
+        self.assertFalse(can_access_store(self.manager, self.other_store))
+
+    def test_cashier_cannot_access_store_from_other_business(self):
+        create_store_access(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            is_active=True,
+        )
+
+        self.assertFalse(can_access_store(self.cashier, self.other_store))
+
     def test_superuser_can_access_any_store(self):
         """Verifica que los superusuarios puedan acceder a cualquier tienda."""
         self.assertTrue(can_access_store(self.superuser, self.other_store))

@@ -324,44 +324,52 @@ class Store(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         """Guarda la tienda preservando invariantes de código y predeterminada."""
+        with transaction.atomic():
+            if self.business_id:
+                try:
+                    Business.objects.select_for_update().only("pk").get(
+                        pk=self.business_id
+                    )
+                except Business.DoesNotExist as exc:
+                    raise ValidationError(
+                        {"business": "La tienda debe pertenecer a un negocio valido."}
+                    ) from exc
 
-        update_fields = kwargs.get("update_fields")
-
-        if self.business_id and self.name and not self.code:
-            self.code = self.generate_unique_code()
-
+            update_fields = kwargs.get("update_fields")
             if update_fields is not None:
                 update_fields = set(update_fields)
-                update_fields.add("code")
 
-        if not self.is_active and self.is_default:
-            self.is_default = False
-
-            if update_fields is not None:
-                update_fields = set(update_fields)
-                update_fields.add("is_default")
-
-        if self.business_id and self.is_active and not self.is_default:
-            default_exists = Store.objects.filter(
-                business_id=self.business_id,
-                is_default=True,
-                is_active=True,
-            )
-
-            if self.pk:
-                default_exists = default_exists.exclude(pk=self.pk)
-
-            if not default_exists.exists():
-                self.is_default = True
+            if self.business_id and self.name and not self.code:
+                self.code = self.generate_unique_code()
 
                 if update_fields is not None:
-                    update_fields = set(update_fields)
+                    update_fields.add("code")
+
+            if not self.is_active and self.is_default:
+                self.is_default = False
+
+                if update_fields is not None:
                     update_fields.add("is_default")
 
-        self.full_clean()
+            if self.business_id and self.is_active and not self.is_default:
+                default_exists = Store.objects.filter(
+                    business_id=self.business_id,
+                    is_default=True,
+                    is_active=True,
+                )
 
-        if update_fields is not None:
-            kwargs["update_fields"] = list(update_fields)
+                if self.pk:
+                    default_exists = default_exists.exclude(pk=self.pk)
 
-        with transaction.atomic():
+                if not default_exists.exists():
+                    self.is_default = True
+
+                    if update_fields is not None:
+                        update_fields.add("is_default")
+
+            self.full_clean()
+
+            if update_fields is not None:
+                kwargs["update_fields"] = list(update_fields)
+
             return super().save(*args, **kwargs)

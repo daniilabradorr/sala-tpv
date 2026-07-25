@@ -3,14 +3,24 @@ from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 
+from apps.core.models import Business
 from apps.stores.models import Store
 
 from apps.stores.selectors import (
     get_default_store_for_business,
     get_next_active_store_for_business,
     get_store_for_business,
-    get_stores_for_business,
 )
+
+
+def _lock_business(*, business):
+    if business is None or not getattr(business, "pk", None):
+        raise ValidationError("Debes indicar un negocio valido.")
+
+    try:
+        return Business.objects.select_for_update().get(pk=business.pk)
+    except Business.DoesNotExist as exc:
+        raise ValidationError("El negocio indicado no existe.") from exc
 
 
 def _get_locked_store(*, business, store):
@@ -50,16 +60,11 @@ def set_default_store(*, business, store):
     si la tienda ya es predeterminada y no hay inconsistencias,
     no hace cambios.
     """
-    locked_store = _get_locked_store(
-        business=business,
-        store=store,
-    )
+    locked_business = _lock_business(business=business)
 
-    list(
-        get_stores_for_business(
-            business=business,
-            for_update=True,
-        ).values_list("pk", flat=True)
+    locked_store = _get_locked_store(
+        business=locked_business,
+        store=store,
     )
 
     if not locked_store.is_active:
@@ -72,7 +77,7 @@ def set_default_store(*, business, store):
         )
 
     current_default = get_default_store_for_business(
-        business=business,
+        business=locked_business,
         for_update=True,
         excluded_store=locked_store,
     )
@@ -113,20 +118,15 @@ def activate_store(*, business, store):
     Es idempotente:
     activar una tienda ya activa no produce error.
     """
+    locked_business = _lock_business(business=business)
+
     locked_store = _get_locked_store(
-        business=business,
+        business=locked_business,
         store=store,
     )
 
-    list(
-        get_stores_for_business(
-            business=business,
-            for_update=True,
-        ).values_list("pk", flat=True)
-    )
-
     current_default = get_default_store_for_business(
-        business=business,
+        business=locked_business,
         for_update=True,
         only_active=True,
         excluded_store=locked_store,
@@ -185,16 +185,11 @@ def deactivate_store(*, business, store):
     Es idempotente:
     desactivar una tienda ya inactiva no produce error.
     """
-    locked_store = _get_locked_store(
-        business=business,
-        store=store,
-    )
+    locked_business = _lock_business(business=business)
 
-    list(
-        get_stores_for_business(
-            business=business,
-            for_update=True,
-        ).values_list("pk", flat=True)
+    locked_store = _get_locked_store(
+        business=locked_business,
+        store=store,
     )
 
     if not locked_store.is_active:
@@ -215,7 +210,7 @@ def deactivate_store(*, business, store):
 
     if was_default:
         replacement = get_next_active_store_for_business(
-            business=business,
+            business=locked_business,
             excluded_store=locked_store,
             for_update=True,
         )
@@ -251,16 +246,11 @@ def delete_store(*, business, store):
     Si la tienda eliminada era la predeterminada, se selecciona otra
     tienda activa como predeterminada.
     """
-    locked_store = _get_locked_store(
-        business=business,
-        store=store,
-    )
+    locked_business = _lock_business(business=business)
 
-    list(
-        get_stores_for_business(
-            business=business,
-            for_update=True,
-        ).values_list("pk", flat=True)
+    locked_store = _get_locked_store(
+        business=locked_business,
+        store=store,
     )
 
     store_name = locked_store.name
@@ -270,7 +260,7 @@ def delete_store(*, business, store):
 
     if was_default:
         replacement = get_next_active_store_for_business(
-            business=business,
+            business=locked_business,
             excluded_store=locked_store,
             for_update=True,
         )

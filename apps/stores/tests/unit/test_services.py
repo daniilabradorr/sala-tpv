@@ -10,6 +10,7 @@ from apps.stores.services import (
     delete_store,
     set_default_store,
 )
+import apps.stores.services as store_services
 from apps.users.tests.factories import create_business, create_store
 
 
@@ -237,3 +238,139 @@ class StoreServicesTests(TestCase):
                 )
 
         self.assertIn("Desactívala", str(context.exception))
+
+    def test_set_default_store_locks_business_before_store(self):
+        call_order = []
+
+        original_lock_business = store_services._lock_business
+        original_get_locked_store = store_services._get_locked_store
+
+        def lock_business_side_effect(*args, **kwargs):
+            call_order.append("business")
+            return original_lock_business(*args, **kwargs)
+
+        def get_locked_store_side_effect(*args, **kwargs):
+            call_order.append("store")
+            return original_get_locked_store(*args, **kwargs)
+
+        with (
+            patch.object(
+                store_services,
+                "_lock_business",
+                side_effect=lock_business_side_effect,
+            ),
+            patch.object(
+                store_services,
+                "_get_locked_store",
+                side_effect=get_locked_store_side_effect,
+            ),
+        ):
+            set_default_store(
+                business=self.business,
+                store=self.other_active_store,
+            )
+
+        self.assertGreaterEqual(len(call_order), 2)
+        self.assertEqual(call_order[:2], ["business", "store"])
+
+    def test_activate_store_locks_business_before_store(self):
+        call_order = []
+
+        original_lock_business = store_services._lock_business
+        original_get_locked_store = store_services._get_locked_store
+
+        def lock_business_side_effect(*args, **kwargs):
+            call_order.append("business")
+            return original_lock_business(*args, **kwargs)
+
+        def get_locked_store_side_effect(*args, **kwargs):
+            call_order.append("store")
+            return original_get_locked_store(*args, **kwargs)
+
+        with (
+            patch.object(
+                store_services,
+                "_lock_business",
+                side_effect=lock_business_side_effect,
+            ),
+            patch.object(
+                store_services,
+                "_get_locked_store",
+                side_effect=get_locked_store_side_effect,
+            ),
+        ):
+            activate_store(
+                business=self.business,
+                store=self.store,
+            )
+
+        self.assertGreaterEqual(len(call_order), 2)
+        self.assertEqual(call_order[:2], ["business", "store"])
+
+    def test_deactivate_store_locks_business_before_store(self):
+        call_order = []
+
+        original_lock_business = store_services._lock_business
+        original_get_locked_store = store_services._get_locked_store
+
+        def lock_business_side_effect(*args, **kwargs):
+            call_order.append("business")
+            return original_lock_business(*args, **kwargs)
+
+        def get_locked_store_side_effect(*args, **kwargs):
+            call_order.append("store")
+            return original_get_locked_store(*args, **kwargs)
+
+        with (
+            patch.object(
+                store_services,
+                "_lock_business",
+                side_effect=lock_business_side_effect,
+            ),
+            patch.object(
+                store_services,
+                "_get_locked_store",
+                side_effect=get_locked_store_side_effect,
+            ),
+        ):
+            deactivate_store(
+                business=self.business,
+                store=self.store,
+            )
+
+        self.assertGreaterEqual(len(call_order), 2)
+        self.assertEqual(call_order[:2], ["business", "store"])
+
+    def test_delete_store_locks_business_before_store(self):
+        call_order = []
+
+        original_lock_business = store_services._lock_business
+        original_get_locked_store = store_services._get_locked_store
+
+        def lock_business_side_effect(*args, **kwargs):
+            call_order.append("business")
+            return original_lock_business(*args, **kwargs)
+
+        def get_locked_store_side_effect(*args, **kwargs):
+            call_order.append("store")
+            return original_get_locked_store(*args, **kwargs)
+
+        with (
+            patch.object(
+                store_services,
+                "_lock_business",
+                side_effect=lock_business_side_effect,
+            ),
+            patch.object(
+                store_services,
+                "_get_locked_store",
+                side_effect=get_locked_store_side_effect,
+            ),
+        ):
+            delete_store(
+                business=self.business,
+                store=self.store,
+            )
+
+        self.assertGreaterEqual(len(call_order), 2)
+        self.assertEqual(call_order[:2], ["business", "store"])

@@ -136,6 +136,7 @@ class StoresAdmin(admin.ModelAdmin):
         """
         readonly_fields = [
             "is_default",
+            "is_active",
             "created_at",
             "updated_at",
             "contact_phone",

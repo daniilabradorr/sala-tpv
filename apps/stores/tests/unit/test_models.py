@@ -107,19 +107,52 @@ class StoreModelTests(TestCase):
         first = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
+            code="CENTRO",
         )
 
         second = Store(
             business=self.business,
             name="Tienda Norte",
+            code="NORTE",
             is_default=True,
         )
 
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ValidationError) as context:
             second.full_clean()
+
+        non_field_errors = context.exception.error_dict.get("__all__", [])
+        self.assertTrue(
+            any(
+                "unique_default_store_per_business" in str(error)
+                for error in non_field_errors
+            )
+        )
 
         first.refresh_from_db()
         self.assertTrue(first.is_default)
+
+    def test_database_rejects_two_default_stores_for_same_business(self):
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+            code="CENTRO",
+        )
+
+        second = Store.objects.create(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Store.objects.filter(pk=second.pk).update(is_default=True)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+
+        self.assertTrue(first.is_default)
+        self.assertFalse(second.is_default)
 
     def test_inactive_store_cannot_be_default(self):
         store = Store(
