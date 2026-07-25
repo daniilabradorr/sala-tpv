@@ -294,17 +294,6 @@ class StoreSetDefaultView(ManagerOrOwnerRequiredMixin, View):
             business=request.user.business,
         )
 
-        if store.is_default:
-            messages.info(
-                request,
-                "Esta tienda ya es la predeterminada.",
-            )
-
-            return redirect(
-                "stores:store_detail",
-                pk=store.pk,
-            )
-
         try:
             store = set_default_store(
                 business=request.user.business,

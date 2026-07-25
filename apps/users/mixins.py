@@ -234,9 +234,6 @@ class BaseStorePermissionMixin(LoginRequiredMixin):
         """
         self.store = self.get_store()
 
-        if request.user.is_superuser:
-            return super().dispatch(request, *args, **kwargs)
-
         if self.permission_checker is None:
             raise PermissionDenied(
                 "No se ha definido el validador de permisos de tienda."

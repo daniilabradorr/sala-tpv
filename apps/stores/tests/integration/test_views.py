@@ -1,5 +1,8 @@
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
 
 from apps.stores.models import Store
 from apps.users.models import RoleChoices
@@ -238,6 +241,60 @@ class StoreViewsIntegrationTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertTrue(self.store.is_default)
+
+    def test_set_default_view_calls_service_even_if_store_is_already_default(self):
+        self.assertTrue(self.store.is_default)
+
+        self.login_as(self.owner)
+
+        with patch(
+            "apps.stores.views.set_default_store", return_value=self.store
+        ) as mock_service:
+            response = self.client.post(
+                reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+            )
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            fetch_redirect_response=False,
+        )
+        mock_service.assert_called_once()
+        self.assertEqual(mock_service.call_args.kwargs["business"], self.business)
+        self.assertEqual(mock_service.call_args.kwargs["store"].pk, self.store.pk)
+
+    def test_set_default_view_keeps_working_when_target_is_already_default(self):
+        self.assertTrue(self.store.is_default)
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+            follow=True,
+        )
+
+        self.store.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.store.is_default)
+        self.assertContains(
+            response,
+            f"'{self.store.name}' es ahora la tienda predeterminada.",
+        )
+
+    def test_set_default_view_shows_controlled_error_when_service_fails(self):
+        self.login_as(self.owner)
+
+        with patch(
+            "apps.stores.views.set_default_store",
+            side_effect=ValidationError("Error de validacion controlado."),
+        ):
+            response = self.client.post(
+                reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Error de validacion controlado.")
 
     def test_manager_can_set_default_store(self):
         second_store = create_store(
