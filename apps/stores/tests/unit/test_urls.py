@@ -9,6 +9,7 @@ from apps.stores.views import (
     StoreDeactivateView,
     StoreActivateView,
     StoreDeleteView,
+    StoreSetDefaultView,
 )
 
 
@@ -47,3 +48,8 @@ class StoreUrlsTests(SimpleTestCase):
         url = reverse("stores:store_delete", kwargs={"pk": 1})
 
         self.assertEqual(resolve(url).func.view_class, StoreDeleteView)
+
+    def test_store_set_default_url_resolves(self):
+        url = reverse("stores:store_set_default", kwargs={"pk": 1})
+
+        self.assertEqual(resolve(url).func.view_class, StoreSetDefaultView)

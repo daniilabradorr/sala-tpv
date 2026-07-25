@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.core.models import Business
@@ -30,15 +31,142 @@ class StoreModelTests(TestCase):
 
         self.assertEqual(str(store), "Tienda Centro")
 
-    def test_store_generates_code_automatically_when_empty(self):
+    def test_store_generates_code_automatically_when_missing(self):
         store = Store.objects.create(
             business=self.business,
             name="Tienda Centro",
-            code="",
         )
 
         self.assertTrue(store.code)
-        self.assertNotEqual(store.code, "")
+        self.assertEqual(store.code, "NEGOCIOTE-TIENDACEN")
+
+    def test_store_generates_unique_suffix_when_base_code_collides(self):
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+        )
+        second = Store.objects.create(
+            business=self.business,
+            name="Tienda-Centro",
+        )
+
+        self.assertNotEqual(first.code, second.code)
+        self.assertTrue(second.code.endswith("-2"))
+
+    def test_generated_code_never_exceeds_max_length(self):
+        store = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro Muy Larga Con Nombre Extendido",
+        )
+
+        self.assertLessEqual(len(store.code), 20)
+
+    def test_first_active_store_becomes_default(self):
+        store = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+        )
+
+        self.assertTrue(store.is_default)
+
+    def test_second_active_store_does_not_replace_existing_default(self):
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+        )
+        second = Store.objects.create(
+            business=self.business,
+            name="Tienda Norte",
+        )
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+
+        self.assertTrue(first.is_default)
+        self.assertFalse(second.is_default)
+
+    def test_each_business_can_have_its_own_default_store(self):
+        other_business = Business.objects.create(
+            name="Otro Negocio",
+            slug="otro-negocio",
+        )
+
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+        )
+        second = Store.objects.create(
+            business=other_business,
+            name="Tienda Centro",
+        )
+
+        self.assertTrue(first.is_default)
+        self.assertTrue(second.is_default)
+
+    def test_same_business_cannot_have_two_default_stores(self):
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+            code="CENTRO",
+        )
+
+        second = Store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+            is_default=True,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            second.full_clean()
+
+        non_field_errors = context.exception.error_dict.get("__all__", [])
+        self.assertTrue(
+            any(
+                "unique_default_store_per_business" in str(error)
+                for error in non_field_errors
+            )
+        )
+
+        first.refresh_from_db()
+        self.assertTrue(first.is_default)
+
+    def test_database_rejects_two_default_stores_for_same_business(self):
+        first = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+            code="CENTRO",
+        )
+
+        second = Store.objects.create(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Store.objects.filter(pk=second.pk).update(is_default=True)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+
+        self.assertTrue(first.is_default)
+        self.assertFalse(second.is_default)
+
+    def test_inactive_store_cannot_be_default(self):
+        store = Store(
+            business=self.business,
+            name="Tienda Centro",
+            code="CENTRO",
+            is_active=False,
+            is_default=True,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            store.full_clean()
+
+        self.assertIn("is_default", context.exception.message_dict)
 
     def test_store_normalizes_text_fields(self):
         store = Store(
@@ -65,6 +193,15 @@ class StoreModelTests(TestCase):
         self.assertEqual(store.country_code, "ES")
         self.assertEqual(store.phone_store, "600123123")
         self.assertEqual(store.email_store, "centro@test.com")
+
+    def test_store_normalizes_manual_code(self):
+        store = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+            code=" centro_1 ",
+        )
+
+        self.assertEqual(store.code, "CENTRO_1")
 
     def test_store_requires_business(self):
         store = Store(
@@ -178,6 +315,17 @@ class StoreModelTests(TestCase):
         store.full_clean()
 
         self.assertEqual(store.code, "CENTRO")
+
+    def test_database_rejects_empty_code_with_constraint(self):
+        store = Store.objects.create(
+            business=self.business,
+            name="Tienda Centro",
+            code="CENTRO",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Store.objects.filter(pk=store.pk).update(code="")
 
     def test_contact_phone_prefers_store_phone(self):
         store = Store.objects.create(

@@ -124,11 +124,17 @@ class Customer(TimeStampedModel):
 
     @property
     def has_national_tax_data(self):
-        return bool(self.tax_identifier)
+        return self.country_code == "ES" and bool(self.tax_identifier)
 
     @property
     def has_foreign_tax_data(self):
-        return bool(self.foreign_id_type and self.foreign_id)
+        return self.country_code != "ES" and bool(
+            self.foreign_id_type and self.foreign_id
+        )
+
+    @property
+    def has_complete_fiscal_identity(self):
+        return self.has_national_tax_data or self.has_foreign_tax_data
 
     def _normalize_fields(self):
         self.name = (self.name or "").strip()

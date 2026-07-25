@@ -8,6 +8,7 @@ from apps.stores.views import (
     StoreDeactivateView,
     StoreActivateView,
     StoreDeleteView,
+    StoreSetDefaultView,
 )
 
 app_name = "stores"
@@ -39,5 +40,10 @@ urlpatterns = [
         "stores/<int:pk>/delete/",
         StoreDeleteView.as_view(),
         name="store_delete",
+    ),
+    path(
+        "stores/<int:pk>/set-default/",
+        StoreSetDefaultView.as_view(),
+        name="store_set_default",
     ),
 ]

@@ -1,62 +1,79 @@
-from apps.users.models import UserStoreAccess
+from apps.users.models import RoleChoices, UserStoreAccess
 
 
 def is_authenticated_user(user):
-    return user is not None and user.is_authenticated and user.is_active
+    """Comprueba que exista un usuario autenticado y activo."""
+
+    return bool(
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_active", False)
+    )
 
 
 def is_owner(user):
-    return is_authenticated_user(user) and user.role == "owner"
+    """Indica si el usuario activo tiene rol owner."""
+
+    return is_authenticated_user(user) and user.role == RoleChoices.OWNER
 
 
 def is_manager(user):
-    return is_authenticated_user(user) and user.role == "manager"
+    """Indica si el usuario activo tiene rol manager."""
+
+    return is_authenticated_user(user) and user.role == RoleChoices.MANAGER
 
 
 def is_cashier(user):
-    return is_authenticated_user(user) and user.role == "cashier"
+    """Indica si el usuario activo tiene rol cashier."""
+
+    return is_authenticated_user(user) and user.role == RoleChoices.CASHIER
 
 
 def is_owner_or_manager(user):
+    """Indica si el usuario es owner o manager."""
+
     return is_owner(user) or is_manager(user)
 
 
 def belongs_to_business(user, business):
-    """
-    Comprueba si el usuario pertenece al negocio indicado.
-    """
+    """Comprueba si el usuario pertenece al negocio indicado."""
+
     if not is_authenticated_user(user):
+        return False
+
+    if business is None or not getattr(business, "pk", None):
         return False
 
     if user.is_superuser:
         return True
 
-    return user.business_id == business.id
+    return user.business_id == business.pk
 
 
 def can_access_store(user, store):
-    """
-    Comprueba si el usuario puede acceder a una tienda concreta.
+    """Comprueba si el usuario puede consultar una tienda concreta.
+
+    Una tienda inactiva puede seguir consultándose para ver detalle,
+    administrarla o reactivarla.
     """
 
     if not is_authenticated_user(user):
         return False
 
+    if store is None or not getattr(store, "pk", None):
+        return False
+
     if user.is_superuser:
         return True
 
-    # Seguridad multiempresa:
-    # un usuario nunca debería acceder a tiendas de otro negocio.
-    if user.business_id != store.business_id:
+    if not user.business_id or user.business_id != store.business_id:
         return False
 
-    # El owner puede acceder a todas las tiendas de su negocio.
-    if is_owner(user) and (user.business_id == store.business_id):
+    if is_owner(user):
         return True
 
-    # Manager y cashier necesitan un UserStoreAccess activo.
     return UserStoreAccess.objects.filter(
-        business=user.business,
+        business_id=user.business_id,
         user=user,
         store=store,
         is_active=True,
@@ -64,21 +81,22 @@ def can_access_store(user, store):
 
 
 def can_sell_in_store(user, store):
-    """
-    Comprueba si el usuario puede vender en una tienda.
-    """
+    """Comprueba si el usuario puede vender en una tienda activa."""
 
     if not can_access_store(user, store):
+        return False
+
+    if not store.is_active:
         return False
 
     if user.is_superuser:
         return True
 
-    if is_owner(user) and (user.business_id == store.business_id):
+    if is_owner(user):
         return True
 
     return UserStoreAccess.objects.filter(
-        business=user.business,
+        business_id=user.business_id,
         user=user,
         store=store,
         can_sell=True,
@@ -87,21 +105,22 @@ def can_sell_in_store(user, store):
 
 
 def can_open_cash_register(user, store):
-    """
-    Comprueba si el usuario puede abrir caja en una tienda.
-    """
+    """Comprueba si el usuario puede abrir caja en una tienda activa."""
 
     if not can_access_store(user, store):
+        return False
+
+    if not store.is_active:
         return False
 
     if user.is_superuser:
         return True
 
-    if is_owner(user) and (user.business_id == store.business_id):
+    if is_owner(user):
         return True
 
     return UserStoreAccess.objects.filter(
-        business=user.business,
+        business_id=user.business_id,
         user=user,
         store=store,
         can_open_cash=True,
@@ -110,21 +129,22 @@ def can_open_cash_register(user, store):
 
 
 def can_close_cash_register(user, store):
-    """
-    Comprueba si el usuario puede cerrar caja en una tienda.
-    """
+    """Comprueba si el usuario puede cerrar caja en una tienda activa."""
 
     if not can_access_store(user, store):
+        return False
+
+    if not store.is_active:
         return False
 
     if user.is_superuser:
         return True
 
-    if is_owner(user) and (user.business_id == store.business_id):
+    if is_owner(user):
         return True
 
     return UserStoreAccess.objects.filter(
-        business=user.business,
+        business_id=user.business_id,
         user=user,
         store=store,
         can_close_cash=True,
@@ -133,10 +153,7 @@ def can_close_cash_register(user, store):
 
 
 def can_manage_users(user):
-    """
-    Permiso para gestionar usuarios internos del negocio.
-    Normalmente owner y manager.
-    """
+    """Owner y manager pueden gestionar usuarios."""
 
     if not is_authenticated_user(user):
         return False
@@ -148,10 +165,7 @@ def can_manage_users(user):
 
 
 def can_manage_business_settings(user):
-    """
-    Permiso para tocar configuración general del negocio.
-    Mejor limitarlo a owner.
-    """
+    """Solo owner puede modificar la configuración del negocio."""
 
     if not is_authenticated_user(user):
         return False
@@ -163,10 +177,7 @@ def can_manage_business_settings(user):
 
 
 def can_view_reports(user):
-    """
-    Permiso para ver reportes.
-    Normalmente owner y manager.
-    """
+    """Owner y manager pueden consultar reportes."""
 
     if not is_authenticated_user(user):
         return False
@@ -178,10 +189,7 @@ def can_view_reports(user):
 
 
 def can_perform_sensitive_action(user):
-    """
-    Permiso base para acciones sensibles.
-    El PIN se validará aparte.
-    """
+    """Permiso base para acciones sensibles."""
 
     if not is_authenticated_user(user):
         return False
