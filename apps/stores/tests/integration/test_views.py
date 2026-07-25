@@ -155,3 +155,102 @@ class StoreViewsIntegrationTests(TestCase):
         self.assertNotEqual(new_store.business, self.other_business)
         self.assertTrue(new_store.code)
         self.assertTrue(new_store.is_active)
+
+    def test_owner_can_deactivate_store(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_deactivate", kwargs={"pk": self.store.pk}),
+        )
+
+        self.store.refresh_from_db()
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(self.store.is_active)
+
+    def test_owner_can_activate_store(self):
+        self.store.is_active = False
+        self.store.save(update_fields=["is_active", "updated_at"])
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_activate", kwargs={"pk": self.store.pk}),
+        )
+
+        self.store.refresh_from_db()
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(self.store.is_active)
+
+    def test_owner_can_set_default_store(self):
+        self.store.is_default = False
+        self.store.save(update_fields=["is_default", "updated_at"])
+
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+        )
+
+        self.store.refresh_from_db()
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(self.store.is_default)
+
+    def test_owner_cannot_set_default_when_store_is_inactive(self):
+        self.store.is_active = False
+        self.store.save(update_fields=["is_active", "updated_at"])
+
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+            follow=True,
+        )
+
+        self.store.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.store.is_default)
+
+    def test_owner_can_delete_store(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_delete", kwargs={"pk": self.store.pk}),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_list"),
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(Store.objects.filter(pk=self.store.pk).exists())
+
+    def test_manager_cannot_delete_store_from_other_business(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("stores:store_delete", kwargs={"pk": self.other_store.pk}),
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_cashier_cannot_access_store_create(self):
+        self.login_as(self.cashier)
+
+        response = self.client.get(reverse("stores:store_create"))
+
+        self.assertEqual(response.status_code, 403)

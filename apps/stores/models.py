@@ -3,6 +3,7 @@ import re
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils.text import slugify
+from django.db.models import Q
 
 from apps.core.models import Business, TimeStampedModel
 
@@ -16,8 +17,8 @@ class Store(TimeStampedModel):
         business (ForeignKey): Relación con el modelo Business.
         name (CharField): Nombre de la tienda.
         code (CharField): Código único de la tienda dentro del negocio.
-        adress_line_1 (CharField): Dirección principal de la tienda.
-        adress_line_2 (CharField): Dirección secundaria de la tienda.
+        address_line_1 (CharField): Dirección principal de la tienda.
+        address_line_2 (CharField): Dirección secundaria de la tienda.
         postal_code (CharField): Código postal de la tienda.
         city (CharField): Ciudad donde se encuentra la tienda.
         province (CharField): Provincia donde se encuentra la tienda.
@@ -59,16 +60,17 @@ class Store(TimeStampedModel):
         #
         # Más adelante, cuando stores esté bien implementado, este campo debería
         # ser obligatorio.
-        blank=True,
         # TEMPORAL:
         # Este default evita que makemigrations te pida:
         # "¿Qué valor pongo para code en las filas antiguas?"
         #
         # Django necesita un valor para rellenar las tiendas que ya existían
         # según las migraciones antiguas.
-        default="",
     )
-
+    is_default = models.BooleanField(
+        "Tienda predeterminada",
+        default=False,
+    )
     address_line_1 = models.CharField("Dirección Principal", max_length=150, blank=True)
     address_line_2 = models.CharField(
         "Dirección Secundaria", max_length=150, blank=True
@@ -135,6 +137,14 @@ class Store(TimeStampedModel):
                 fields=["business", "name"],
                 name="unique_store_name_per_business",
             ),
+            models.CheckConstraint(
+                check=Q(code__isnull=False) & ~Q(code=""),
+                name="store_code_not_null_or_empty",
+            ),
+            models.CheckConstraint(
+                check=Q(is_default=False) | Q(is_active=True),
+                name="store_default_requires_active",
+            ),
         ]
 
         indexes = [
@@ -168,6 +178,45 @@ class Store(TimeStampedModel):
             return f"{self.name} ({self.code})"
 
         return self.name
+
+    def generate_unique_code(self) -> str:
+        """
+        Genera un código único para la tienda basado en el nombre de la tienda y el negocio.
+        Si el código generado ya existe, se añade un sufijo numérico para garantizar la unicidad.
+
+        Returns:
+            str: Código único generado para la tienda.
+        """
+        # primero limpio los slugs de business y de store
+        b_slug = slugify(self.business.name)[:10].upper().replace("-", "")
+        s_slug = slugify(self.name)[:10].upper().replace("-", "")
+
+        base_code = f"{b_slug}-{s_slug}"
+
+        if len(base_code) > 20:
+            base_code = base_code[:20]
+
+        # ahora lo que tengo que hacer es verficar que no ahay ninguno como este, si lo hay le pongo un sufijo numerico
+        candidate_code = base_code
+        counter = 1
+
+        queryset = Store.objects.filter(business=self.business, code=base_code)
+
+        # excluyo la instacnia actual por si es una actualizción
+        if self.pk:
+            queryset = queryset.exclude(pk=self.pk)
+
+        while queryset.exists():
+            counter += 1
+            suffix = f"-{counter}"
+            # me aseguro que la base y el sufijo no superen los 20 caracteres
+            max_base_len = 20 - len(suffix)
+            candidate_code = f"{base_code[:max_base_len]}{suffix}"
+
+            queryset = Store.objects.filter(business=self.business, code=candidate_code)
+            if self.pk:
+                queryset = queryset.exclude(pk=self.pk)
+        return candidate_code
 
     def clean(self):
         """
@@ -229,9 +278,7 @@ class Store(TimeStampedModel):
 
         # Generar código automáticamente si está vacío
         if not self.code and self.name and self.business_id:
-            business_slug = slugify(self.business.name)[:4].upper()
-            store_slug = slugify(self.name)[:4].upper()
-            self.code = f"{business_slug}-{store_slug}"
+            self.code = self.generate_unique_code()
 
         if not self.name:
             errors["name"] = "El nombre de la tienda es obligatorio."

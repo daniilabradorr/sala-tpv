@@ -30,15 +30,17 @@ class StoreModelTests(TestCase):
 
         self.assertEqual(str(store), "Tienda Centro")
 
-    def test_store_generates_code_automatically_when_empty(self):
-        store = Store.objects.create(
+    def test_store_requires_code_when_created_directly(self):
+        store = Store(
             business=self.business,
             name="Tienda Centro",
             code="",
         )
 
-        self.assertTrue(store.code)
-        self.assertNotEqual(store.code, "")
+        with self.assertRaises(ValidationError) as context:
+            store.full_clean()
+
+        self.assertIn("code", context.exception.message_dict)
 
     def test_store_normalizes_text_fields(self):
         store = Store(
