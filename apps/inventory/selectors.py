@@ -77,7 +77,8 @@ def get_inventory_dashboard_data(
             available__gt=0,
         ).count(),
         "low_stock_products": inventory_items.filter(
-            current_stock__lte=F("minimum_stock"),
+            available__gt=0,
+            available__lte=F("minimum_stock"),
         ).count(),
         "out_of_stock_products": inventory_items.filter(
             available__lte=0,
@@ -138,7 +139,8 @@ def get_inventory_items_for_business(business, filters=None):
 
     if low_stock:
         queryset = queryset.filter(
-            current_stock__lte=F("minimum_stock"),
+            available__gt=0,
+            available__lte=F("minimum_stock"),
         )
 
     if out_of_stock:
@@ -173,7 +175,13 @@ def get_low_stock_items(business):
         InventoryItem.objects.filter(
             business=business,
             is_active=True,
-            current_stock__lte=F("minimum_stock"),
+        )
+        .annotate(
+            available=F("current_stock") - F("reserved_stock"),
+        )
+        .filter(
+            available__gt=0,
+            available__lte=F("minimum_stock"),
         )
         .select_related(
             "store",

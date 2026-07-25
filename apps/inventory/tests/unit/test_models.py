@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.inventory.models import StockAdjustment, StockMovement
+from apps.inventory.models import StockAdjustment, StockAdjustmentLine, StockMovement
 from apps.inventory.tests.factories import (
     create_business,
     create_inventory_item,
@@ -49,7 +49,7 @@ class InventoryModelsTests(TestCase):
         self.assertEqual(item.available_stock, Decimal("7.000"))
 
     def test_inventory_item_needs_restock_property(self):
-        """needs_restock debe ser True cuando current_stock <= minimum_stock."""
+        """needs_restock debe ser True cuando available_stock <= minimum_stock."""
         item = create_inventory_item(
             business=self.business,
             store=self.store,
@@ -125,3 +125,66 @@ class InventoryModelsTests(TestCase):
         self.assertFalse(incoming.is_outgoing)
         self.assertFalse(outgoing.is_incoming)
         self.assertTrue(outgoing.is_outgoing)
+
+    def test_inventory_item_needs_restock_uses_available_stock(self):
+        """needs_restock debe usar current_stock - reserved_stock."""
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("10.000"),
+            reserved_stock=Decimal("8.000"),
+            minimum_stock=Decimal("3.000"),
+        )
+
+        self.assertEqual(item.available_stock, Decimal("2.000"))
+        self.assertTrue(item.needs_restock)
+
+    def test_stock_adjustment_line_allows_negative_system_stock(self):
+        """Ajuste desde stock negativo debe calcular difference correctamente."""
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("-3.000"),
+        )
+        adjustment = StockAdjustment.objects.create(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            created_by=self.user,
+        )
+
+        line = StockAdjustmentLine.objects.create(
+            adjustment=adjustment,
+            inventory_item=item,
+            product=self.product,
+            system_stock=Decimal("-3.000"),
+            counted_stock=Decimal("2.000"),
+        )
+
+        self.assertEqual(line.difference, Decimal("5.000"))
+
+    def test_stock_adjustment_line_rejects_negative_counted_stock(self):
+        """El stock contado físicamente no puede ser negativo."""
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("-3.000"),
+        )
+        adjustment = StockAdjustment.objects.create(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            created_by=self.user,
+        )
+
+        with self.assertRaises(ValidationError):
+            StockAdjustmentLine.objects.create(
+                adjustment=adjustment,
+                inventory_item=item,
+                product=self.product,
+                system_stock=Decimal("-3.000"),
+                counted_stock=Decimal("-1.000"),
+            )

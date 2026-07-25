@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Clientes{% endblock %}
+
+{% block content %}
+<section class="card">
+    <header>
+        <h1>Clientes</h1>
+        <a class="btn" href="{% url 'customers:customer_create' %}">Nuevo cliente</a>
+    </header>
+
+    {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        </ul>
+    {% endif %}
+
+    <form method="get" class="filters">
+        <label for="q">Buscar</label>
+        <input id="q" class="form-control" name="q" value="{{ query }}" placeholder="Nombre, NIF, teléfono o email">
+
+        <label for="status">Estado</label>
+        <select id="status" class="form-select" name="status">
+            <option value="active" {% if status == "active" %}selected{% endif %}>Activos</option>
+            <option value="inactive" {% if status == "inactive" %}selected{% endif %}>Inactivos</option>
+            <option value="all" {% if status == "all" %}selected{% endif %}>Todos</option>
+        </select>
+
+        <label for="customer_type">Tipo</label>
+        <select id="customer_type" class="form-select" name="customer_type">
+            <option value="">Todos</option>
+            {% for value, label in customer_type_choices %}
+                <option value="{{ value }}" {% if customer_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <button class="btn" type="submit">Filtrar</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr><th>Nombre</th><th>Tipo</th><th>Estado</th><th>Saldo</th></tr>
+        </thead>
+        <tbody>
+            {% for customer in customers %}
+                <tr>
+                    <td><a href="{% url 'customers:customer_detail' customer.pk %}">{{ customer.name }}</a></td>
+                    <td>{{ customer.get_customer_type_display }}</td>
+                    <td>{% if customer.is_active %}Activo{% else %}Inactivo{% endif %}</td>
+                    <td>{% if customer.account %}{{ customer.account.balance }}{% else %}—{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4">No hay clientes.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_paginated %}
+        <nav aria-label="Paginación">
+            {% if page_obj.has_previous %}
+                <a href="?q={{ query }}&status={{ status }}&customer_type={{ customer_type }}&page={{ page_obj.previous_page_number }}">Anterior</a>
+            {% endif %}
+            <span>Página {{ page_obj.number }} de {{ paginator.num_pages }}</span>
+            {% if page_obj.has_next %}
+                <a href="?q={{ query }}&status={{ status }}&customer_type={{ customer_type }}&page={{ page_obj.next_page_number }}">Siguiente</a>
+            {% endif %}
+        </nav>
+    {% endif %}
+</section>
+{% endblock %}
