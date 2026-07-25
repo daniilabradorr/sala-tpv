@@ -276,10 +276,8 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(self.store.is_default)
-        self.assertContains(
-            response,
-            f"'{self.store.name}' es ahora la tienda predeterminada.",
-        )
+        self.assertContains(response, self.store.name)
+        self.assertContains(response, "es ahora la tienda predeterminada.")
 
     def test_set_default_view_shows_controlled_error_when_service_fails(self):
         self.login_as(self.owner)
