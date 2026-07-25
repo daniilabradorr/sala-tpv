@@ -36,6 +36,27 @@ def get_store_for_business(*, business, store, for_update=False):
     ).first()
 
 
+def get_stores_for_business(*, business, for_update=False, only_active=None):
+    """Devuelve tiendas del negocio para casos de uso de dominio."""
+
+    if business is None or not getattr(business, "pk", None):
+        return Store.objects.none()
+
+    queryset = Store.objects.filter(
+        business_id=business.pk,
+    )
+
+    if only_active is True:
+        queryset = queryset.filter(is_active=True)
+    elif only_active is False:
+        queryset = queryset.filter(is_active=False)
+
+    if for_update:
+        queryset = queryset.select_for_update()
+
+    return queryset.order_by("name", "pk")
+
+
 def get_next_active_store_for_business(
     *, business, excluded_store=None, for_update=False
 ):
@@ -48,6 +69,31 @@ def get_next_active_store_for_business(
         business_id=business.pk,
         is_active=True,
     )
+
+    if excluded_store is not None and getattr(excluded_store, "pk", None):
+        queryset = queryset.exclude(pk=excluded_store.pk)
+
+    if for_update:
+        queryset = queryset.select_for_update()
+
+    return queryset.order_by("name", "pk").first()
+
+
+def get_default_store_for_business(
+    *, business, for_update=False, only_active=False, excluded_store=None
+):
+    """Devuelve la tienda predeterminada del negocio o None."""
+
+    if business is None or not getattr(business, "pk", None):
+        return None
+
+    queryset = Store.objects.filter(
+        business_id=business.pk,
+        is_default=True,
+    )
+
+    if only_active:
+        queryset = queryset.filter(is_active=True)
 
     if excluded_store is not None and getattr(excluded_store, "pk", None):
         queryset = queryset.exclude(pk=excluded_store.pk)

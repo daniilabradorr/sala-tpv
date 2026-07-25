@@ -1,6 +1,6 @@
 from django.test import TestCase
 
-from apps.stores.helpers import (
+from apps.users.helpers import (
     belongs_to_business,
     can_access_store,
     can_close_cash_register,
@@ -70,6 +70,16 @@ class StoreHelpersTests(TestCase):
             is_active=True,
         )
 
+    def test_inactive_store_can_be_consulted_with_access(self):
+        create_store_access(
+            business=self.business,
+            user=self.manager,
+            store=self.inactive_store,
+            is_active=True,
+        )
+
+        self.assertTrue(can_access_store(self.manager, self.inactive_store))
+
     def test_role_helpers(self):
         self.assertTrue(is_owner(self.owner))
         self.assertFalse(is_owner(self.manager))
@@ -126,6 +136,24 @@ class StoreHelpersTests(TestCase):
 
         self.assertTrue(can_sell_in_store(self.cashier, self.store))
         self.assertFalse(can_sell_in_store(self.cashier, self.inactive_store))
+
+    def test_owner_cannot_sell_or_operate_cash_in_inactive_store(self):
+        self.assertFalse(can_sell_in_store(self.owner, self.inactive_store))
+        self.assertFalse(can_open_cash_register(self.owner, self.inactive_store))
+        self.assertFalse(can_close_cash_register(self.owner, self.inactive_store))
+
+    def test_superuser_cannot_sell_or_operate_cash_in_inactive_store(self):
+        superuser = create_user(
+            business=self.business,
+            email="root@helpers.com",
+            role=RoleChoices.OWNER,
+            is_superuser=True,
+            is_staff=True,
+        )
+
+        self.assertFalse(can_sell_in_store(superuser, self.inactive_store))
+        self.assertFalse(can_open_cash_register(superuser, self.inactive_store))
+        self.assertFalse(can_close_cash_register(superuser, self.inactive_store))
 
     def test_open_close_cash_permissions(self):
         create_store_access(

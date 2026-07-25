@@ -50,6 +50,13 @@ class UserHelpersTests(TestCase):
             code="OTRA",
         )
 
+        self.inactive_store = create_store(
+            business=self.business,
+            name="Tienda Inactiva",
+            code="INACTIVA",
+            is_active=False,
+        )
+
         self.owner = create_user(
             business=self.business,
             email="owner@test.com",
@@ -190,6 +197,16 @@ class UserHelpersTests(TestCase):
 
         self.assertFalse(can_access_store(self.manager, self.store))
 
+    def test_inactive_store_can_be_consulted_when_access_exists(self):
+        create_store_access(
+            business=self.business,
+            user=self.manager,
+            store=self.inactive_store,
+            is_active=True,
+        )
+
+        self.assertTrue(can_access_store(self.manager, self.inactive_store))
+
     # ============================================================
     # PERMISOS DE TIENDA: VENDER / ABRIR CAJA / CERRAR CAJA
     # ============================================================
@@ -259,6 +276,44 @@ class UserHelpersTests(TestCase):
         self.assertTrue(can_sell_in_store(self.superuser, self.other_store))
         self.assertTrue(can_open_cash_register(self.superuser, self.other_store))
         self.assertTrue(can_close_cash_register(self.superuser, self.other_store))
+
+    def test_owner_cannot_sell_open_or_close_cash_in_inactive_store(self):
+        self.assertFalse(can_sell_in_store(self.owner, self.inactive_store))
+        self.assertFalse(can_open_cash_register(self.owner, self.inactive_store))
+        self.assertFalse(can_close_cash_register(self.owner, self.inactive_store))
+
+    def test_manager_and_cashier_cannot_sell_open_or_close_cash_in_inactive_store(self):
+        create_store_access(
+            business=self.business,
+            user=self.manager,
+            store=self.inactive_store,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=True,
+            is_active=True,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.cashier,
+            store=self.inactive_store,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=True,
+            is_active=True,
+        )
+
+        self.assertFalse(can_sell_in_store(self.manager, self.inactive_store))
+        self.assertFalse(can_open_cash_register(self.manager, self.inactive_store))
+        self.assertFalse(can_close_cash_register(self.manager, self.inactive_store))
+
+        self.assertFalse(can_sell_in_store(self.cashier, self.inactive_store))
+        self.assertFalse(can_open_cash_register(self.cashier, self.inactive_store))
+        self.assertFalse(can_close_cash_register(self.cashier, self.inactive_store))
+
+    def test_superuser_cannot_sell_open_or_close_cash_in_inactive_store(self):
+        self.assertFalse(can_sell_in_store(self.superuser, self.inactive_store))
+        self.assertFalse(can_open_cash_register(self.superuser, self.inactive_store))
+        self.assertFalse(can_close_cash_register(self.superuser, self.inactive_store))
 
     # ============================================================
     # PERMISOS GLOBALES

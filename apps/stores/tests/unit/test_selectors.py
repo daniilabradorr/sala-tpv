@@ -1,11 +1,13 @@
 from django.test import TestCase
 
 from apps.stores.selectors import (
+    get_default_store_for_business,
     get_default_store_for_user,
     get_next_active_store_for_business,
     get_operational_store_for_user,
     get_store_for_business,
     get_store_access_for_user,
+    get_stores_for_business,
     get_stores_available_for_user,
 )
 from apps.users.models import RoleChoices
@@ -244,3 +246,22 @@ class StoreSelectorsTests(TestCase):
         )
 
         self.assertEqual(selected, self.secondary_store)
+
+    def test_get_default_store_for_business_returns_default(self):
+        selected = get_default_store_for_business(
+            business=self.business,
+        )
+
+        self.assertEqual(selected, self.default_store)
+
+    def test_get_stores_for_business_returns_only_business_stores(self):
+        stores = list(
+            get_stores_for_business(
+                business=self.business,
+            )
+        )
+
+        self.assertEqual(
+            stores,
+            [self.default_store, self.secondary_store, self.inactive_store],
+        )

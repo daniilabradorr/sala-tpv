@@ -4,6 +4,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from django.db.models import Q
+from django.db import transaction
 
 from apps.core.models import Business, TimeStampedModel
 
@@ -54,18 +55,6 @@ class Store(TimeStampedModel):
     code = models.CharField(
         "Código de tienda",
         max_length=20,
-        # TEMPORAL:
-        # Permitimos blank=True porque estamos añadiendo el campo a un modelo
-        # que ya existía.
-        #
-        # Más adelante, cuando stores esté bien implementado, este campo debería
-        # ser obligatorio.
-        # TEMPORAL:
-        # Este default evita que makemigrations te pida:
-        # "¿Qué valor pongo para code en las filas antiguas?"
-        #
-        # Django necesita un valor para rellenar las tiendas que ya existían
-        # según las migraciones antiguas.
     )
     is_default = models.BooleanField(
         "Tienda predeterminada",
@@ -89,11 +78,8 @@ class Store(TimeStampedModel):
     is_active = models.BooleanField(
         "Activa",
         blank=False,
-        # pongo default True para que las tiendas antiguas no se queden inactivas al migrar
         default=True,
-        # deberia de ser unica  pero no obligatoriamente, ya que puede haber tiendas inactivas con el mismo nombre y codigo
     )
-    # no pongo created_at y updated_at porque hereda de TimeStampedModel
 
     @property
     def contact_phone(self):
@@ -137,12 +123,17 @@ class Store(TimeStampedModel):
                 fields=["business", "name"],
                 name="unique_store_name_per_business",
             ),
+            models.UniqueConstraint(
+                fields=["business"],
+                condition=Q(is_default=True),
+                name="unique_default_store_per_business",
+            ),
             models.CheckConstraint(
-                check=Q(code__isnull=False) & ~Q(code=""),
+                condition=Q(code__isnull=False) & ~Q(code=""),
                 name="store_code_not_null_or_empty",
             ),
             models.CheckConstraint(
-                check=Q(is_default=False) | Q(is_active=True),
+                condition=Q(is_default=False) | Q(is_active=True),
                 name="store_default_requires_active",
             ),
         ]
@@ -179,6 +170,28 @@ class Store(TimeStampedModel):
 
         return self.name
 
+    def _build_base_code(self) -> str:
+        """Genera la base del código antes de aplicar unicidad."""
+
+        business_name = getattr(self.business, "name", "") or ""
+        store_name = self.name or ""
+
+        b_slug = slugify(business_name)[:10].upper().replace("-", "")
+        s_slug = slugify(store_name)[:10].upper().replace("-", "")
+
+        if not b_slug:
+            b_slug = "BUSINESS"
+
+        if not s_slug:
+            s_slug = "STORE"
+
+        base_code = f"{b_slug}-{s_slug}"[:20]
+
+        if base_code.endswith("-"):
+            base_code = base_code[:-1]
+
+        return base_code or "STORE"
+
     def generate_unique_code(self) -> str:
         """
         Genera un código único para la tienda basado en el nombre de la tienda y el negocio.
@@ -187,57 +200,40 @@ class Store(TimeStampedModel):
         Returns:
             str: Código único generado para la tienda.
         """
-        # primero limpio los slugs de business y de store
-        b_slug = slugify(self.business.name)[:10].upper().replace("-", "")
-        s_slug = slugify(self.name)[:10].upper().replace("-", "")
-
-        base_code = f"{b_slug}-{s_slug}"
-
-        if len(base_code) > 20:
-            base_code = base_code[:20]
-
-        # ahora lo que tengo que hacer es verficar que no ahay ninguno como este, si lo hay le pongo un sufijo numerico
+        base_code = self._build_base_code()
         candidate_code = base_code
-        counter = 1
+        counter = 2
 
-        queryset = Store.objects.filter(business=self.business, code=base_code)
+        queryset = Store.objects.filter(
+            business_id=self.business_id,
+            code=candidate_code,
+        )
 
-        # excluyo la instacnia actual por si es una actualizción
         if self.pk:
             queryset = queryset.exclude(pk=self.pk)
 
         while queryset.exists():
-            counter += 1
             suffix = f"-{counter}"
-            # me aseguro que la base y el sufijo no superen los 20 caracteres
             max_base_len = 20 - len(suffix)
             candidate_code = f"{base_code[:max_base_len]}{suffix}"
 
-            queryset = Store.objects.filter(business=self.business, code=candidate_code)
+            queryset = Store.objects.filter(
+                business_id=self.business_id,
+                code=candidate_code,
+            )
+
             if self.pk:
                 queryset = queryset.exclude(pk=self.pk)
+
+            counter += 1
+
         return candidate_code
 
     def clean(self):
         """
         Validaciones del modelo.
 
-        IMPORTANTE:
-        En esta versión puente NO obligamos todavía a que business exista.
-
-        ¿Por qué?
-        ---------
-        Porque hemos dejado business con null=True temporalmente para poder hacer
-        la migración sin que Django pida un default.
-
-        En la lógica real del TPV, business será obligatorio más adelante.
-
-        De momento validamos solo:
-        - normalizar code a mayúsculas
-        - que name exista
-
-        El campo name ya es obligatorio por CharField(blank=False), pero dejamos
-        la validación explícita para que el error sea más claro.
+        Normaliza entradas y valida reglas de dominio.
         """
         super().clean()
 
@@ -246,7 +242,6 @@ class Store(TimeStampedModel):
         if self.name:
             self.name = self.name.strip()
 
-        # normalizo code a mayúsculas y elimino espacios
         if self.code:
             self.code = self.code.strip().upper()
 
@@ -276,8 +271,7 @@ class Store(TimeStampedModel):
         if self.email_store:
             self.email_store = self.email_store.strip().lower()
 
-        # Generar código automáticamente si está vacío
-        if not self.code and self.name and self.business_id:
+        if self.business_id and self.name and not self.code:
             self.code = self.generate_unique_code()
 
         if not self.name:
@@ -289,10 +283,18 @@ class Store(TimeStampedModel):
         if not self.code:
             errors["code"] = "El código de tienda es obligatorio."
 
+        if self.code and len(self.code) > 20:
+            errors["code"] = "El código de tienda no puede superar 20 caracteres."
+
         if self.code and not re.fullmatch(r"[A-Z0-9_-]+", self.code):
             errors["code"] = (
                 "El código de tienda solo puede contener letras mayúsculas, "
                 "números, guiones y guiones bajos."
+            )
+
+        if self.is_default and not self.is_active:
+            errors["is_default"] = (
+                "No se puede marcar como predeterminada una tienda inactiva."
             )
 
         if not self.country_code:
@@ -321,13 +323,45 @@ class Store(TimeStampedModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        """
-        Ejecutamos full_clean antes de guardar.
+        """Guarda la tienda preservando invariantes de código y predeterminada."""
 
-        El código se genera automáticamente dentro de clean() si no existe.
+        update_fields = kwargs.get("update_fields")
 
-        Esto mantiene el mismo estilo que ya tienes en otros modelos del proyecto,
-        como CustomUser y UserStoreAccess.
-        """
+        if self.business_id and self.name and not self.code:
+            self.code = self.generate_unique_code()
+
+            if update_fields is not None:
+                update_fields = set(update_fields)
+                update_fields.add("code")
+
+        if not self.is_active and self.is_default:
+            self.is_default = False
+
+            if update_fields is not None:
+                update_fields = set(update_fields)
+                update_fields.add("is_default")
+
+        if self.business_id and self.is_active and not self.is_default:
+            default_exists = Store.objects.filter(
+                business_id=self.business_id,
+                is_default=True,
+                is_active=True,
+            )
+
+            if self.pk:
+                default_exists = default_exists.exclude(pk=self.pk)
+
+            if not default_exists.exists():
+                self.is_default = True
+
+                if update_fields is not None:
+                    update_fields = set(update_fields)
+                    update_fields.add("is_default")
+
         self.full_clean()
-        return super().save(*args, **kwargs)
+
+        if update_fields is not None:
+            kwargs["update_fields"] = list(update_fields)
+
+        with transaction.atomic():
+            return super().save(*args, **kwargs)

@@ -25,7 +25,7 @@ TEST_TEMPLATES = [
                     "django.template.loaders.locmem.Loader",
                     {
                         "stores/list_stores.html": "{% for store in stores %}{{ store.name }} {% endfor %}",
-                        "stores/store_detail.html": "{{ store.name }}",
+                        "stores/store_detail.html": "{% for message in messages %}{{ message }} {% endfor %}{{ store.name }}",
                         "stores/store_create.html": "{{ form.errors }}",
                         "stores/store_update.html": "{{ form.errors }}",
                         "stores/store_confirm_delete.html": "{{ store.name }}",
@@ -172,6 +172,36 @@ class StoreViewsIntegrationTests(TestCase):
         )
         self.assertFalse(self.store.is_active)
 
+    def test_deactivating_default_store_assigns_replacement(self):
+        second_store = create_store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+            is_active=True,
+        )
+
+        self.store.is_default = True
+        self.store.save(update_fields=["is_default", "updated_at"])
+
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_deactivate", kwargs={"pk": self.store.pk}),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            fetch_redirect_response=False,
+        )
+
+        self.store.refresh_from_db()
+        second_store.refresh_from_db()
+
+        self.assertFalse(self.store.is_default)
+        self.assertFalse(self.store.is_active)
+        self.assertTrue(second_store.is_default)
+
     def test_owner_can_activate_store(self):
         self.store.is_active = False
         self.store.save(update_fields=["is_active", "updated_at"])
@@ -209,6 +239,49 @@ class StoreViewsIntegrationTests(TestCase):
         )
         self.assertTrue(self.store.is_default)
 
+    def test_manager_can_set_default_store(self):
+        second_store = create_store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+            is_active=True,
+        )
+
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": second_store.pk}),
+        )
+
+        second_store.refresh_from_db()
+        self.store.refresh_from_db()
+
+        self.assertRedirects(
+            response,
+            reverse("stores:store_detail", kwargs={"pk": second_store.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(second_store.is_default)
+        self.assertFalse(self.store.is_default)
+
+    def test_cashier_cannot_set_default_store(self):
+        self.login_as(self.cashier)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": self.store.pk}),
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_cannot_set_default_store_from_other_business(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": self.other_store.pk}),
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_owner_cannot_set_default_when_store_is_inactive(self):
         self.store.is_active = False
         self.store.save(update_fields=["is_active", "updated_at"])
@@ -224,6 +297,10 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self.store.is_default)
+        self.assertContains(
+            response,
+            "No se puede marcar como predeterminada una tienda inactiva.",
+        )
 
     def test_owner_can_delete_store(self):
         self.login_as(self.owner)
@@ -254,3 +331,22 @@ class StoreViewsIntegrationTests(TestCase):
         response = self.client.get(reverse("stores:store_create"))
 
         self.assertEqual(response.status_code, 403)
+
+    def test_store_detail_view_works_with_pk_kwarg(self):
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tienda Centro")
+
+    def test_manager_cannot_modify_store_from_other_business(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("stores:store_deactivate", kwargs={"pk": self.other_store.pk}),
+        )
+
+        self.assertEqual(response.status_code, 404)

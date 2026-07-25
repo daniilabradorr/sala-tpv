@@ -215,19 +215,47 @@ class CustomerModelTests(TestCase):
             create_customer(business=self.business, name="Ana").fiscal_name, "Ana"
         )
 
-    def test_has_national_tax_data(self):
-        self.assertTrue(
-            create_customer(
-                business=self.business, tax_identifier="B1"
-            ).has_national_tax_data
+    def test_es_customer_with_tax_identifier_has_complete_national_identity(self):
+        customer = create_customer(
+            business=self.business,
+            country_code="ES",
+            tax_identifier="B1",
         )
+        self.assertTrue(customer.has_national_tax_data)
+        self.assertFalse(customer.has_foreign_tax_data)
+        self.assertTrue(customer.has_complete_fiscal_identity)
 
-    def test_has_foreign_tax_data(self):
-        self.assertTrue(
-            create_customer(
-                business=self.business, foreign_id_type="PASS", foreign_id="X1"
-            ).has_foreign_tax_data
+    def test_es_customer_with_only_foreign_id_is_not_fiscally_complete(self):
+        customer = create_customer(
+            business=self.business,
+            country_code="ES",
+            foreign_id_type="PASS",
+            foreign_id="X1",
         )
+        self.assertFalse(customer.has_national_tax_data)
+        self.assertFalse(customer.has_foreign_tax_data)
+        self.assertFalse(customer.has_complete_fiscal_identity)
+
+    def test_foreign_customer_with_foreign_id_has_complete_foreign_identity(self):
+        customer = create_customer(
+            business=self.business,
+            country_code="FR",
+            foreign_id_type="PASS",
+            foreign_id="X1",
+        )
+        self.assertFalse(customer.has_national_tax_data)
+        self.assertTrue(customer.has_foreign_tax_data)
+        self.assertTrue(customer.has_complete_fiscal_identity)
+
+    def test_foreign_customer_with_only_national_tax_identifier_is_not_complete(self):
+        customer = create_customer(
+            business=self.business,
+            country_code="FR",
+            tax_identifier="B1",
+        )
+        self.assertFalse(customer.has_national_tax_data)
+        self.assertFalse(customer.has_foreign_tax_data)
+        self.assertFalse(customer.has_complete_fiscal_identity)
 
 
 class CustomerAccountModelTests(TestCase):
