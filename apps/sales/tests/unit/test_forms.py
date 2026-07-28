@@ -1,0 +1,280 @@
+"""Tests unitarios de formularios del módulo sales."""
+
+from decimal import Decimal
+
+from django.test import TestCase
+
+from apps.sales.forms import (
+    SaleCancelForm,
+    SaleFilterForm,
+    SaleLineCreateForm,
+    SaleOpenForm,
+    SaleReturnCreateForm,
+    SaleReturnLineCreateForm,
+)
+from apps.sales.models import (
+    RequestedDocumentTypeChoices,
+    SaleReturnStatusChoices,
+    SaleStatusChoices,
+)
+from apps.sales.selectors import get_returnable_sale_lines
+from apps.sales.tests.factories import (
+    create_pos_settings,
+    create_sale,
+    create_sale_line,
+    create_sale_return,
+    create_sale_return_line,
+    create_sales_business,
+    create_sales_customer,
+    create_sales_product,
+    create_sales_store,
+    create_sales_tax,
+    create_sales_user,
+)
+
+
+class SaleFormsTests(TestCase):
+    def setUp(self):  # noqa: N802
+        self.business = create_sales_business()
+        self.other_business = create_sales_business(name="Otro negocio")
+        self.store = create_sales_store(business=self.business)
+        self.owner = create_sales_user(business=self.business, pin="1234")
+        self.tax = create_sales_tax(business=self.business)
+        self.product = create_sales_product(
+            business=self.business,
+            tax=self.tax,
+            base_price=Decimal("10.00"),
+        )
+        self.customer = create_sales_customer(
+            business=self.business,
+            name="Cliente permitido",
+        )
+        self.other_customer = create_sales_customer(
+            business=self.other_business,
+            name="Cliente ajeno",
+        )
+        self.pos_settings = create_pos_settings(
+            business=self.business,
+            require_open_cash_register=False,
+            require_pin_for_sensitive_actions=False,
+        )
+        self.sale = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+        )
+
+    def test_filter_form_rejects_reversed_date_range(self):
+        form = SaleFilterForm(
+            data={
+                "date_from": "2026-07-20",
+                "date_to": "2026-07-10",
+            },
+            business=self.business,
+            store=self.store,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("__all__", form.errors)
+
+    def test_filter_form_only_exposes_customers_from_current_business(self):
+        form = SaleFilterForm(
+            business=self.business,
+            store=self.store,
+        )
+
+        customer_ids = set(
+            form.fields["customer"].queryset.values_list("pk", flat=True)
+        )
+
+        self.assertIn(self.customer.pk, customer_ids)
+        self.assertNotIn(self.other_customer.pk, customer_ids)
+
+    def test_open_form_accepts_ticket_without_customer_or_cash_when_not_required(self):
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "customer": "",
+                "cash_register": "",
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_open_form_requires_customer_when_invoice_is_requested(self):
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.INVOICE,
+                "customer": "",
+                "cash_register": "",
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("customer", form.errors)
+
+    def test_open_form_rejects_customer_from_other_business(self):
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.INVOICE,
+                "customer": self.other_customer.pk,
+                "cash_register": "",
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("customer", form.errors)
+
+    def test_line_form_rejects_discount_above_configured_percentage(self):
+        self.pos_settings.max_manual_discount_percent = Decimal("20.00")
+        self.pos_settings.save()
+
+        form = SaleLineCreateForm(
+            data={
+                "product": self.product.pk,
+                "quantity": "1.000",
+                "unit_base_price": "10.00",
+                "discount_amount": "3.00",
+            },
+            business=self.business,
+            store=self.store,
+            sale=self.sale,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("discount_amount", form.errors)
+
+    def test_line_form_ignores_tampered_manual_price_when_disabled(self):
+        self.pos_settings.allow_manual_price = False
+        self.pos_settings.save()
+
+        form = SaleLineCreateForm(
+            data={
+                "product": self.product.pk,
+                "quantity": "1.000",
+                "unit_base_price": "1.00",
+                "discount_amount": "0.00",
+            },
+            business=self.business,
+            store=self.store,
+            sale=self.sale,
+            user=self.owner,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.cleaned_data["unit_base_price"])
+
+    def test_cancel_form_requires_valid_pin_when_configured(self):
+        self.pos_settings.require_pin_for_sensitive_actions = True
+        self.pos_settings.save()
+
+        invalid = SaleCancelForm(
+            data={"pin": "9999"},
+            sale=self.sale,
+            user=self.owner,
+        )
+        valid = SaleCancelForm(
+            data={"pin": "1234"},
+            sale=self.sale,
+            user=self.owner,
+        )
+
+        self.assertFalse(invalid.is_valid())
+        self.assertIn("pin", invalid.errors)
+        self.assertTrue(valid.is_valid(), valid.errors)
+
+
+class SaleReturnFormsTests(TestCase):
+    def setUp(self):  # noqa: N802
+        self.business = create_sales_business()
+        self.store = create_sales_store(business=self.business)
+        self.owner = create_sales_user(business=self.business)
+        create_pos_settings(
+            business=self.business,
+            require_open_cash_register=False,
+            require_pin_for_sensitive_actions=False,
+        )
+        self.tax = create_sales_tax(business=self.business)
+        self.product = create_sales_product(business=self.business, tax=self.tax)
+        self.sale = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+            status=SaleStatusChoices.COMPLETED,
+        )
+        self.sale_line = create_sale_line(
+            business=self.business,
+            sale=self.sale,
+            product=self.product,
+            quantity=Decimal("3.000"),
+        )
+
+    def test_return_create_form_strips_reason_and_rejects_blank(self):
+        valid = SaleReturnCreateForm(
+            data={"reason": "  Producto defectuoso  "},
+            business=self.business,
+            sale=self.sale,
+            user=self.owner,
+        )
+        invalid = SaleReturnCreateForm(
+            data={"reason": "   "},
+            business=self.business,
+            sale=self.sale,
+            user=self.owner,
+        )
+
+        self.assertTrue(valid.is_valid(), valid.errors)
+        self.assertEqual(valid.cleaned_data["reason"], "Producto defectuoso")
+        self.assertFalse(invalid.is_valid())
+
+    def test_return_line_form_rejects_quantity_above_remaining_capacity(self):
+        completed_return = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+            status=SaleReturnStatusChoices.COMPLETED,
+        )
+        create_sale_return_line(
+            business=self.business,
+            return_doc=completed_return,
+            original_line=self.sale_line,
+            quantity=Decimal("2.000"),
+        )
+
+        draft_return = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+        )
+        returnable_lines = get_returnable_sale_lines(
+            business=self.business,
+            sale=self.sale,
+        )
+
+        form = SaleReturnLineCreateForm(
+            data={
+                "original_line": self.sale_line.pk,
+                "quantity": "2.000",
+            },
+            business=self.business,
+            return_doc=draft_return,
+            returnable_lines=returnable_lines,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("quantity", form.errors)
