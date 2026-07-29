@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Detalle de devolucion{% endblock %}
+{% block title %}Detalle de devoluci&oacute;n{% endblock %}
 
 {% block content %}
 <main>
-    <h1>Devolucion {{ return_doc.pk }}</h1>
+    <h1>Devoluci&oacute;n {{ return_doc.pk }}</h1>
 
     <section>
         <h2>Cabecera</h2>
@@ -15,37 +15,44 @@
     </section>
 
     <section>
-        <h2>Lineas</h2>
+        <h2>L&iacute;neas</h2>
         {% for line in lines %}
             <article>
                 <p>
                     {{ line.original_line.product_name }} x {{ line.quantity }} - {{ line.amount }} EUR -
-                    Reponer stock: {% if line.restock %}Si{% else %}No{% endif %}
+                    Reponer stock: {% if line.restock %}S&iacute;{% else %}No{% endif %}
                 </p>
                 {% if is_editable %}
                     <p>
-                        <a href="{% url 'sales:return_line_update' store_id=store.pk return_pk=return_doc.pk line_pk=line.pk %}">Editar linea</a>
+                        <a href="{% url 'sales:return_line_update' store_id=store.pk return_pk=return_doc.pk line_pk=line.pk %}">Editar l&iacute;nea</a>
                     </p>
                     <form method="post" action="{% url 'sales:return_line_delete' store_id=store.pk return_pk=return_doc.pk line_pk=line.pk %}">
                         {% csrf_token %}
-                        <button type="submit">Eliminar linea</button>
+                        <button type="submit">Eliminar l&iacute;nea</button>
                     </form>
                 {% endif %}
             </article>
         {% empty %}
-            <p>Esta devolucion no tiene lineas.</p>
+            <p>Esta devoluci&oacute;n no tiene l&iacute;neas.</p>
         {% endfor %}
     </section>
 
     <section>
         <h2>Acciones</h2>
         {% if is_editable %}
-            <p><a href="{% url 'sales:return_line_add' store_id=store.pk return_pk=return_doc.pk %}">Anadir linea</a></p>
-            <form method="post" action="{% url 'sales:return_complete' store_id=store.pk return_pk=return_doc.pk %}">
+            <p><a href="{% url 'sales:return_line_add' store_id=store.pk return_pk=return_doc.pk %}">A&ntilde;adir l&iacute;nea</a></p>
+            <form
+                method="post"
+                action="{% url 'sales:return_complete' store_id=store.pk return_pk=return_doc.pk %}"
+            >
                 {% csrf_token %}
-                <button type="submit">Completar devolucion</button>
+                {{ complete_form.as_p }}
+
+                <button type="submit">
+                    Completar devoluci&oacute;n
+                </button>
             </form>
-            <p><a href="{% url 'sales:return_cancel' store_id=store.pk return_pk=return_doc.pk %}">Cancelar devolucion</a></p>
+            <p><a href="{% url 'sales:return_cancel' store_id=store.pk return_pk=return_doc.pk %}">Cancelar devoluci&oacute;n</a></p>
         {% endif %}
 
         <p><a href="{% url 'sales:return_list' store_id=store.pk %}">Volver al listado</a></p>

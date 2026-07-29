@@ -1039,6 +1039,10 @@ class SaleReturnDetailView(
 
     def get(self, request, store_id, return_pk):
         return_doc = self.get_sale_return()
+        complete_form = SaleReturnCompleteForm(
+            return_doc=return_doc,
+            user=request.user,
+        )
 
         return render(
             request,
@@ -1051,6 +1055,7 @@ class SaleReturnDetailView(
                 "is_editable": return_doc.is_editable,
                 "is_completed": return_doc.is_completed,
                 "is_cancelled": return_doc.is_cancelled,
+                "complete_form": complete_form,
             },
         )
 
