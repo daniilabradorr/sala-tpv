@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Ventas{% endblock %}
+
+{% block content %}
+<main>
+    <h1>{{ title|default:"Ventas" }}</h1>
+
+    <p>
+        <a href="{% url 'sales:sale_open' store_id=store.pk %}">Abrir nueva venta</a>
+    </p>
+
+    <form method="get">
+        {{ form.as_p }}
+        <button type="submit">Filtrar</button>
+    </form>
+
+    <section>
+        {% for sale in sales %}
+            <a href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">
+                Venta {{ sale.pk }} &mdash; {{ sale.total_amount }} &euro;
+            </a>
+        {% empty %}
+            <p>No hay ventas.</p>
+        {% endfor %}
+    </section>
+</main>
+{% endblock %}

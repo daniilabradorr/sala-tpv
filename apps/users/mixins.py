@@ -232,6 +232,9 @@ class BaseStorePermissionMixin(LoginRequiredMixin):
             4. Valida que el usuario tenga permiso para esta tienda
             5. Si todo es válido, ejecuta la vista
         """
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
+
         self.store = self.get_store()
 
         if self.permission_checker is None:
