@@ -7,11 +7,12 @@ Reglas:
 """
 
 from decimal import Decimal
-from django.apps import apps
+
 from django import forms
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 
 from apps.business_config.models import POSSettings
+from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
 from apps.sales.models import (
@@ -39,114 +40,6 @@ def _get_pos_settings(business):
         return POSSettings.objects.filter(
             business=business,
         ).first()
-
-
-def _model_has_field(model, field_name):
-    """Comprueba si un modelo contiene un campo concreto."""
-    return any(field.name == field_name for field in model._meta.get_fields())
-
-
-def _filter_related_queryset(
-    queryset,
-    *,
-    business=None,
-    store=None,
-    active_only=True,
-):
-    """
-    Filtra modelos de caja sin acoplar el formulario
-    a campos que todavía no están cerrados definitivamente.
-    """
-    model = queryset.model
-
-    if business is not None and _model_has_field(model, "business"):
-        queryset = queryset.filter(
-            business=business,
-        )
-
-    if store is not None and _model_has_field(model, "store"):
-        queryset = queryset.filter(
-            store=store,
-        )
-
-    if active_only and _model_has_field(model, "is_active"):
-        queryset = queryset.filter(
-            is_active=True,
-        )
-
-    return queryset
-
-
-def _filter_open_sessions(queryset):
-    """
-    Aplica el filtro de sesión abierta cuando
-    el modelo de caja permite identificarlo.
-    """
-    model = queryset.model
-
-    if _model_has_field(model, "status"):
-        return queryset.filter(
-            status="open",
-        )
-
-    if _model_has_field(model, "closed_at"):
-        return queryset.filter(
-            closed_at__isnull=True,
-        )
-
-    return queryset
-
-
-def _resolve_related_model(model, field_name):
-    """
-    Resuelve de manera segura el modelo relacionado de un ForeignKey.
-
-    Devuelve None si la relación todavía apunta a una cadena
-    que Django no puede resolver.
-    """
-
-    related_model = (
-        model._meta
-        .get_field(field_name)
-        .remote_field
-        .model
-    )
-
-    if not isinstance(related_model, str):
-        return related_model
-
-    if "." in related_model:
-        app_label, model_name = related_model.split(".", 1)
-    else:
-        app_label = model._meta.app_label
-        model_name = related_model
-
-    try:
-        return apps.get_model(
-            app_label,
-            model_name,
-            require_ready=False,
-        )
-    except LookupError:
-        return None
-
-
-def _cash_register_model():
-    """Obtiene el modelo de caja cuando está disponible."""
-
-    return _resolve_related_model(
-        Sale,
-        "cash_register",
-    )
-
-
-def _cash_session_model():
-    """Obtiene el modelo de sesión cuando está disponible."""
-
-    return _resolve_related_model(
-        Sale,
-        "cash_session",
-    )
 
 
 # ==========================================================
@@ -268,6 +161,18 @@ class SaleOpenForm(forms.Form):
         queryset=Customer.objects.none(),
     )
 
+    cash_register = forms.ModelChoiceField(
+        label="Caja",
+        required=False,
+        queryset=CashRegister.objects.none(),
+    )
+
+    cash_session = forms.ModelChoiceField(
+        label="Sesión de caja",
+        required=False,
+        queryset=CashSession.objects.none(),
+    )
+
     document_type_requested = forms.ChoiceField(
         label="Documento solicitado",
         choices=(RequestedDocumentTypeChoices.choices),
@@ -299,24 +204,28 @@ class SaleOpenForm(forms.Form):
             "pk",
         )
 
-        register_model = _cash_register_model()
-        session_model = _cash_session_model()
-
-        register_queryset = _filter_related_queryset(
-            register_model.objects.all(),
+        register_queryset = CashRegister.objects.filter(
             business=business,
             store=store,
+            is_active=True,
         ).order_by("pk")
 
-        session_queryset = _filter_related_queryset(
-            session_model.objects.all(),
+        register_id = self.data.get("cash_register") if self.is_bound else None
+        if register_id is None:
+            initial_register = self.initial.get("cash_register")
+            register_id = getattr(initial_register, "pk", initial_register)
+
+        session_queryset = CashSession.objects.filter(
             business=business,
             store=store,
+            status=CashSession.Status.OPEN,
+            closed_at__isnull=True,
         )
-
-        session_queryset = _filter_open_sessions(
-            session_queryset,
-        ).order_by("pk")
+        if register_id:
+            session_queryset = session_queryset.filter(cash_register_id=register_id)
+        else:
+            session_queryset = session_queryset.none()
+        session_queryset = session_queryset.order_by("pk")
 
         self.fields["cash_register"].queryset = register_queryset
 
@@ -501,18 +410,18 @@ class BaseSaleLineForm(forms.Form):
             if not self.pos_settings.allow_manual_price:
                 self.fields["unit_base_price"].disabled = True
 
-                self.fields["unit_base_price"].help_text = (
-                    "El negocio no permite modificar manualmente el precio."
-                )
+                self.fields[
+                    "unit_base_price"
+                ].help_text = "El negocio no permite modificar manualmente el precio."
 
             if not self.pos_settings.allow_manual_discounts:
                 self.fields["discount_amount"].disabled = True
 
                 self.fields["discount_amount"].initial = Decimal("0.00")
 
-                self.fields["discount_amount"].help_text = (
-                    "El negocio no permite aplicar descuentos manuales."
-                )
+                self.fields[
+                    "discount_amount"
+                ].help_text = "El negocio no permite aplicar descuentos manuales."
 
     def get_reference_price(
         self,
@@ -684,9 +593,9 @@ class SaleLineUpdateForm(BaseSaleLineForm):
             **kwargs,
         )
 
-        self.fields["unit_base_price"].help_text = (
-            "Precio histórico aplicado a esta línea."
-        )
+        self.fields[
+            "unit_base_price"
+        ].help_text = "Precio histórico aplicado a esta línea."
 
     def get_reference_price(
         self,

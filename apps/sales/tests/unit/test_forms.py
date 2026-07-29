@@ -3,7 +3,9 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 
+from apps.cash_register.models import CashRegister, CashSession
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
@@ -62,6 +64,25 @@ class SaleFormsTests(TestCase):
             business=self.business,
             store=self.store,
             opened_by=self.owner,
+        )
+
+    def create_cash_register(self, *, business=None, store=None, name="Caja 1"):
+        return CashRegister.objects.create(
+            business=business or self.business,
+            store=store or self.store,
+            name=name,
+        )
+
+    def create_cash_session(
+        self, *, cash_register, status=CashSession.Status.OPEN, opened_by=None
+    ):
+        return CashSession.objects.create(
+            business=cash_register.business,
+            store=cash_register.store,
+            cash_register=cash_register,
+            status=status,
+            closed_at=timezone.now() if status == CashSession.Status.CLOSED else None,
+            opened_by=opened_by or self.owner,
         )
 
     def test_filter_form_rejects_reversed_date_range(self):
@@ -136,6 +157,151 @@ class SaleFormsTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("customer", form.errors)
+
+    def test_open_form_requires_cash_register_and_session_when_configured(self):
+        self.pos_settings.require_open_cash_register = True
+        self.pos_settings.save()
+
+        form = SaleOpenForm(
+            data={"document_type_requested": RequestedDocumentTypeChoices.TICKET},
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_register", form.errors)
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_cash_register_without_session(self):
+        register = self.create_cash_register()
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_session_without_cash_register(self):
+        register = self.create_cash_register()
+        session = self.create_cash_session(cash_register=register)
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": "",
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_closed_session(self):
+        register = self.create_cash_register()
+        session = self.create_cash_session(
+            cash_register=register, status=CashSession.Status.CLOSED
+        )
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_session_from_another_register(self):
+        register = self.create_cash_register()
+        other_register = self.create_cash_register(name="Caja 2")
+        session = self.create_cash_session(cash_register=other_register)
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_session_from_another_business(self):
+        register = self.create_cash_register()
+        other_store = create_sales_store(business=self.other_business)
+        other_user = create_sales_user(business=self.other_business)
+        other_register = self.create_cash_register(
+            business=self.other_business,
+            store=other_store,
+            name="Caja ajena",
+        )
+        session = self.create_cash_session(
+            cash_register=other_register, opened_by=other_user
+        )
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
+    def test_open_form_rejects_register_from_another_business(self):
+        other_store = create_sales_store(business=self.other_business)
+        register = self.create_cash_register(
+            business=self.other_business, store=other_store
+        )
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_register", form.errors)
+
+    def test_open_form_rejects_register_from_another_store(self):
+        other_store = create_sales_store(business=self.business, name="Otra tienda")
+        register = self.create_cash_register(store=other_store)
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_register", form.errors)
 
     def test_line_form_rejects_discount_above_configured_percentage(self):
         self.pos_settings.max_manual_discount_percent = Decimal("20.00")
