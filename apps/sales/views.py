@@ -79,9 +79,7 @@ def _get_business(request):
     business = getattr(request.user, "business", None)
 
     if business is None:
-        raise PermissionDenied(
-            "La interfaz de ventas requiere un negocio asociado."
-        )
+        raise PermissionDenied("La interfaz de ventas requiere un negocio asociado.")
 
     return business
 
@@ -149,11 +147,7 @@ def _add_invalid_form_messages(request, form):
                 messages.error(request, str(error))
                 continue
 
-            field_label = (
-                form.fields[field].label
-                if field in form.fields
-                else field
-            )
+            field_label = form.fields[field].label if field in form.fields else field
 
             messages.error(
                 request,
@@ -168,9 +162,7 @@ def _ensure_sale_editable(sale):
     """
 
     if not sale.is_editable:
-        raise PermissionDenied(
-            "Esta venta ya no puede modificarse."
-        )
+        raise PermissionDenied("Esta venta ya no puede modificarse.")
 
 
 def _ensure_return_editable(return_doc):
@@ -180,9 +172,8 @@ def _ensure_return_editable(return_doc):
     """
 
     if not return_doc.is_editable:
-        raise PermissionDenied(
-            "Esta devolución ya no puede modificarse."
-        )
+        raise PermissionDenied("Esta devolución ya no puede modificarse.")
+
 
 # ==========================================================
 # Mixins internos de sales
@@ -202,9 +193,7 @@ class SalesStoreContextMixin:
         store = self.store
 
         if store.business_id != business.id:
-            raise Http404(
-                "La tienda no pertenece al negocio actual."
-            )
+            raise Http404("La tienda no pertenece al negocio actual.")
 
         return business, store
 
@@ -225,9 +214,7 @@ class SaleObjectMixin(SalesStoreContextMixin):
         )
 
         if sale.store_id != store.id:
-            raise Http404(
-                "La venta no pertenece a esta tienda."
-            )
+            raise Http404("La venta no pertenece a esta tienda.")
 
         return sale
 
@@ -248,9 +235,7 @@ class SaleReturnObjectMixin(SalesStoreContextMixin):
         )
 
         if return_doc.store_id != store.id:
-            raise Http404(
-                "La devolución no pertenece a esta tienda."
-            )
+            raise Http404("La devolución no pertenece a esta tienda.")
 
         return return_doc
 
@@ -423,15 +408,9 @@ class SaleOpenView(
                 store=store,
                 opened_by=request.user,
                 customer=form.cleaned_data.get("customer"),
-                document_type_requested=(
-                    form.cleaned_data["document_type_requested"]
-                ),
-                cash_register=form.cleaned_data.get(
-                    "cash_register"
-                ),
-                cash_session=form.cleaned_data.get(
-                    "cash_session"
-                ),
+                document_type_requested=(form.cleaned_data["document_type_requested"]),
+                cash_register=form.cleaned_data.get("cash_register"),
+                cash_session=form.cleaned_data.get("cash_session"),
             )
         except ValidationError as error:
             _add_service_errors_to_form(form, error)
@@ -491,9 +470,7 @@ class SaleHeaderUpdateView(
             sale=sale,
             initial={
                 "customer": sale.customer,
-                "document_type_requested": (
-                    sale.document_type_requested
-                ),
+                "document_type_requested": (sale.document_type_requested),
             },
         )
 
@@ -538,9 +515,7 @@ class SaleHeaderUpdateView(
                 business=business,
                 sale=sale,
                 customer=form.cleaned_data.get("customer"),
-                document_type_requested=(
-                    form.cleaned_data["document_type_requested"]
-                ),
+                document_type_requested=(form.cleaned_data["document_type_requested"]),
                 updated_by=request.user,
             )
         except ValidationError as error:
@@ -566,6 +541,7 @@ class SaleHeaderUpdateView(
             store_id=store.pk,
             sale_pk=sale.pk,
         )
+
 
 # ==========================================================
 # Añadir línea
@@ -640,12 +616,8 @@ class SaleLineAddView(
                 sale=sale,
                 product=form.cleaned_data["product"],
                 quantity=form.cleaned_data["quantity"],
-                unit_base_price=form.cleaned_data.get(
-                    "unit_base_price"
-                ),
-                discount_amount=form.cleaned_data.get(
-                    "discount_amount"
-                ),
+                unit_base_price=form.cleaned_data.get("unit_base_price"),
+                discount_amount=form.cleaned_data.get("discount_amount"),
                 user=request.user,
             )
         except ValidationError as error:
@@ -771,12 +743,8 @@ class SaleLineUpdateView(
                 sale=sale,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
-                unit_base_price=form.cleaned_data.get(
-                    "unit_base_price"
-                ),
-                discount_amount=form.cleaned_data.get(
-                    "discount_amount"
-                ),
+                unit_base_price=form.cleaned_data.get("unit_base_price"),
+                discount_amount=form.cleaned_data.get("discount_amount"),
                 user=request.user,
             )
         except ValidationError as error:
@@ -1107,9 +1075,7 @@ class SaleReturnCreateView(
         sale = self.get_sale()
 
         if not sale.is_completed:
-            raise PermissionDenied(
-                "Solo pueden devolverse ventas completadas."
-            )
+            raise PermissionDenied("Solo pueden devolverse ventas completadas.")
 
         form = SaleReturnCreateForm(
             business=business,
@@ -1132,9 +1098,7 @@ class SaleReturnCreateView(
         sale = self.get_sale()
 
         if not sale.is_completed:
-            raise PermissionDenied(
-                "Solo pueden devolverse ventas completadas."
-            )
+            raise PermissionDenied("Solo pueden devolverse ventas completadas.")
 
         form = SaleReturnCreateForm(
             request.POST,
@@ -1270,9 +1234,7 @@ class SaleReturnLineAddView(
             add_sale_return_line(
                 business=business,
                 return_doc=return_doc,
-                original_line=form.cleaned_data[
-                    "original_line"
-                ],
+                original_line=form.cleaned_data["original_line"],
                 quantity=form.cleaned_data["quantity"],
                 user=request.user,
             )

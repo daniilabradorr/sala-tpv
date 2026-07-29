@@ -9,7 +9,7 @@ Reglas:
 from decimal import Decimal
 
 from django import forms
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
@@ -30,16 +30,16 @@ EMPTY_CHOICE = [("", "Todos")]
 
 
 def _get_pos_settings(business):
-    """Obtiene la configuración TPV sin ocultar una configuración ausente."""
+    """
+    Obtiene siempre la versión persistida más reciente
+    de la configuración TPV.
+    """
     if business is None:
         return None
 
-    try:
-        return business.pos_settings
-    except ObjectDoesNotExist:
-        return POSSettings.objects.filter(
-            business=business,
-        ).first()
+    return POSSettings.objects.filter(
+        business_id=business.pk,
+    ).first()
 
 
 # ==========================================================

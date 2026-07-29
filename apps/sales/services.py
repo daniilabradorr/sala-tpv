@@ -11,7 +11,7 @@ Reglas de arquitectura:
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -138,13 +138,18 @@ def calculate_sale_line_amounts(
 
 
 def _get_pos_settings(business):
+    """
+    Obtiene siempre la configuración TPV actual desde la base de datos.
+
+    No utiliza business.pos_settings porque la relación OneToOne
+    puede permanecer cacheada después de actualizar POSSettings.
+    """
     if business is None:
         raise ValidationError("No se ha indicado el negocio.")
 
-    try:
-        settings = business.pos_settings
-    except ObjectDoesNotExist:
-        settings = POSSettings.objects.filter(business=business).first()
+    settings = POSSettings.objects.filter(
+        business_id=business.pk,
+    ).first()
 
     if settings is None:
         raise ValidationError("El negocio no tiene configuración TPV.")
