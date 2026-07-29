@@ -92,3 +92,18 @@ class CashSessionModelTests(TestCase):
                 cash_register=self.register,
                 opened_by=other_user,
             )
+
+    def test_session_rejects_closed_by_from_another_business(self):
+        other_business = create_sales_business(name="Otro negocio")
+        other_user = create_sales_user(business=other_business)
+
+        with self.assertRaises(ValidationError):
+            CashSession.objects.create(
+                business=self.business,
+                store=self.store,
+                cash_register=self.register,
+                opened_by=self.user,
+                closed_by=other_user,
+                status=CashSession.Status.CLOSED,
+                closed_at=timezone.now(),
+            )

@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from django.test import TestCase, override_settings
-from django.urls import include, path, reverse
+from django.urls import reverse
 
 from apps.inventory.models import StockMovement
 from apps.sales.models import Sale, SaleReturn, SaleStatusChoices
@@ -17,119 +17,7 @@ from apps.sales.tests.factories import (
     create_sales_tax,
     create_sales_user,
 )
-from apps.sales.views import (
-    SaleCancelView,
-    SaleCompleteView,
-    SaleDetailView,
-    SaleHeaderUpdateView,
-    SaleLineAddView,
-    SaleLineDeleteView,
-    SaleLineUpdateView,
-    SaleListView,
-    SaleOpenView,
-    SaleReturnCancelView,
-    SaleReturnCompleteView,
-    SaleReturnCreateView,
-    SaleReturnDetailView,
-    SaleReturnLineAddView,
-    SaleReturnLineDeleteView,
-    SaleReturnLineUpdateView,
-    SaleReturnListView,
-)
 from apps.users.models import RoleChoices
-
-
-sales_patterns = [
-    path(
-        "stores/<int:store_id>/sales/",
-        SaleListView.as_view(),
-        name="sale_list",
-    ),
-    path(
-        "stores/<int:store_id>/sales/open/",
-        SaleOpenView.as_view(),
-        name="sale_open",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/",
-        SaleDetailView.as_view(),
-        name="sale_detail",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/header/",
-        SaleHeaderUpdateView.as_view(),
-        name="sale_header_update",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/lines/add/",
-        SaleLineAddView.as_view(),
-        name="sale_line_add",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/edit/",
-        SaleLineUpdateView.as_view(),
-        name="sale_line_update",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/delete/",
-        SaleLineDeleteView.as_view(),
-        name="sale_line_delete",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/complete/",
-        SaleCompleteView.as_view(),
-        name="sale_complete",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/cancel/",
-        SaleCancelView.as_view(),
-        name="sale_cancel",
-    ),
-    path(
-        "stores/<int:store_id>/returns/",
-        SaleReturnListView.as_view(),
-        name="return_list",
-    ),
-    path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/returns/create/",
-        SaleReturnCreateView.as_view(),
-        name="return_create",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/",
-        SaleReturnDetailView.as_view(),
-        name="return_detail",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/lines/add/",
-        SaleReturnLineAddView.as_view(),
-        name="return_line_add",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/lines/<int:line_pk>/edit/",
-        SaleReturnLineUpdateView.as_view(),
-        name="return_line_update",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/lines/<int:line_pk>/delete/",
-        SaleReturnLineDeleteView.as_view(),
-        name="return_line_delete",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/complete/",
-        SaleReturnCompleteView.as_view(),
-        name="return_complete",
-    ),
-    path(
-        "stores/<int:store_id>/returns/<int:return_pk>/cancel/",
-        SaleReturnCancelView.as_view(),
-        name="return_cancel",
-    ),
-]
-
-urlpatterns = [
-    path("", include((sales_patterns, "sales"), namespace="sales")),
-]
 
 
 TEST_TEMPLATES = [
@@ -174,7 +62,7 @@ TEST_TEMPLATES = [
 
 
 @override_settings(
-    ROOT_URLCONF=__name__,
+    ROOT_URLCONF="config.urls",
     TEMPLATES=TEST_TEMPLATES,
     LOGIN_URL="/users/login/",
 )
@@ -229,6 +117,37 @@ class SaleViewsIntegrationTests(TestCase):
             product=self.product,
             current_stock=Decimal("10.000"),
         )
+
+    def test_real_urlconf_reverses_all_sales_routes(self):
+        route_kwargs = {
+            "sale_list": {"store_id": 1},
+            "sale_open": {"store_id": 1},
+            "sale_detail": {"store_id": 1, "sale_pk": 2},
+            "sale_header_update": {"store_id": 1, "sale_pk": 2},
+            "sale_line_add": {"store_id": 1, "sale_pk": 2},
+            "sale_line_update": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
+            "sale_line_delete": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
+            "sale_complete": {"store_id": 1, "sale_pk": 2},
+            "sale_cancel": {"store_id": 1, "sale_pk": 2},
+            "return_list": {"store_id": 1},
+            "return_create": {"store_id": 1, "sale_pk": 2},
+            "return_detail": {"store_id": 1, "return_pk": 4},
+            "return_line_add": {"store_id": 1, "return_pk": 4},
+            "return_line_update": {"store_id": 1, "return_pk": 4, "line_pk": 3},
+            "return_line_delete": {"store_id": 1, "return_pk": 4, "line_pk": 3},
+            "return_complete": {"store_id": 1, "return_pk": 4},
+            "return_cancel": {"store_id": 1, "return_pk": 4},
+        }
+
+        reversed_urls = {
+            name: reverse(f"sales:{name}", kwargs=kwargs)
+            for name, kwargs in route_kwargs.items()
+        }
+
+        self.assertEqual(len(reversed_urls), 17)
+        self.assertEqual(len(set(reversed_urls.values())), 17)
+        for url in reversed_urls.values():
+            self.assertTrue(url.startswith("/stores/1/"))
 
     def login_as(self, user):
         logged_in = self.client.login(

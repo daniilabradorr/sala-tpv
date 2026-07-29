@@ -215,6 +215,11 @@ class SaleOpenForm(forms.Form):
             initial_register = self.initial.get("cash_register")
             register_id = getattr(initial_register, "pk", initial_register)
 
+        try:
+            register_id = int(register_id) if register_id else None
+        except (TypeError, ValueError):
+            register_id = None
+
         session_queryset = CashSession.objects.filter(
             business=business,
             store=store,

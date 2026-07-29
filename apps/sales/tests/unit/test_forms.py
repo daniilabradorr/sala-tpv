@@ -173,6 +173,112 @@ class SaleFormsTests(TestCase):
         self.assertIn("cash_register", form.errors)
         self.assertIn("cash_session", form.errors)
 
+    def test_open_form_accepts_valid_cash_context_when_required(self):
+        self.pos_settings.require_open_cash_register = True
+        self.pos_settings.save()
+        register = self.create_cash_register()
+        session = self.create_cash_session(cash_register=register)
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["cash_register"], register)
+        self.assertEqual(form.cleaned_data["cash_session"], session)
+
+    def test_open_form_accepts_valid_cash_context_when_optional(self):
+        register = self.create_cash_register()
+        session = self.create_cash_session(cash_register=register)
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_open_form_rejects_non_numeric_register_id_without_raising(self):
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": "manipulated",
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_register", form.errors)
+
+    def test_open_form_rejects_inactive_register(self):
+        register = self.create_cash_register()
+        register.is_active = False
+        register.save()
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": "",
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_register", form.errors)
+
+    def test_open_form_limits_sessions_to_selected_register(self):
+        register = self.create_cash_register()
+        session = self.create_cash_session(cash_register=register)
+        other_register = self.create_cash_register(name="Caja 2")
+        other_session = self.create_cash_session(cash_register=other_register)
+
+        form = SaleOpenForm(
+            data={"cash_register": register.pk},
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        session_ids = set(
+            form.fields["cash_session"].queryset.values_list("pk", flat=True)
+        )
+        self.assertEqual(session_ids, {session.pk})
+        self.assertNotIn(other_session.pk, session_ids)
+
+    def test_open_form_rejects_open_session_with_closed_at(self):
+        register = self.create_cash_register()
+        session = self.create_cash_session(cash_register=register)
+        CashSession.objects.filter(pk=session.pk).update(closed_at=timezone.now())
+        form = SaleOpenForm(
+            data={
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+            },
+            business=self.business,
+            store=self.store,
+            user=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cash_session", form.errors)
+
     def test_open_form_rejects_cash_register_without_session(self):
         register = self.create_cash_register()
         form = SaleOpenForm(
