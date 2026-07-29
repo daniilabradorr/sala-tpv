@@ -712,6 +712,12 @@ class SaleReturn(TimeStampedModel):
         db_index=True,
     )
 
+    completed_at = models.DateTimeField(
+        "Completada en",
+        null=True,
+        blank=True,
+    )
+
     total_amount = models.DecimalField(
         "Total devuelto",
         max_digits=14,
@@ -861,6 +867,10 @@ class SaleReturnLine(TimeStampedModel):
         decimal_places=2,
         default=Decimal("0.00"),
         help_text="Importe económico correspondiente a la cantidad devuelta.",
+    )
+    restock = models.BooleanField(
+        default=True,
+        help_text="Indica si el producto vuelve al stock vendible.",
     )
 
     class Meta:

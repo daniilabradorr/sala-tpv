@@ -1236,6 +1236,7 @@ class SaleReturnLineAddView(
                 return_doc=return_doc,
                 original_line=form.cleaned_data["original_line"],
                 quantity=form.cleaned_data["quantity"],
+                restock=form.cleaned_data["restock"],
                 user=request.user,
             )
         except ValidationError as error:
@@ -1304,6 +1305,7 @@ class SaleReturnLineUpdateView(
             line=line,
             initial={
                 "quantity": line.quantity,
+                "restock": line.restock,
             },
         )
 
@@ -1358,6 +1360,7 @@ class SaleReturnLineUpdateView(
                 return_doc=return_doc,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
+                restock=form.cleaned_data["restock"],
                 user=request.user,
             )
         except ValidationError as error:

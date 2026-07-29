@@ -381,6 +381,7 @@ def create_sale_return_line(
     original_line,
     quantity=Decimal("1.000"),
     amount=None,
+    restock=True,
 ):
     if amount is None:
         amount = _money(
@@ -393,6 +394,7 @@ def create_sale_return_line(
         original_line=original_line,
         quantity=quantity,
         amount=amount,
+        restock=restock,
     )
 
     total = _money(

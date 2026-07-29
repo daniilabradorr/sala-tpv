@@ -13,6 +13,7 @@ from apps.sales.forms import (
     SaleOpenForm,
     SaleReturnCreateForm,
     SaleReturnLineCreateForm,
+    SaleReturnLineUpdateForm,
 )
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
@@ -550,3 +551,30 @@ class SaleReturnFormsTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("quantity", form.errors)
+
+    def test_return_line_update_form_preserves_restock_false_initial(self):
+        draft_return = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+        )
+        line = create_sale_return_line(
+            business=self.business,
+            return_doc=draft_return,
+            original_line=self.sale_line,
+            quantity=Decimal("1.000"),
+            restock=False,
+        )
+
+        form = SaleReturnLineUpdateForm(
+            business=self.business,
+            return_doc=draft_return,
+            line=line,
+            initial={
+                "quantity": line.quantity,
+                "restock": line.restock,
+            },
+        )
+
+        self.assertIs(form["restock"].value(), False)

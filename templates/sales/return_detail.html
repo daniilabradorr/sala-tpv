@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de devolucion{% endblock %}
+
+{% block content %}
+<main>
+    <h1>Devolucion {{ return_doc.pk }}</h1>
+
+    <section>
+        <h2>Cabecera</h2>
+        <p>Estado: {{ return_doc.get_status_display }}</p>
+        <p>Total devuelto: {{ return_doc.total_amount }} EUR</p>
+        <p>Motivo: {{ return_doc.reason }}</p>
+        <p>Venta original: <a href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">Venta {{ sale.pk }}</a></p>
+    </section>
+
+    <section>
+        <h2>Lineas</h2>
+        {% for line in lines %}
+            <article>
+                <p>
+                    {{ line.original_line.product_name }} x {{ line.quantity }} - {{ line.amount }} EUR -
+                    Reponer stock: {% if line.restock %}Si{% else %}No{% endif %}
+                </p>
+                {% if is_editable %}
+                    <p>
+                        <a href="{% url 'sales:return_line_update' store_id=store.pk return_pk=return_doc.pk line_pk=line.pk %}">Editar linea</a>
+                    </p>
+                    <form method="post" action="{% url 'sales:return_line_delete' store_id=store.pk return_pk=return_doc.pk line_pk=line.pk %}">
+                        {% csrf_token %}
+                        <button type="submit">Eliminar linea</button>
+                    </form>
+                {% endif %}
+            </article>
+        {% empty %}
+            <p>Esta devolucion no tiene lineas.</p>
+        {% endfor %}
+    </section>
+
+    <section>
+        <h2>Acciones</h2>
+        {% if is_editable %}
+            <p><a href="{% url 'sales:return_line_add' store_id=store.pk return_pk=return_doc.pk %}">Anadir linea</a></p>
+            <form method="post" action="{% url 'sales:return_complete' store_id=store.pk return_pk=return_doc.pk %}">
+                {% csrf_token %}
+                <button type="submit">Completar devolucion</button>
+            </form>
+            <p><a href="{% url 'sales:return_cancel' store_id=store.pk return_pk=return_doc.pk %}">Cancelar devolucion</a></p>
+        {% endif %}
+
+        <p><a href="{% url 'sales:return_list' store_id=store.pk %}">Volver al listado</a></p>
+    </section>
+</main>
+{% endblock %}

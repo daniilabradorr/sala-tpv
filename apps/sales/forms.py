@@ -823,6 +823,11 @@ class SaleReturnLineCreateForm(forms.Form):
         decimal_places=3,
         min_value=Decimal("0.001"),
     )
+    restock = forms.BooleanField(
+        label="Devolver al stock disponible",
+        required=False,
+        initial=True,
+    )
 
     def __init__(
         self,
@@ -880,6 +885,12 @@ class SaleReturnLineUpdateForm(forms.Form):
         max_digits=14,
         decimal_places=3,
         min_value=Decimal("0.001"),
+    )
+
+    restock = forms.BooleanField(
+        label="Devolver al stock disponible",
+        required=False,
+        initial=True,
     )
 
     def __init__(

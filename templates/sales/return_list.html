@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Devoluciones{% endblock %}
+
+{% block content %}
+<main>
+    <h1>{{ title|default:"Ventas" }}</h1>
+
+    <form method="get">
+        {{ form.as_p }}
+        <button type="submit">Filtrar</button>
+    </form>
+
+    <section>
+        {% for return_doc in returns %}
+            <p>
+                <a href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">
+                    Devolucion {{ return_doc.pk }} - {{ return_doc.total_amount }} EUR
+                </a>
+            </p>
+        {% empty %}
+            <p>No hay devoluciones.</p>
+        {% endfor %}
+    </section>
+</main>
+{% endblock %}

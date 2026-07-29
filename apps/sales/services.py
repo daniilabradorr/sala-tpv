@@ -1249,6 +1249,7 @@ def add_sale_return_line(
     original_line,
     quantity,
     user,
+    restock,
 ):
     """Añade una línea a una devolución en borrador."""
 
@@ -1290,6 +1291,7 @@ def add_sale_return_line(
             original_line=locked_original_line,
             quantity=_quantity(quantity),
             amount=amount,
+            restock=restock,
         )
         return_line.save()
     except IntegrityError as exc:
@@ -1309,6 +1311,7 @@ def update_sale_return_line(
     line,
     quantity,
     user,
+    restock,
 ):
     """Actualiza la cantidad de una línea de devolución en borrador."""
 
@@ -1351,7 +1354,8 @@ def update_sale_return_line(
 
     locked_line.quantity = _quantity(quantity)
     locked_line.amount = amount
-    locked_line.save(update_fields=["quantity", "amount", "updated_at"])
+    locked_line.restock = restock
+    locked_line.save(update_fields=["quantity", "amount", "restock", "updated_at"])
 
     _recalculate_locked_return(locked_return)
     return locked_line
@@ -1494,6 +1498,9 @@ def complete_sale_return(
         )
 
         for return_line in return_lines:
+            if not return_line.restock:
+                continue
+
             product = return_line.original_line.product
 
             if product is None or product.is_service or not product.track_stock:
@@ -1531,7 +1538,10 @@ def complete_sale_return(
 
     locked_return.total_amount = total_amount
     locked_return.status = SaleReturnStatusChoices.COMPLETED
-    locked_return.save(update_fields=["total_amount", "status", "updated_at"])
+    locked_return.completed_at = timezone.now()
+    locked_return.save(
+        update_fields=["total_amount", "status", "completed_at", "updated_at"]
+    )
 
     original_lines = list(
         SaleLine.objects.filter(

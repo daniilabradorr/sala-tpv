@@ -23,6 +23,7 @@ from apps.sales.services import (
     delete_sale_line,
     open_sale,
     update_sale_line,
+    update_sale_return_line,
 )
 from apps.sales.tests.factories import (
     create_pos_settings,
@@ -410,6 +411,7 @@ class SaleReturnServicesTests(TestCase):
             return_doc=return_doc,
             original_line=self.sale_line,
             quantity=Decimal("1.000"),
+            restock=True,
             user=self.owner,
         )
 
@@ -446,6 +448,7 @@ class SaleReturnServicesTests(TestCase):
             return_doc=return_doc,
             original_line=self.sale_line,
             quantity=Decimal("2.000"),
+            restock=True,
             user=self.owner,
         )
 
@@ -454,11 +457,109 @@ class SaleReturnServicesTests(TestCase):
             return_doc=return_doc,
             completed_by=self.owner,
         )
+        return_doc.refresh_from_db()
         self.sale.refresh_from_db()
         self.inventory_item.refresh_from_db()
 
         self.assertEqual(self.sale.status, SaleStatusChoices.RETURNED)
         self.assertEqual(self.inventory_item.current_stock, Decimal("10.000"))
+        self.assertIsNotNone(return_doc.completed_at)
+
+    def test_return_with_restock_restores_stock(self):
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+            reason="Reponer producto",
+        )
+        return_line = add_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=self.sale_line,
+            quantity=Decimal("2.000"),
+            restock=True,
+            user=self.owner,
+        )
+
+        self.assertEqual(self.inventory_item.current_stock, Decimal("8.000"))
+
+        complete_sale_return(
+            business=self.business,
+            return_doc=return_doc,
+            completed_by=self.owner,
+        )
+        self.inventory_item.refresh_from_db()
+
+        self.assertEqual(self.inventory_item.current_stock, Decimal("10.000"))
+        self.assertTrue(
+            StockMovement.objects.filter(
+                movement_type=StockMovement.TYPE_SALE_RETURN,
+                reference_id=f"return:{return_doc.pk}:{return_line.pk}",
+            ).exists()
+        )
+
+    def test_return_without_restock_does_not_restore_stock(self):
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+            reason="No repone stock",
+        )
+        return_line = add_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=self.sale_line,
+            quantity=Decimal("2.000"),
+            restock=False,
+            user=self.owner,
+        )
+
+        complete_sale_return(
+            business=self.business,
+            return_doc=return_doc,
+            completed_by=self.owner,
+        )
+        self.inventory_item.refresh_from_db()
+        self.sale.refresh_from_db()
+
+        self.assertEqual(self.inventory_item.current_stock, Decimal("8.000"))
+        self.assertEqual(self.sale.status, SaleStatusChoices.RETURNED)
+        self.assertFalse(
+            StockMovement.objects.filter(
+                movement_type=StockMovement.TYPE_SALE_RETURN,
+                reference_id=f"return:{return_doc.pk}:{return_line.pk}",
+            ).exists()
+        )
+
+    def test_update_return_line_updates_restock(self):
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.owner,
+            reason="Cambiar reposición",
+        )
+        return_line = add_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=self.sale_line,
+            quantity=Decimal("1.000"),
+            restock=True,
+            user=self.owner,
+        )
+
+        updated_line = update_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            line=return_line,
+            quantity=Decimal("1.000"),
+            restock=False,
+            user=self.owner,
+        )
+
+        self.assertFalse(updated_line.restock)
 
     def test_second_return_cannot_exceed_remaining_quantity(self):
         first_return = create_sale_return(
@@ -473,6 +574,7 @@ class SaleReturnServicesTests(TestCase):
             return_doc=first_return,
             original_line=self.sale_line,
             quantity=Decimal("1.000"),
+            restock=True,
             user=self.owner,
         )
         complete_sale_return(
@@ -495,6 +597,7 @@ class SaleReturnServicesTests(TestCase):
                 return_doc=second_return,
                 original_line=self.sale_line,
                 quantity=Decimal("2.000"),
+                restock=True,
                 user=self.owner,
             )
 
@@ -513,6 +616,7 @@ class SaleReturnServicesTests(TestCase):
             return_doc=return_doc,
             original_line=self.sale_line,
             quantity=Decimal("1.000"),
+            restock=True,
             user=self.owner,
         )
         stock_before = self.inventory_item.current_stock

@@ -10,6 +10,8 @@ from apps.sales.models import Sale, SaleReturn, SaleStatusChoices
 from apps.sales.services import add_sale_line, complete_sale, open_sale
 from apps.sales.tests.factories import (
     create_pos_settings,
+    create_sale_return,
+    create_sale_return_line,
     create_sales_business,
     create_sales_inventory_item,
     create_sales_product,
@@ -363,6 +365,7 @@ class SaleViewsIntegrationTests(TestCase):
             data={
                 "original_line": sale_line.pk,
                 "quantity": "2.000",
+                "restock": "on",
             },
         )
         self.assertEqual(add_response.status_code, 302)
@@ -390,3 +393,153 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(return_doc.status, "completed")
         self.assertEqual(sale.status, SaleStatusChoices.RETURNED)
         self.assertEqual(self.inventory_item.current_stock, Decimal("10.000"))
+
+    def test_full_return_flow_without_restock_marks_returned_without_stock_entry(self):
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        complete_sale(
+            business=self.business,
+            sale=sale,
+            closed_by=self.owner,
+        )
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(self.inventory_item.current_stock, Decimal("8.000"))
+
+        create_response = self.client.post(
+            reverse(
+                "sales:return_create",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            data={"reason": "Producto no reaprovechable"},
+        )
+        return_doc = SaleReturn.objects.get(original_sale=sale)
+        self.assertRedirects(
+            create_response,
+            reverse(
+                "sales:return_detail",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+
+        add_response = self.client.post(
+            reverse(
+                "sales:return_line_add",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            ),
+            data={
+                "original_line": sale_line.pk,
+                "quantity": "2.000",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        return_line = return_doc.lines.get()
+        self.assertFalse(return_line.restock)
+
+        complete_response = self.client.post(
+            reverse(
+                "sales:return_complete",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            ),
+            data={},
+        )
+
+        sale.refresh_from_db()
+        self.inventory_item.refresh_from_db()
+
+        self.assertRedirects(
+            complete_response,
+            reverse(
+                "sales:return_detail",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(sale.status, SaleStatusChoices.RETURNED)
+        self.assertEqual(self.inventory_item.current_stock, Decimal("8.000"))
+        self.assertFalse(
+            StockMovement.objects.filter(
+                movement_type=StockMovement.TYPE_SALE_RETURN,
+                reference_id=f"return:{return_doc.pk}:{return_line.pk}",
+            ).exists()
+        )
+
+    def test_return_line_update_get_sets_initial_restock_from_line(self):
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        complete_sale(
+            business=self.business,
+            sale=sale,
+            closed_by=self.owner,
+        )
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+            reason="Revisar inicial",
+        )
+        return_line = create_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=sale_line,
+            quantity=Decimal("1.000"),
+            restock=False,
+        )
+
+        response = self.client.get(
+            reverse(
+                "sales:return_line_update",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "return_pk": return_doc.pk,
+                    "line_pk": return_line.pk,
+                },
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.context["form"].initial["restock"], False)
+
+    def test_return_line_update_post_updates_restock(self):
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        complete_sale(
+            business=self.business,
+            sale=sale,
+            closed_by=self.owner,
+        )
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+            reason="Editar reposición",
+        )
+        return_line = create_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=sale_line,
+            quantity=Decimal("1.000"),
+            restock=True,
+        )
+
+        response = self.client.post(
+            reverse(
+                "sales:return_line_update",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "return_pk": return_doc.pk,
+                    "line_pk": return_line.pk,
+                },
+            ),
+            data={
+                "quantity": "1.000",
+            },
+        )
+
+        return_line.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(return_line.restock)
