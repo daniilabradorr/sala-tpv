@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de venta{% endblock %}
+
+{% block content %}
+<main>
+    <h1>Venta {{ sale.pk }}</h1>
+
+    <section>
+        <h2>Estado</h2>
+        <p>{{ sale.get_status_display }}</p>
+        <p>Pago: {{ sale.get_payment_status_display }}</p>
+    </section>
+
+    <section>
+        <h2>Cliente</h2>
+        <p>{{ sale.customer|default:"Sin cliente" }}</p>
+    </section>
+
+    <section>
+        <h2>Importes</h2>
+        <p>Subtotal: {{ sale.subtotal_amount }} EUR</p>
+        <p>Descuento: {{ sale.discount_amount }} EUR</p>
+        <p>Impuestos: {{ sale.tax_amount }} EUR</p>
+        <p>Total: {{ sale.total_amount }} EUR</p>
+        <p>Pendiente: {{ sale.pending_amount }} EUR</p>
+    </section>
+
+    <section>
+        <h2>Lineas</h2>
+        {% for line in lines %}
+            <article>
+                <p>{{ line.product_name }} x {{ line.quantity }} ({{ line.line_total }} EUR)</p>
+                {% if is_editable %}
+                    <p>
+                        <a href="{% url 'sales:sale_line_update' store_id=store.pk sale_pk=sale.pk line_pk=line.pk %}">Editar linea</a>
+                    </p>
+                    <form method="post" action="{% url 'sales:sale_line_delete' store_id=store.pk sale_pk=sale.pk line_pk=line.pk %}">
+                        {% csrf_token %}
+                        <button type="submit">Eliminar linea</button>
+                    </form>
+                {% endif %}
+            </article>
+        {% empty %}
+            <p>Esta venta no tiene lineas.</p>
+        {% endfor %}
+    </section>
+
+    <section>
+        <h2>Acciones permitidas</h2>
+        {% if is_editable %}
+            <p><a href="{% url 'sales:sale_header_update' store_id=store.pk sale_pk=sale.pk %}">Editar cabecera</a></p>
+            <p><a href="{% url 'sales:sale_line_add' store_id=store.pk sale_pk=sale.pk %}">Anadir linea</a></p>
+            <form method="post" action="{% url 'sales:sale_complete' store_id=store.pk sale_pk=sale.pk %}">
+                {% csrf_token %}
+                <button type="submit">Completar venta</button>
+            </form>
+            <p><a href="{% url 'sales:sale_cancel' store_id=store.pk sale_pk=sale.pk %}">Cancelar venta</a></p>
+        {% endif %}
+
+        {% if is_completed %}
+            <p><a href="{% url 'sales:return_create' store_id=store.pk sale_pk=sale.pk %}">Crear devolucion</a></p>
+        {% endif %}
+
+        <p><a href="{% url 'sales:sale_list' store_id=store.pk %}">Volver al listado</a></p>
+    </section>
+
+    <section>
+        <h2>Devoluciones asociadas</h2>
+        {% for return_doc in returns %}
+            <p>
+                <a href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">
+                    Devolucion {{ return_doc.pk }} - {{ return_doc.get_status_display }} - {{ return_doc.total_amount }} EUR
+                </a>
+            </p>
+        {% empty %}
+            <p>No hay devoluciones asociadas.</p>
+        {% endfor %}
+    </section>
+</main>
+{% endblock %}

@@ -1,6 +1,7 @@
 from django.urls import path
 
-from . import views
+from apps.sales import views
+
 
 app_name = "sales"
 
@@ -19,7 +20,7 @@ urlpatterns = [
         name="sale_detail",
     ),
     path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/edit/",
+        "stores/<int:store_id>/sales/<int:sale_pk>/header/",
         views.SaleHeaderUpdateView.as_view(),
         name="sale_header_update",
     ),
@@ -54,7 +55,7 @@ urlpatterns = [
         name="return_list",
     ),
     path(
-        "stores/<int:store_id>/sales/<int:sale_pk>/return/",
+        "stores/<int:store_id>/sales/<int:sale_pk>/returns/create/",
         views.SaleReturnCreateView.as_view(),
         name="return_create",
     ),
