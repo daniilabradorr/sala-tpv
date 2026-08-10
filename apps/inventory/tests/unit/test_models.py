@@ -14,6 +14,14 @@ from apps.inventory.tests.factories import (
     create_inventory_product,
     create_inventory_store,
 )
+from apps.sales.tests.factories import (
+    create_sale,
+    create_sale_line,
+    create_sale_return,
+    create_sale_return_line,
+    create_sales_product,
+    create_sales_tax,
+)
 
 
 class InventoryModelsTests(TestCase):
@@ -188,3 +196,142 @@ class InventoryModelsTests(TestCase):
                 system_stock=Decimal("-3.000"),
                 counted_stock=Decimal("-1.000"),
             )
+
+
+class StockMovementSalesIntegrityTests(TestCase):
+    """Protege las relaciones Sales que originan un movimiento de stock."""
+
+    def setUp(self):  # noqa: N802
+        self.business = create_business(
+            name="Inventory Sales Relations", slug="inventory-sales-relations"
+        )
+        self.store = create_inventory_store(business=self.business)
+        self.user = create_inventory_owner(business=self.business)
+        self.tax = create_sales_tax(business=self.business)
+        self.product = create_sales_product(business=self.business, tax=self.tax)
+        self.item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("10.000"),
+        )
+        self.sale = create_sale(
+            business=self.business, store=self.store, opened_by=self.user
+        )
+        self.line = create_sale_line(
+            business=self.business, sale=self.sale, product=self.product
+        )
+        self.return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+        )
+        self.return_line = create_sale_return_line(
+            business=self.business,
+            return_doc=self.return_doc,
+            original_line=self.line,
+        )
+
+    def movement(self, **overrides):
+        values = {
+            "business": self.business,
+            "inventory_item": self.item,
+            "store": self.store,
+            "product": self.product,
+            "movement_type": StockMovement.TYPE_SALE_RETURN,
+            "quantity": Decimal("1.000"),
+            "stock_before": Decimal("10.000"),
+            "stock_after": Decimal("11.000"),
+        }
+        values.update(overrides)
+        return StockMovement(**values)
+
+    def test_rejects_sale_from_another_business(self):
+        other_business = create_business(
+            name="Other Sales Relations", slug="other-sales-relations"
+        )
+        other_store = create_inventory_store(business=other_business)
+        other_user = create_inventory_owner(business=other_business)
+        other_sale = create_sale(
+            business=other_business, store=other_store, opened_by=other_user
+        )
+
+        with self.assertRaises(ValidationError):
+            self.movement(sale=other_sale).full_clean()
+
+    def test_rejects_sale_line_from_another_sale(self):
+        other_sale = create_sale(
+            business=self.business, store=self.store, opened_by=self.user
+        )
+        other_line = create_sale_line(
+            business=self.business, sale=other_sale, product=self.product
+        )
+
+        with self.assertRaises(ValidationError):
+            self.movement(sale=self.sale, sale_line=other_line).full_clean()
+
+    def test_rejects_return_from_another_sale(self):
+        other_sale = create_sale(
+            business=self.business, store=self.store, opened_by=self.user
+        )
+        other_return = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=other_sale,
+            created_by=self.user,
+        )
+
+        with self.assertRaises(ValidationError):
+            self.movement(sale=self.sale, sale_return=other_return).full_clean()
+
+    def test_rejects_return_line_from_another_return(self):
+        other_return = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+        )
+
+        with self.assertRaises(ValidationError):
+            self.movement(
+                sale=self.sale,
+                sale_return=self.return_doc,
+                sale_return_line=create_sale_return_line(
+                    business=self.business,
+                    return_doc=other_return,
+                    original_line=self.line,
+                ),
+            ).full_clean()
+
+    def test_rejects_return_line_product_without_sale_line(self):
+        other_product = create_sales_product(
+            business=self.business, tax=self.tax, name="Otro producto"
+        )
+        other_item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=other_product,
+        )
+
+        with self.assertRaises(ValidationError):
+            self.movement(
+                inventory_item=other_item,
+                product=other_product,
+                sale=self.sale,
+                sale_return=self.return_doc,
+                sale_return_line=self.return_line,
+                sale_line=None,
+            ).full_clean()
+
+    def test_accepts_fully_coherent_sales_references(self):
+        movement = self.movement(
+            sale=self.sale,
+            sale_line=self.line,
+            sale_return=self.return_doc,
+            sale_return_line=self.return_line,
+        )
+
+        movement.save()
+
+        self.assertIsNotNone(movement.pk)

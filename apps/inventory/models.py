@@ -922,6 +922,7 @@ class StockMovement(TimeStampedModel):
                     "La devolución debe pertenecer a la misma tienda."
                 )
         if self.sale_return_line_id:
+            original_line = self.sale_return_line.original_line
             if (
                 not self.sale_return_id
                 or self.sale_return_line.return_doc_id != self.sale_return_id
@@ -929,12 +930,17 @@ class StockMovement(TimeStampedModel):
                 errors["sale_return_line"] = (
                     "La línea debe pertenecer a la devolución indicada."
                 )
-            if (
-                self.sale_line_id
-                and self.sale_return_line.original_line_id != self.sale_line_id
-            ):
+            if self.sale_id and original_line.sale_id != self.sale_id:
+                errors["sale_return_line"] = (
+                    "La línea devuelta debe pertenecer a la venta indicada."
+                )
+            if self.sale_line_id and original_line.pk != self.sale_line_id:
                 errors["sale_return_line"] = (
                     "La línea devuelta debe coincidir con la línea de venta."
+                )
+            if original_line.product_id and original_line.product_id != self.product_id:
+                errors["product"] = (
+                    "El producto debe coincidir con la línea original devuelta."
                 )
 
         if self.quantity is None or self.quantity <= Decimal("0.000"):
