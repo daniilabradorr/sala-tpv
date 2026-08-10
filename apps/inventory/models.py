@@ -638,6 +638,39 @@ class StockMovement(TimeStampedModel):
         related_name="stock_movements",
     )
 
+    sale = models.ForeignKey(
+        "sales.Sale",
+        verbose_name="Venta",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    sale_line = models.ForeignKey(
+        "sales.SaleLine",
+        verbose_name="Línea de venta",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    sale_return = models.ForeignKey(
+        "sales.SaleReturn",
+        verbose_name="Devolución de venta",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    sale_return_line = models.ForeignKey(
+        "sales.SaleReturnLine",
+        verbose_name="Línea de devolución",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+
     inventory_item = models.ForeignKey(
         InventoryItem,
         verbose_name="Stock afectado",
@@ -719,7 +752,7 @@ class StockMovement(TimeStampedModel):
         blank=True,
         help_text=(
             "ID externo o interno del documento relacionado. "
-            "Temporal hasta crear sales/purchases."
+            "Se conserva como referencia genérica y por compatibilidad."
         ),
     )
 
@@ -855,6 +888,53 @@ class StockMovement(TimeStampedModel):
             if self.stock_adjustment_line.inventory_item_id != self.inventory_item_id:
                 errors["stock_adjustment_line"] = (
                     "La línea de ajuste debe coincidir con el stock afectado."
+                )
+
+        sales_objects = {
+            "sale": self.sale if self.sale_id else None,
+            "sale_line": self.sale_line if self.sale_line_id else None,
+            "sale_return": self.sale_return if self.sale_return_id else None,
+            "sale_return_line": (
+                self.sale_return_line if self.sale_return_line_id else None
+            ),
+        }
+        for field, obj in sales_objects.items():
+            if obj is not None and obj.business_id != self.business_id:
+                errors[field] = "La referencia debe pertenecer al mismo negocio."
+
+        if self.sale_id and self.sale.store_id != self.store_id:
+            errors["sale"] = "La venta debe pertenecer a la misma tienda."
+        if self.sale_line_id:
+            if not self.sale_id or self.sale_line.sale_id != self.sale_id:
+                errors["sale_line"] = "La línea debe pertenecer a la venta indicada."
+            if (
+                self.sale_line.product_id
+                and self.sale_line.product_id != self.product_id
+            ):
+                errors["product"] = "El producto debe coincidir con la línea de venta."
+        if self.sale_return_id:
+            if not self.sale_id or self.sale_return.original_sale_id != self.sale_id:
+                errors["sale_return"] = (
+                    "La devolución debe corresponder a la venta indicada."
+                )
+            if self.sale_return.store_id != self.store_id:
+                errors["sale_return"] = (
+                    "La devolución debe pertenecer a la misma tienda."
+                )
+        if self.sale_return_line_id:
+            if (
+                not self.sale_return_id
+                or self.sale_return_line.return_doc_id != self.sale_return_id
+            ):
+                errors["sale_return_line"] = (
+                    "La línea debe pertenecer a la devolución indicada."
+                )
+            if (
+                self.sale_line_id
+                and self.sale_return_line.original_line_id != self.sale_line_id
+            ):
+                errors["sale_return_line"] = (
+                    "La línea devuelta debe coincidir con la línea de venta."
                 )
 
         if self.quantity is None or self.quantity <= Decimal("0.000"):

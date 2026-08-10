@@ -64,6 +64,7 @@ def create_entry(
     balance_after=Decimal("10.00"),
     created_by=None,
     notes="",
+    sale=None,
 ):
     return CustomerAccountEntry.objects.create(
         business=business,
@@ -73,6 +74,7 @@ def create_entry(
         balance_after=balance_after,
         created_by=created_by,
         notes=notes,
+        sale=sale,
     )
 
 

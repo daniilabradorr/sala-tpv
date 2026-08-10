@@ -135,6 +135,18 @@ class SaleServicesTests(TestCase):
 
         self.assertEqual(line.product_name, "Café")
         self.assertEqual(line.tax_rate, Decimal("21.00"))
+        self.assertEqual(line.tax_type, self.tax.tax_type)
+        self.assertEqual(line.clave_regimen, self.tax.clave_regimen)
+        self.assertEqual(line.calificacion_operacion, self.tax.calificacion_operacion)
+        self.assertEqual(line.operacion_exenta, self.tax.operacion_exenta)
+        self.assertEqual(
+            line.has_equivalence_surcharge,
+            self.tax.has_equivalence_surcharge,
+        )
+        self.assertEqual(
+            line.equivalence_surcharge_rate,
+            self.tax.equivalence_surcharge_rate,
+        )
         self.assertEqual(line.tax_amount, Decimal("3.78"))
         self.assertEqual(line.line_total, Decimal("21.78"))
         self.assertEqual(sale.subtotal_amount, Decimal("20.00"))
@@ -142,6 +154,40 @@ class SaleServicesTests(TestCase):
         self.assertEqual(sale.tax_amount, Decimal("3.78"))
         self.assertEqual(sale.total_amount, Decimal("21.78"))
         self.assertEqual(sale.pending_amount, Decimal("21.78"))
+
+    def test_tax_and_product_changes_do_not_rewrite_line_snapshot(self):
+        sale = self.open_basic_sale()
+        line = self.add_basic_line(sale)
+        original_snapshot = (
+            line.tax_rate,
+            line.tax_type,
+            line.clave_regimen,
+            line.calificacion_operacion,
+        )
+
+        self.tax.rate = Decimal("10.00")
+        self.tax.save()
+        replacement_tax = create_sales_tax(business=self.business, rate=Decimal("4.00"))
+        self.product.tax = replacement_tax
+        self.product.save()
+        update_sale_line(
+            business=self.business,
+            sale=sale,
+            line=line,
+            quantity=Decimal("2.000"),
+            user=self.owner,
+        )
+        line.refresh_from_db()
+
+        self.assertEqual(
+            (
+                line.tax_rate,
+                line.tax_type,
+                line.clave_regimen,
+                line.calificacion_operacion,
+            ),
+            original_snapshot,
+        )
 
     def test_add_line_rejects_manual_price_when_disabled(self):
         self.pos_settings.allow_manual_price = False
@@ -203,7 +249,7 @@ class SaleServicesTests(TestCase):
 
     def test_complete_sale_reduces_stock_and_creates_movement(self):
         sale = self.open_basic_sale()
-        self.add_basic_line(sale, quantity=Decimal("2.000"))
+        line = self.add_basic_line(sale, quantity=Decimal("2.000"))
 
         completed = complete_sale(
             business=self.business,
@@ -216,13 +262,17 @@ class SaleServicesTests(TestCase):
         self.assertEqual(completed.closed_by, self.owner)
         self.assertIsNotNone(completed.completed_at)
         self.assertEqual(self.inventory_item.current_stock, Decimal("18.000"))
-        self.assertTrue(
-            StockMovement.objects.filter(
-                business=self.business,
-                movement_type=StockMovement.TYPE_SALE,
-                quantity=Decimal("2.000"),
-            ).exists()
+        movement = StockMovement.objects.get(
+            business=self.business,
+            movement_type=StockMovement.TYPE_SALE,
+            quantity=Decimal("2.000"),
         )
+        self.assertEqual(movement.sale, sale)
+        self.assertEqual(movement.sale_line, line)
+        self.assertEqual(movement.store, self.store)
+        self.assertEqual(movement.product, self.product)
+        self.assertEqual(movement.reference_type, StockMovement.REF_SALE)
+        self.assertTrue(movement.reference_id)
 
     def test_complete_sale_is_idempotent(self):
         sale = self.open_basic_sale()
@@ -425,15 +475,21 @@ class SaleReturnServicesTests(TestCase):
         return_line.refresh_from_db()
 
         self.assertEqual(completed.status, SaleReturnStatusChoices.COMPLETED)
+        self.assertEqual(completed.approved_by, self.owner)
+        self.assertIsNotNone(completed.completed_at)
         self.assertEqual(return_line.amount, Decimal("12.10"))
         self.assertEqual(self.inventory_item.current_stock, Decimal("9.000"))
         self.assertEqual(self.sale.status, SaleStatusChoices.COMPLETED)
-        self.assertTrue(
-            StockMovement.objects.filter(
-                movement_type=StockMovement.TYPE_SALE_RETURN,
-                quantity=Decimal("1.000"),
-            ).exists()
+        movement = StockMovement.objects.get(
+            movement_type=StockMovement.TYPE_SALE_RETURN,
+            quantity=Decimal("1.000"),
         )
+        self.assertEqual(movement.sale, self.sale)
+        self.assertEqual(movement.sale_line, self.sale_line)
+        self.assertEqual(movement.sale_return, return_doc)
+        self.assertEqual(movement.sale_return_line, return_line)
+        self.assertEqual(movement.reference_type, StockMovement.REF_SALE)
+        self.assertTrue(movement.reference_id)
 
     def test_full_return_marks_sale_as_returned(self):
         return_doc = create_sale_return(
