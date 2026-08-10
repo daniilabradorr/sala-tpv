@@ -103,6 +103,10 @@ def _create_stock_movement(
     reason="",
     notes="",
     operation_id=None,
+    sale=None,
+    sale_line=None,
+    sale_return=None,
+    sale_return_line=None,
 ):
     """Crea un movimiento de stock.
 
@@ -130,6 +134,10 @@ def _create_stock_movement(
         notes=notes or "",
         occurred_at=timezone.now(),
         created_by=user,
+        sale=sale,
+        sale_line=sale_line,
+        sale_return=sale_return,
+        sale_return_line=sale_return_line,
     )
 
     if operation_id:
@@ -346,6 +354,10 @@ def increase_stock(
     reason="",
     notes="",
     operation_id=None,
+    sale=None,
+    sale_line=None,
+    sale_return=None,
+    sale_return_line=None,
 ):
     """Incrementa stock y crea movimiento de entrada."""
 
@@ -391,6 +403,10 @@ def increase_stock(
             reason=reason,
             notes=notes,
             operation_id=operation_id,
+            sale=sale,
+            sale_line=sale_line,
+            sale_return=sale_return,
+            sale_return_line=sale_return_line,
         )
 
     return locked_item, movement
@@ -410,6 +426,10 @@ def decrease_stock(
     notes="",
     operation_id=None,
     allow_negative=False,
+    sale=None,
+    sale_line=None,
+    sale_return=None,
+    sale_return_line=None,
 ):
     """Reduce stock y crea movimiento de salida."""
 
@@ -458,6 +478,10 @@ def decrease_stock(
             reason=reason,
             notes=notes,
             operation_id=operation_id,
+            sale=sale,
+            sale_line=sale_line,
+            sale_return=sale_return,
+            sale_return_line=sale_return_line,
         )
 
     return locked_item, movement
