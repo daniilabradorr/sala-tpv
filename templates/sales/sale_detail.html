@@ -59,6 +59,7 @@
         {% endif %}
 
         {% if is_completed %}
+            {% if sale.pending_amount > 0 %}<p><a href="{% url 'payments:create' store_id=store.pk sale_id=sale.pk %}">Registrar cobro</a></p>{% endif %}
             <p><a href="{% url 'sales:return_create' store_id=store.pk sale_pk=sale.pk %}">Crear devolucion</a></p>
         {% endif %}
 

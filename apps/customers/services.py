@@ -228,6 +228,8 @@ class CustomerAccountService:
         amount_delta,
         user=None,
         notes="",
+        sale=None,
+        payment=None,
         check_customer_active=False,
         check_account_blocked=False,
         check_credit_limit=False,
@@ -240,6 +242,17 @@ class CustomerAccountService:
             raise ValidationError("El importe del movimiento no puede ser cero.")
 
         locked_account = cls._get_locked_account(business=business, account=account)
+
+        if sale is not None:
+            if sale.business_id != business.pk:
+                raise ValidationError("La venta debe pertenecer al mismo negocio.")
+            if sale.customer_id != locked_account.customer_id:
+                raise ValidationError("La venta no pertenece al cliente de la cuenta.")
+        if payment is not None:
+            if payment.business_id != business.pk:
+                raise ValidationError("El pago debe pertenecer al mismo negocio.")
+            if sale is not None and payment.sale_id != sale.pk:
+                raise ValidationError("El pago no corresponde a la venta indicada.")
 
         if check_customer_active and not locked_account.customer.is_active:
             raise ValidationError(
@@ -269,14 +282,33 @@ class CustomerAccountService:
             balance_after=balance_after,
             created_by=user,
             notes=(notes or "").strip(),
+            sale=sale,
+            payment=payment,
         )
         entry.save()
         return locked_account, entry
 
     @classmethod
-    def create_charge(cls, *, business, account, amount, user=None, notes=""):
+    @transaction.atomic
+    def create_charge(
+        cls, *, business, account, amount, user=None, notes="", sale=None
+    ):
         """Registra una deuda nueva del cliente."""
         amount = cls._positive_amount(amount)
+        if sale is not None:
+            locked_account = cls._get_locked_account(business=business, account=account)
+            existing = CustomerAccountEntry.objects.filter(
+                business=business,
+                account=locked_account,
+                sale=sale,
+                entry_type=EntryTypeChoices.CHARGE,
+            ).first()
+            if existing:
+                if existing.amount != amount:
+                    raise ValidationError(
+                        "La venta ya tiene un cargo con un importe diferente."
+                    )
+                return locked_account, existing
         return cls._apply_entry(
             business=business,
             account=account,
@@ -284,13 +316,16 @@ class CustomerAccountService:
             amount_delta=amount,
             user=user,
             notes=notes,
+            sale=sale,
             check_customer_active=True,
             check_account_blocked=True,
             check_credit_limit=True,
         )
 
     @classmethod
-    def register_payment(cls, *, business, account, amount, user=None, notes=""):
+    def register_payment(
+        cls, *, business, account, amount, user=None, notes="", sale=None, payment=None
+    ):
         """Registra un pago recibido del cliente."""
         amount = cls._positive_amount(amount)
         return cls._apply_entry(
@@ -300,10 +335,14 @@ class CustomerAccountService:
             amount_delta=-amount,
             user=user,
             notes=notes,
+            sale=sale,
+            payment=payment,
         )
 
     @classmethod
-    def register_refund(cls, *, business, account, amount, user=None, notes=""):
+    def register_refund(
+        cls, *, business, account, amount, user=None, notes="", sale=None, payment=None
+    ):
         """Registra un reembolso a favor del cliente."""
         amount = cls._positive_amount(amount)
         return cls._apply_entry(
@@ -313,6 +352,8 @@ class CustomerAccountService:
             amount_delta=-amount,
             user=user,
             notes=notes,
+            sale=sale,
+            payment=payment,
         )
 
     @classmethod
