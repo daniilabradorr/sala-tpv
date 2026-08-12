@@ -18,6 +18,7 @@ from apps.customers.services import (
     _validate_user_business,
 )
 from apps.customers.tests.factories import create_account, create_customer_user
+from apps.sales.tests.factories import create_sale, create_sales_store
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_business, create_user
 
@@ -232,6 +233,18 @@ class CustomerAccountServiceTests(TestCase):
             credit_limit=Decimal("100.00"),
         )
 
+    def _sale(self, *, business=None, customer=None):
+        business = business or self.business
+        user = self.user
+        if business != self.business:
+            user = create_customer_user(business=business)
+        return create_sale(
+            business=business,
+            store=create_sales_store(business=business),
+            opened_by=user,
+            customer=customer,
+        )
+
     def test_update_account_settings_success_zero_positive_and_no_entries(self):
         CustomerAccountService.update_account_settings(
             business=self.business,
@@ -286,6 +299,49 @@ class CustomerAccountServiceTests(TestCase):
         self.assertEqual(entry.balance_after, locked.balance)
         self.assertEqual(entry.notes, "ok")
         self.assertEqual(CustomerAccountEntry.objects.count(), 1)
+
+    def test_create_charge_accepts_optional_matching_sale(self):
+        sale = self._sale(customer=self.account.customer)
+        _, entry = CustomerAccountService.create_charge(
+            business=self.business,
+            account=self.account,
+            amount="10.00",
+            user=self.user,
+            sale=sale,
+        )
+        self.assertEqual(entry.sale, sale)
+
+    def test_create_charge_without_sale_remains_supported(self):
+        _, entry = CustomerAccountService.create_charge(
+            business=self.business,
+            account=self.account,
+            amount="10.00",
+            user=self.user,
+        )
+        self.assertIsNone(entry.sale)
+
+    def test_create_charge_rejects_cross_business_and_customer_sales(self):
+        other_business = create_business(name="Other", slug="svc-sale-other")
+        with self.assertRaises(ValidationError):
+            CustomerAccountService.create_charge(
+                business=self.business,
+                account=self.account,
+                amount="10.00",
+                user=self.user,
+                sale=self._sale(business=other_business),
+            )
+        other_account = create_account(business=self.business)
+        with self.assertRaises(ValidationError):
+            CustomerAccountService.create_charge(
+                business=self.business,
+                account=self.account,
+                amount="10.00",
+                user=self.user,
+                sale=self._sale(customer=other_account.customer),
+            )
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.balance, Decimal("0.00"))
+        self.assertEqual(CustomerAccountEntry.objects.count(), 0)
 
     def test_create_charge_rejections(self):
         for amount in ["0.00", "-1.00", "abc"]:

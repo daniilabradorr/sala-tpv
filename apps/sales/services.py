@@ -481,26 +481,16 @@ def _validate_manual_pricing(
 
 
 def _validate_supported_tax_snapshot(tax):
-    """Impide perder datos fiscales que SaleLine aún no almacena."""
+    """Rechaza tratamientos cuyo cálculo económico aún no está soportado."""
 
     if getattr(tax, "tax_type", "IVA") != "IVA":
         raise ValidationError(
-            {
-                "product": (
-                    "SaleLine todavía no guarda el tipo de impuesto "
-                    "necesario para esta operación."
-                )
-            }
+            {"product": ("El cálculo económico solo admite IVA actualmente.")}
         )
 
     if getattr(tax, "clave_regimen", "01") not in (None, "", "01"):
         raise ValidationError(
-            {
-                "product": (
-                    "SaleLine todavía no guarda la clave de régimen "
-                    "necesaria para esta operación."
-                )
-            }
+            {"product": ("El cálculo económico solo admite el régimen general.")}
         )
 
     if getattr(tax, "has_equivalence_surcharge", False):
@@ -508,19 +498,14 @@ def _validate_supported_tax_snapshot(tax):
             {
                 "product": (
                     "El impuesto aplica recargo de equivalencia, pero "
-                    "SaleLine todavía no guarda ese snapshot fiscal."
+                    "el cálculo económico aún no está soportado."
                 )
             }
         )
 
     if getattr(tax, "operacion_exenta", None):
         raise ValidationError(
-            {
-                "product": (
-                    "Las operaciones exentas requieren ampliar el "
-                    "snapshot fiscal de SaleLine."
-                )
-            }
+            {"product": ("Las operaciones exentas aún no están soportadas.")}
         )
 
     ordinary_qualification = getattr(
@@ -534,12 +519,7 @@ def _validate_supported_tax_snapshot(tax):
         != ordinary_qualification
     ):
         raise ValidationError(
-            {
-                "product": (
-                    "El tratamiento fiscal del producto no puede "
-                    "congelarse por completo con SaleLine."
-                )
-            }
+            {"product": ("El tratamiento fiscal todavía no está soportado.")}
         )
 
 
@@ -788,6 +768,12 @@ def add_sale_line(
         unit_base_price=calculated["unit_base_price"],
         discount_amount=calculated["discount_amount"],
         tax_rate=calculated["tax_rate"],
+        tax_type=tax.tax_type,
+        clave_regimen=tax.clave_regimen,
+        calificacion_operacion=tax.calificacion_operacion,
+        operacion_exenta=tax.operacion_exenta,
+        has_equivalence_surcharge=tax.has_equivalence_surcharge,
+        equivalence_surcharge_rate=tax.equivalence_surcharge_rate,
         tax_amount=calculated["tax_amount"],
         line_total=calculated["line_total"],
     )
@@ -1024,6 +1010,8 @@ def complete_sale(*, business, sale, closed_by):
                 notes=f"Línea de venta #{line.pk}",
                 operation_id=operation_id,
                 allow_negative=pos_settings.allow_sale_without_stock,
+                sale=locked_sale,
+                sale_line=line,
             )
 
     locked_sale.status = SaleStatusChoices.COMPLETED
@@ -1536,13 +1524,24 @@ def complete_sale_return(
                 reason=f"Entrada por devolución #{locked_return.pk}",
                 notes=(f"Línea original #{return_line.original_line_id}"),
                 operation_id=operation_id,
+                sale=locked_sale,
+                sale_line=return_line.original_line,
+                sale_return=locked_return,
+                sale_return_line=return_line,
             )
 
     locked_return.total_amount = total_amount
     locked_return.status = SaleReturnStatusChoices.COMPLETED
+    locked_return.approved_by = completed_by
     locked_return.completed_at = timezone.now()
     locked_return.save(
-        update_fields=["total_amount", "status", "completed_at", "updated_at"]
+        update_fields=[
+            "total_amount",
+            "status",
+            "approved_by",
+            "completed_at",
+            "updated_at",
+        ]
     )
 
     charge = (
