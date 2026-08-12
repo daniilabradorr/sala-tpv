@@ -1,6 +1,7 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.db import connections
@@ -24,6 +25,7 @@ from apps.payments.models import (
 )
 from apps.payments.selectors import get_sale_payment_summary
 from apps.payments.services import (
+    _recalculate_sale_payment_state,
     cancel_payment,
     register_refund,
     register_sale_payment,
@@ -46,7 +48,9 @@ from apps.sales.tests.factories import (
     create_sales_store,
     create_sales_tax,
     create_sales_user,
+    create_store_access,
 )
+from apps.users.models import RoleChoices
 from apps.sales.services import complete_sale_return
 
 
@@ -161,6 +165,42 @@ class PaymentsTests(TestCase):
             )
         with self.assertRaises(ValidationError):
             self.pay("10", self.cash)
+
+    def test_cash_session_from_other_business_or_store_is_rejected(self):
+        other_store = create_sales_store(business=self.business)
+        other_store_session = self.create_session(store=other_store)
+        with self.assertRaises(ValidationError):
+            register_sale_payment(
+                business=self.business,
+                sale_id=self.sale.pk,
+                method_id=self.card.pk,
+                amount=10,
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+                cash_session_id=other_store_session.pk,
+            )
+
+        foreign_store = create_sales_store(business=self.other_business)
+        foreign_user = create_sales_user(business=self.other_business)
+        foreign_register = CashRegister.objects.create(
+            business=self.other_business, store=foreign_store, name="Caja extranjera"
+        )
+        foreign_session = CashSession.objects.create(
+            business=self.other_business,
+            store=foreign_store,
+            cash_register=foreign_register,
+            opened_by=foreign_user,
+        )
+        with self.assertRaises(ValidationError):
+            register_sale_payment(
+                business=self.business,
+                sale_id=self.sale.pk,
+                method_id=self.card.pk,
+                amount=10,
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+                cash_session_id=foreign_session.pk,
+            )
 
     def test_later_cash_refund_uses_current_session(self):
         current = self.create_session()
@@ -334,6 +374,54 @@ class PaymentsTests(TestCase):
                 idempotency_key=uuid.uuid4(),
             )
 
+    def test_refund_requires_sensitive_permission_and_valid_pin(self):
+        self.pay("20")
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("20"),
+        )
+        settings = self.business.pos_settings
+        settings.require_pin_for_sensitive_actions = True
+        settings.save()
+        with self.assertRaises(ValidationError):
+            register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=self.card.pk,
+                amount=20,
+                user=self.user,
+                pin="wrong",
+                idempotency_key=uuid.uuid4(),
+            )
+        refund = register_refund(
+            business=self.business,
+            sale_return_id=returned.pk,
+            method_id=self.card.pk,
+            amount=20,
+            user=self.user,
+            pin="1234",
+            idempotency_key=uuid.uuid4(),
+        )
+        self.assertEqual(refund.status, PaymentStatusChoices.COMPLETED)
+
+        cashier = create_sales_user(business=self.business, role=RoleChoices.CASHIER)
+        create_store_access(
+            business=self.business, user=cashier, store=self.store, can_sell=True
+        )
+        with self.assertRaises(ValidationError):
+            register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=self.card.pk,
+                amount=20,
+                user=cashier,
+                idempotency_key=uuid.uuid4(),
+            )
+
     def test_cancel_pending_is_idempotent_and_completed_is_terminal(self):
         pending = Payment.objects.create(
             business=self.business,
@@ -379,6 +467,31 @@ class PaymentsTests(TestCase):
         self.assertEqual(entry.sale, self.sale)
         account.refresh_from_db()
         self.assertEqual(account.balance, 0)
+
+    def test_customer_account_failure_rolls_back_payment(self):
+        customer = create_sales_customer(business=self.business)
+        account = CustomerAccount.objects.create(
+            business=self.business, customer=customer, credit_limit=Decimal("100")
+        )
+        self.sale.customer = customer
+        self.sale.save()
+        CustomerAccountService.create_charge(
+            business=self.business,
+            account=account,
+            amount=100,
+            user=self.user,
+            sale=self.sale,
+        )
+        with patch.object(
+            CustomerAccountService,
+            "register_payment",
+            side_effect=ValidationError("fallo de cuenta"),
+        ):
+            with self.assertRaises(ValidationError):
+                self.pay("40")
+        self.assertFalse(Payment.objects.filter(sale=self.sale).exists())
+        account.refresh_from_db()
+        self.assertEqual(account.balance, Decimal("100"))
 
     def test_non_completed_idempotent_replay_never_reduces_customer_debt(self):
         customer = create_sales_customer(business=self.business)
@@ -521,6 +634,11 @@ class PaymentsTests(TestCase):
             idempotency_key=uuid.uuid4(),
         )
         self.assertEqual(monetary.amount, Decimal("10"))
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.pending_amount, Decimal("0"))
+        self.assertEqual(self.sale.payment_status, SalePaymentStatus.PAID)
+        with self.assertRaises(ValidationError):
+            self.pay("1")
         with self.assertRaises(ValidationError):
             register_refund(
                 business=self.business,
@@ -530,6 +648,83 @@ class PaymentsTests(TestCase):
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
             )
+
+    def test_partial_return_reduces_collectable_amount(self):
+        create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("50"),
+        )
+        _recalculate_sale_payment_state(self.sale)
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.pending_amount, Decimal("50"))
+        self.pay("50")
+        with self.assertRaises(ValidationError):
+            self.pay("1")
+
+    def test_partial_return_fully_refunded_remains_paid(self):
+        self.pay("100")
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("20"),
+        )
+        register_refund(
+            business=self.business,
+            sale_return_id=returned.pk,
+            method_id=self.card.pk,
+            amount=20,
+            user=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.pending_amount, Decimal("0"))
+        self.assertEqual(self.sale.payment_status, SalePaymentStatus.PAID)
+
+    def test_full_return_and_full_refund_is_refunded(self):
+        self.pay("100")
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("100"),
+        )
+        register_refund(
+            business=self.business,
+            sale_return_id=returned.pk,
+            method_id=self.card.pk,
+            amount=100,
+            user=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.pending_amount, Decimal("0"))
+        self.assertEqual(self.sale.payment_status, SalePaymentStatus.REFUNDED)
+
+    def test_full_return_never_paid_is_unpaid_with_zero_pending(self):
+        create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("100"),
+        )
+        _recalculate_sale_payment_state(self.sale)
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.pending_amount, Decimal("0"))
+        self.assertEqual(self.sale.payment_status, SalePaymentStatus.UNPAID)
+        self.assertFalse(
+            Payment.objects.filter(payment_type=PaymentTypeChoices.REFUND).exists()
+        )
 
 
 class PaymentModelTests(TestCase):

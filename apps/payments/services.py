@@ -131,28 +131,38 @@ def _existing(*, business, key, sale, method, payment_type, amount, sale_return=
     return payment
 
 
-def _totals(sale):
+def _get_sale_payment_balance(sale):
+    """Devuelve un único balance económico persistido de la venta."""
     values = (
         Payment.objects.filter(sale=sale, status=PaymentStatusChoices.COMPLETED)
         .values("payment_type")
         .annotate(total=Sum("amount"))
     )
     totals = {row["payment_type"]: row["total"] for row in values}
-    return (
-        totals.get(PaymentTypeChoices.SALE_PAYMENT, ZERO),
-        totals.get(PaymentTypeChoices.REFUND, ZERO),
-    )
-
-
-def _recalculate_sale_payment_state(locked_sale):
-    paid, refunded = _totals(locked_sale)
-    pending = max(locked_sale.total_amount - paid, ZERO)
+    paid_total = totals.get(PaymentTypeChoices.SALE_PAYMENT, ZERO)
+    refunded_total = totals.get(PaymentTypeChoices.REFUND, ZERO)
     returned_total = (
-        locked_sale.returns.filter(status=SaleReturnStatusChoices.COMPLETED).aggregate(
+        sale.returns.filter(status=SaleReturnStatusChoices.COMPLETED).aggregate(
             total=Sum("total_amount")
         )["total"]
         or ZERO
     )
+    gross_total = sale.total_amount
+    effective_total = max(gross_total - returned_total, ZERO)
+    net_paid = max(paid_total - refunded_total, ZERO)
+    return {
+        "gross_total": gross_total,
+        "returned_total": returned_total,
+        "effective_total": effective_total,
+        "paid_total": paid_total,
+        "refunded_total": refunded_total,
+        "net_paid": net_paid,
+        "pending_amount": max(effective_total - net_paid, ZERO),
+    }
+
+
+def _recalculate_sale_payment_state(locked_sale):
+    balance = _get_sale_payment_balance(locked_sale)
     debt_reduction = abs(
         CustomerAccountEntry.objects.filter(
             business=locked_sale.business,
@@ -162,23 +172,26 @@ def _recalculate_sale_payment_state(locked_sale):
         ).aggregate(total=Sum("amount"))["total"]
         or ZERO
     )
-    monetary_return_required = min(paid, max(returned_total - debt_reduction, ZERO))
+    monetary_return_required = min(
+        balance["paid_total"],
+        max(balance["returned_total"] - debt_reduction, ZERO),
+    )
     if (
-        paid > ZERO
-        and returned_total >= locked_sale.total_amount
-        and refunded >= monetary_return_required
+        balance["paid_total"] > ZERO
+        and balance["returned_total"] >= balance["gross_total"]
+        and balance["refunded_total"] >= monetary_return_required
     ):
         status = SalePaymentStatusChoices.REFUNDED
-    elif paid == ZERO:
+    elif balance["paid_total"] == ZERO:
         status = SalePaymentStatusChoices.UNPAID
-    elif paid < locked_sale.total_amount:
-        status = SalePaymentStatusChoices.PARTIAL
-    else:
+    elif balance["pending_amount"] == ZERO:
         status = SalePaymentStatusChoices.PAID
-    locked_sale.pending_amount = pending
+    else:
+        status = SalePaymentStatusChoices.PARTIAL
+    locked_sale.pending_amount = balance["pending_amount"]
     locked_sale.payment_status = status
     locked_sale.save(update_fields=["pending_amount", "payment_status", "updated_at"])
-    return paid, refunded
+    return balance
 
 
 def _apply_customer_debt_payment(*, business, sale, payment, user):
@@ -265,8 +278,8 @@ def register_sale_payment(
         settings=settings,
         cash_session_id=cash_session_id,
     )
-    paid, _ = _totals(sale)
-    if amount > sale.total_amount - paid:
+    balance = _get_sale_payment_balance(sale)
+    if amount > balance["pending_amount"]:
         raise ValidationError({"amount": "El importe supera lo pendiente de cobro."})
     used_methods = set(
         Payment.objects.filter(
@@ -378,7 +391,7 @@ def register_refund(
         settings=settings,
         cash_session_id=cash_session_id,
     )
-    paid, refunded = _totals(sale)
+    balance = _get_sale_payment_balance(sale)
     return_refunded = (
         Payment.objects.filter(
             sale_return=returned,
@@ -402,7 +415,7 @@ def register_refund(
         raise ValidationError(
             {"amount": "El importe supera la parte monetaria de la devolución."}
         )
-    if refunded + amount > paid:
+    if balance["refunded_total"] + amount > balance["paid_total"]:
         raise ValidationError(
             {"amount": "No se puede devolver más dinero del cobrado."}
         )

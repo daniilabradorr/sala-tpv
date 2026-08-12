@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
             "customers",
             "0002_remove_customeraccountentry_chk_custentry_type_sign_and_more",
         ),
-        ("sales", "0003_salereturn_completed_at"),
+        ("sales", "0004_saleline_tax_snapshot_salereturn_approved_by"),
     ]
     operations = [
         migrations.AddField(

@@ -1591,6 +1591,11 @@ def complete_sale_return(
     )
     locked_sale.save(update_fields=["status", "updated_at"])
 
+    # Import local para evitar un ciclo entre los módulos. La Sale ya está bloqueada.
+    from apps.payments.services import _recalculate_sale_payment_state
+
+    _recalculate_sale_payment_state(locked_sale)
+
     # Payments realizará el reembolso y Billing la rectificativa.
     return locked_return
 
