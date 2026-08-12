@@ -614,6 +614,9 @@ class PaymentsTests(TestCase):
             quantity=Decimal("0.5"),
             restock=False,
         )
+        # Ensure PIN is not required for sensitive actions in this test
+        settings.require_pin_for_sensitive_actions = False
+        settings.save(update_fields=["require_pin_for_sensitive_actions", "updated_at"])
         complete_sale_return(
             business=self.business, return_doc=returned, completed_by=self.user
         )

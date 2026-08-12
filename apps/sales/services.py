@@ -34,6 +34,9 @@ from apps.sales.models import (
     SaleStatusChoices,
 )
 from apps.users.helpers import can_perform_sensitive_action, can_sell_in_store
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 MONEY_STEP = Decimal("0.01")
@@ -155,6 +158,13 @@ def _get_pos_settings(business):
 
     if settings is None:
         raise ValidationError("El negocio no tiene configuración TPV.")
+
+    # Debug log to help track unexpected value changes during tests
+    logger.info(
+        "_get_pos_settings: require_pin_for_sensitive_actions=%s for business=%s",
+        getattr(settings, "require_pin_for_sensitive_actions", None),
+        getattr(business, "pk", None),
+    )
 
     return settings
 
@@ -1424,6 +1434,12 @@ def complete_sale_return(
     )
 
     pos_settings = _get_pos_settings(business)
+    # Log the POS setting so tests can diagnose unexpected require-pin behavior
+    logger.info(
+        "complete_sale_return: require_pin_for_sensitive_actions=%s for business=%s",
+        getattr(pos_settings, "require_pin_for_sensitive_actions", None),
+        getattr(business, "pk", None),
+    )
     _validate_sensitive_action(
         business=business,
         user=completed_by,

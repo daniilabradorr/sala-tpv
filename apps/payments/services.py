@@ -188,7 +188,14 @@ def _recalculate_sale_payment_state(locked_sale):
         status = SalePaymentStatusChoices.PAID
     else:
         status = SalePaymentStatusChoices.PARTIAL
-    locked_sale.pending_amount = balance["pending_amount"]
+    # Quantize pending amount to match model DecimalField precision
+    try:
+        pending = balance["pending_amount"].quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    except Exception:
+        pending = balance["pending_amount"]
+    locked_sale.pending_amount = pending
     locked_sale.payment_status = status
     locked_sale.save(update_fields=["pending_amount", "payment_status", "updated_at"])
     return balance

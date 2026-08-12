@@ -109,8 +109,7 @@ class PaymentMethod(TimeStampedModel):
         "Permite reembolso",
         default=True,
         help_text=(
-            "Indica si este método puede utilizarse para realizar "
-            "nuevos reembolsos."
+            "Indica si este método puede utilizarse para realizar nuevos reembolsos."
         ),
     )
 
@@ -173,22 +172,16 @@ class PaymentMethod(TimeStampedModel):
         self.code = (self.code or "").strip().lower()
 
         if not self.name:
-            errors["name"] = (
-                "El nombre del método de pago es obligatorio."
-            )
+            errors["name"] = "El nombre del método de pago es obligatorio."
 
         if not self.code:
-            errors["code"] = (
-                "El código del método de pago es obligatorio."
-            )
+            errors["code"] = "El código del método de pago es obligatorio."
 
         # ----------------------------------------------------------
         # Regla fija del MVP
         # ----------------------------------------------------------
 
-        self.affects_cash_register = (
-            self.code == PaymentMethodCodeChoices.CASH
-        )
+        self.affects_cash_register = self.code == PaymentMethodCodeChoices.CASH
 
         if errors:
             raise ValidationError(errors)
@@ -370,7 +363,6 @@ class Payment(TimeStampedModel):
                 ),
                 name="chk_payment_amount_gt_0",
             ),
-
             # ------------------------------------------------------
             # Relación PaymentType <-> SaleReturn
             #
@@ -393,7 +385,6 @@ class Payment(TimeStampedModel):
                 ),
                 name="chk_payment_type_sale_return",
             ),
-
             # ------------------------------------------------------
             # Una misma operación no puede registrarse dos veces
             # dentro del mismo Business.
@@ -441,51 +432,32 @@ class Payment(TimeStampedModel):
 
     def __str__(self):
         return (
-            f"{self.get_payment_type_display()} "
-            f"{self.amount} · Venta #{self.sale_id}"
+            f"{self.get_payment_type_display()} {self.amount} · Venta #{self.sale_id}"
         )
 
     @property
     def is_sale_payment(self):
-        return (
-            self.payment_type
-            == PaymentTypeChoices.SALE_PAYMENT
-        )
+        return self.payment_type == PaymentTypeChoices.SALE_PAYMENT
 
     @property
     def is_refund(self):
-        return (
-            self.payment_type
-            == PaymentTypeChoices.REFUND
-        )
+        return self.payment_type == PaymentTypeChoices.REFUND
 
     @property
     def is_pending(self):
-        return (
-            self.status
-            == PaymentStatusChoices.PENDING
-        )
+        return self.status == PaymentStatusChoices.PENDING
 
     @property
     def is_completed(self):
-        return (
-            self.status
-            == PaymentStatusChoices.COMPLETED
-        )
+        return self.status == PaymentStatusChoices.COMPLETED
 
     @property
     def is_failed(self):
-        return (
-            self.status
-            == PaymentStatusChoices.FAILED
-        )
+        return self.status == PaymentStatusChoices.FAILED
 
     @property
     def is_cancelled(self):
-        return (
-            self.status
-            == PaymentStatusChoices.CANCELLED
-        )
+        return self.status == PaymentStatusChoices.CANCELLED
 
     def clean(self):
         """
@@ -521,79 +493,52 @@ class Payment(TimeStampedModel):
         # ==========================================================
 
         if self.amount is None:
-            errors["amount"] = (
-                "El importe es obligatorio."
-            )
+            errors["amount"] = "El importe es obligatorio."
 
         elif self.amount <= Decimal("0.00"):
-            errors["amount"] = (
-                "El importe debe ser mayor que cero."
-            )
+            errors["amount"] = "El importe debe ser mayor que cero."
 
         # ==========================================================
         # Business / Store
         # ==========================================================
 
         if self.store_id and self.business_id:
-            if (
-                self.store.business_id
-                != self.business_id
-            ):
+            if self.store.business_id != self.business_id:
                 errors["store"] = (
-                    "La tienda debe pertenecer al mismo "
-                    "negocio que el pago."
+                    "La tienda debe pertenecer al mismo negocio que el pago."
                 )
 
         if self.sale_id and self.business_id:
-            if (
-                self.sale.business_id
-                != self.business_id
-            ):
+            if self.sale.business_id != self.business_id:
                 errors["sale"] = (
-                    "La venta debe pertenecer al mismo "
-                    "negocio que el pago."
+                    "La venta debe pertenecer al mismo negocio que el pago."
                 )
 
         if self.method_id and self.business_id:
-            if (
-                self.method.business_id
-                != self.business_id
-            ):
-                errors["method"] = (
-                    "El método de pago debe pertenecer "
-                    "al mismo negocio."
-                )
+            if self.method.business_id != self.business_id:
+                errors["method"] = "El método de pago debe pertenecer al mismo negocio."
 
         # ==========================================================
         # Sale / Store
         # ==========================================================
 
         if self.sale_id and self.store_id:
-            if (
-                self.sale.store_id
-                != self.store_id
-            ):
+            if self.sale.store_id != self.store_id:
                 errors["store"] = (
-                    "El pago debe realizarse en la misma "
-                    "tienda que la venta."
+                    "El pago debe realizarse en la misma tienda que la venta."
                 )
 
         # ==========================================================
         # Usuario
         # ==========================================================
 
-        if (
-            self.processed_by_id
-            and self.business_id
-        ):
+        if self.processed_by_id and self.business_id:
             if (
                 not self.processed_by.is_superuser
-                and self.processed_by.business_id
-                != self.business_id
+                and self.processed_by.business_id != self.business_id
             ):
                 errors["processed_by"] = (
-                    "El usuario que procesa el pago debe "
-                    "pertenecer al mismo negocio."
+                    "El usuario que procesa el pago debe pertenecer al mismo negocio."
                 )
 
         # ==========================================================
@@ -601,38 +546,24 @@ class Payment(TimeStampedModel):
         # ==========================================================
 
         if self.cash_session_id:
-            if (
-                self.business_id
-                and self.cash_session.business_id
-                != self.business_id
-            ):
+            if self.business_id and self.cash_session.business_id != self.business_id:
                 errors["cash_session"] = (
-                    "La sesión de caja debe pertenecer "
-                    "al mismo negocio."
+                    "La sesión de caja debe pertenecer al mismo negocio."
                 )
 
-            if (
-                self.store_id
-                and self.cash_session.store_id
-                != self.store_id
-            ):
+            if self.store_id and self.cash_session.store_id != self.store_id:
                 errors["cash_session"] = (
-                    "La sesión de caja debe pertenecer "
-                    "a la misma tienda que el pago."
+                    "La sesión de caja debe pertenecer a la misma tienda que el pago."
                 )
 
         # ==========================================================
         # Refund / SaleReturn
         # ==========================================================
 
-        if (
-            self.payment_type
-            == PaymentTypeChoices.REFUND
-        ):
+        if self.payment_type == PaymentTypeChoices.REFUND:
             if not self.sale_return_id:
                 errors["sale_return"] = (
-                    "Un reembolso debe estar asociado "
-                    "a una devolución comercial."
+                    "Un reembolso debe estar asociado a una devolución comercial."
                 )
 
         elif self.sale_return_id:
@@ -642,47 +573,28 @@ class Payment(TimeStampedModel):
             )
 
         if self.sale_return_id:
-            if (
-                self.business_id
-                and self.sale_return.business_id
-                != self.business_id
-            ):
+            if self.business_id and self.sale_return.business_id != self.business_id:
                 errors["sale_return"] = (
-                    "La devolución debe pertenecer "
-                    "al mismo negocio."
+                    "La devolución debe pertenecer al mismo negocio."
                 )
 
-            if (
-                self.store_id
-                and self.sale_return.store_id
-                != self.store_id
-            ):
+            if self.store_id and self.sale_return.store_id != self.store_id:
                 errors["sale_return"] = (
-                    "La devolución debe pertenecer "
-                    "a la misma tienda."
+                    "La devolución debe pertenecer a la misma tienda."
                 )
 
-            if (
-                self.sale_id
-                and self.sale_return.original_sale_id
-                != self.sale_id
-            ):
+            if self.sale_id and self.sale_return.original_sale_id != self.sale_id:
                 errors["sale_return"] = (
-                    "La devolución debe pertenecer "
-                    "a la venta indicada."
+                    "La devolución debe pertenecer a la venta indicada."
                 )
 
         # ==========================================================
         # Normalización
         # ==========================================================
 
-        self.external_reference = (
-            self.external_reference or ""
-        ).strip()
+        self.external_reference = (self.external_reference or "").strip()
 
-        self.notes = (
-            self.notes or ""
-        ).strip()
+        self.notes = (self.notes or "").strip()
 
         if errors:
             raise ValidationError(errors)
