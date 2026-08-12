@@ -25,7 +25,7 @@ from apps.payments.models import (
 )
 from apps.payments.selectors import get_sale_payment_summary
 from apps.payments.services import (
-    _recalculate_sale_payment_state,
+    recalculate_sale_payment_state,
     cancel_payment,
     register_refund,
     register_sale_payment,
@@ -148,6 +148,74 @@ class PaymentsTests(TestCase):
         )
         self.assertEqual(payment.cash_session, current)
 
+    def test_partial_payment_return_has_no_refundable_money(self):
+        # Caso A: Sale 100, paid 30, return 50 -> no hay dinero reembolsable
+        self.sale.total_amount = Decimal("100")
+        self.sale.pending_amount = Decimal("70")
+        self.sale.save(update_fields=["total_amount", "pending_amount"])
+        # pay 30
+        self.pay(Decimal("30"))
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("50"),
+        )
+        # ensure pending remains 20
+        recalc = recalculate_sale_payment_state(self.sale)
+        self.assertEqual(recalc["pending_amount"], Decimal("20"))
+        # try to refund 1 -> ValidationError
+        with self.assertRaises(ValidationError):
+            register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=self.card.pk,
+                amount=Decimal("1"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+
+    def test_partial_payment_return_only_refunds_excess_paid(self):
+        # Caso B: Sale 100, paid 60, return 50 -> refund max 10
+        self.sale.total_amount = Decimal("100")
+        self.sale.pending_amount = Decimal("40")
+        self.sale.save(update_fields=["total_amount", "pending_amount"])
+        # pay 60
+        self.pay(Decimal("60"))
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("50"),
+        )
+        # refund 10 -> OK
+        p = register_refund(
+            business=self.business,
+            sale_return_id=returned.pk,
+            method_id=self.card.pk,
+            amount=Decimal("10"),
+            user=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        self.assertEqual(p.amount, Decimal("10"))
+        recalc = recalculate_sale_payment_state(self.sale)
+        self.assertEqual(recalc["pending_amount"], Decimal("0"))
+        self.assertEqual(self.sale.payment_status, SalePaymentStatus.PAID)
+        # another refund of 1 -> ValidationError
+        with self.assertRaises(ValidationError):
+            register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=self.card.pk,
+                amount=Decimal("1"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+
     def test_cash_session_is_scoped_and_must_be_operational(self):
         settings = self.business.pos_settings
         settings.require_open_cash_register = True
@@ -204,7 +272,7 @@ class PaymentsTests(TestCase):
 
     def test_later_cash_refund_uses_current_session(self):
         current = self.create_session()
-        self.pay("20")
+        self.pay("100")
         returned = create_sale_return(
             business=self.business,
             store=self.store,
@@ -375,7 +443,7 @@ class PaymentsTests(TestCase):
             )
 
     def test_refund_requires_sensitive_permission_and_valid_pin(self):
-        self.pay("20")
+        self.pay("100")
         returned = create_sale_return(
             business=self.business,
             store=self.store,
@@ -661,7 +729,7 @@ class PaymentsTests(TestCase):
             status=SaleReturnStatusChoices.COMPLETED,
             total_amount=Decimal("50"),
         )
-        _recalculate_sale_payment_state(self.sale)
+        recalculate_sale_payment_state(self.sale)
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.pending_amount, Decimal("50"))
         self.pay("50")
@@ -721,7 +789,7 @@ class PaymentsTests(TestCase):
             status=SaleReturnStatusChoices.COMPLETED,
             total_amount=Decimal("100"),
         )
-        _recalculate_sale_payment_state(self.sale)
+        recalculate_sale_payment_state(self.sale)
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.pending_amount, Decimal("0"))
         self.assertEqual(self.sale.payment_status, SalePaymentStatus.UNPAID)

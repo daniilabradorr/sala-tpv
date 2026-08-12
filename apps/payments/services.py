@@ -161,7 +161,7 @@ def _get_sale_payment_balance(sale):
     }
 
 
-def _recalculate_sale_payment_state(locked_sale):
+def recalculate_sale_payment_state(locked_sale):
     balance = _get_sale_payment_balance(locked_sale)
     debt_reduction = abs(
         CustomerAccountEntry.objects.filter(
@@ -330,7 +330,7 @@ def register_sale_payment(
         )
         if payment is None:
             raise
-    _recalculate_sale_payment_state(sale)
+    recalculate_sale_payment_state(sale)
     _apply_customer_debt_payment(
         business=business, sale=sale, payment=payment, user=user
     )
@@ -422,6 +422,18 @@ def register_refund(
         raise ValidationError(
             {"amount": "El importe supera la parte monetaria de la devolución."}
         )
+    # Determine how much money is actually refundable from the sale
+    # based on what the customer has paid above the commercial value
+    # remaining after returns.
+    monetary_refund_due = max(balance["net_paid"] - balance["effective_total"], ZERO)
+    return_remaining_capacity = monetary_capacity - return_refunded
+    max_refundable = min(monetary_refund_due, return_remaining_capacity)
+    if amount > max_refundable:
+        raise ValidationError(
+            {
+                "amount": "El importe supera el dinero realmente reembolsable de la venta."
+            }
+        )
     if balance["refunded_total"] + amount > balance["paid_total"]:
         raise ValidationError(
             {"amount": "No se puede devolver más dinero del cobrado."}
@@ -455,7 +467,7 @@ def register_refund(
         )
         if payment is None:
             raise
-    _recalculate_sale_payment_state(sale)
+    recalculate_sale_payment_state(sale)
     return payment
 
 
@@ -493,7 +505,7 @@ def register_sale_on_account(*, business, sale_id, user):
         raise ValidationError(
             {"sale": "El cliente no tiene cuenta corriente."}
         ) from exc
-    _recalculate_sale_payment_state(sale)
+    recalculate_sale_payment_state(sale)
     if sale.pending_amount <= ZERO:
         raise ValidationError({"sale": "La venta no tiene importe pendiente."})
     return CustomerAccountService.create_charge(
