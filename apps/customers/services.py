@@ -228,6 +228,7 @@ class CustomerAccountService:
         amount_delta,
         user=None,
         notes="",
+        sale=None,
         check_customer_active=False,
         check_account_blocked=False,
         check_credit_limit=False,
@@ -240,6 +241,12 @@ class CustomerAccountService:
             raise ValidationError("El importe del movimiento no puede ser cero.")
 
         locked_account = cls._get_locked_account(business=business, account=account)
+
+        if sale is not None:
+            if sale.business_id != business.id:
+                raise ValidationError("La venta no pertenece al negocio indicado.")
+            if sale.customer_id and sale.customer_id != locked_account.customer_id:
+                raise ValidationError("La venta no pertenece al cliente de la cuenta.")
 
         if check_customer_active and not locked_account.customer.is_active:
             raise ValidationError(
@@ -269,12 +276,15 @@ class CustomerAccountService:
             balance_after=balance_after,
             created_by=user,
             notes=(notes or "").strip(),
+            sale=sale,
         )
         entry.save()
         return locked_account, entry
 
     @classmethod
-    def create_charge(cls, *, business, account, amount, user=None, notes=""):
+    def create_charge(
+        cls, *, business, account, amount, user=None, notes="", sale=None
+    ):
         """Registra una deuda nueva del cliente."""
         amount = cls._positive_amount(amount)
         return cls._apply_entry(
@@ -284,6 +294,7 @@ class CustomerAccountService:
             amount_delta=amount,
             user=user,
             notes=notes,
+            sale=sale,
             check_customer_active=True,
             check_account_blocked=True,
             check_credit_limit=True,

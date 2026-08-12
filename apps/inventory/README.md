@@ -86,8 +86,9 @@ Si cambia stock, tiene que pasar por `services.py`.
 
 ### `sales`
 
-- Debe consumir stock en operaciones de venta (flujo futuro o en expansion).
-- El descuento real debe terminar en servicios de `inventory` para mantener auditoria.
+- Las ventas y devoluciones consumen o reponen stock mediante los servicios de `inventory`.
+- `StockMovement` conserva FKs reales a venta, línea, devolución y línea devuelta.
+- `reference_type`/`reference_id` se mantienen para compatibilidad y referencias genéricas.
 
 ### `billing`
 
@@ -96,7 +97,7 @@ Si cambia stock, tiene que pasar por `services.py`.
 
 ### `purchases`
 
-- Al recibir mercancia, deberia incrementar stock via servicios de `inventory`.
+- Sus relaciones y la recepción de mercancía siguen pendientes hasta implementar Purchases.
 
 ### `reports`
 
