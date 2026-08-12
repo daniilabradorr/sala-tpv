@@ -23,7 +23,7 @@ Gestiona clientes del negocio completo, no de una tienda concreta.
 
 Las vistas de listado, detalle y creación requieren usuario autenticado con negocio. Cashier puede crear ficha básica. Edición, desactivación, reactivación y configuración de cuenta requieren manager u owner. Todas las lecturas y escrituras filtran por `business`.
 
-`Sale` y `Payment` se enlazarán en migraciones futuras cuando existan sus modelos reales. Billing validará y congelará datos fiscales al emitir.
+`CustomerAccountEntry` ya puede enlazar de forma validada una `Sale`. La relación con `Payment` sigue pendiente hasta que se implemente el módulo Payments. Billing validará y congelará datos fiscales al emitir.
 
 ## Tests
 

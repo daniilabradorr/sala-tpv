@@ -497,6 +497,31 @@ class SaleLine(TimeStampedModel):
         help_text="Porcentaje de impuesto congelado en la venta.",
     )
 
+    tax_type = models.CharField("Tipo de impuesto", max_length=20, default="IVA")
+    clave_regimen = models.CharField(
+        "Clave de régimen", max_length=2, null=True, blank=True, default="01"
+    )
+    calificacion_operacion = models.CharField(
+        "Calificación de la operación",
+        max_length=2,
+        null=True,
+        blank=True,
+        default="S1",
+    )
+    operacion_exenta = models.CharField(
+        "Causa de operación exenta", max_length=2, null=True, blank=True
+    )
+    has_equivalence_surcharge = models.BooleanField(
+        "Tiene recargo de equivalencia", default=False
+    )
+    equivalence_surcharge_rate = models.DecimalField(
+        "Porcentaje de recargo de equivalencia",
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+
     tax_amount = models.DecimalField(
         "Cuota de impuesto",
         max_digits=14,
@@ -696,6 +721,15 @@ class SaleReturn(TimeStampedModel):
         related_name="sale_returns_created",
     )
 
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Aprobada por",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="sale_returns_approved",
+    )
+
     reason = models.TextField(
         "Motivo",
         help_text=(
@@ -807,6 +841,15 @@ class SaleReturn(TimeStampedModel):
             ):
                 errors["created_by"] = (
                     "El usuario debe pertenecer al mismo negocio que la devolución."
+                )
+
+        if self.approved_by_id and self.business_id:
+            if (
+                not self.approved_by.is_superuser
+                and self.approved_by.business_id != self.business_id
+            ):
+                errors["approved_by"] = (
+                    "El usuario que aprueba debe pertenecer al mismo negocio."
                 )
 
         if not self.reason:
