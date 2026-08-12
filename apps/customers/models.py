@@ -273,10 +273,18 @@ class CustomerAccountEntry(TimeStampedModel):
     sale = models.ForeignKey(
         "sales.Sale",
         verbose_name="Venta",
-        null=True,
-        blank=True,
         on_delete=models.PROTECT,
         related_name="customer_account_entries",
+        null=True,
+        blank=True,
+    )
+    payment = models.ForeignKey(
+        "payments.Payment",
+        verbose_name="Pago",
+        on_delete=models.PROTECT,
+        related_name="customer_account_entries",
+        null=True,
+        blank=True,
     )
     entry_type = models.CharField(
         "Tipo de movimiento",
@@ -370,15 +378,16 @@ class CustomerAccountEntry(TimeStampedModel):
                 errors["account"] = (
                     "La cuenta debe pertenecer al mismo negocio que el movimiento."
                 )
-        if self.sale_id and self.business_id:
+        if self.sale_id:
             if self.sale.business_id != self.business_id:
                 errors["sale"] = "La venta debe pertenecer al mismo negocio."
-            elif (
-                self.sale.customer_id
-                and self.account_id
-                and self.sale.customer_id != self.account.customer_id
-            ):
+            if self.account_id and self.sale.customer_id != self.account.customer_id:
                 errors["sale"] = "La venta debe pertenecer al cliente de la cuenta."
+        if self.payment_id:
+            if self.payment.business_id != self.business_id:
+                errors["payment"] = "El pago debe pertenecer al mismo negocio."
+            if self.sale_id and self.payment.sale_id != self.sale_id:
+                errors["payment"] = "El pago debe corresponder a la misma venta."
         if self.created_by_id:
             if not self.created_by.is_superuser:
                 if self.created_by.business_id != self.business_id:
