@@ -43,7 +43,11 @@ def create_sales_business(name="Negocio Sales", slug=None):
     )
 
 
-def create_sales_store(*, business, name="Tienda Sales", code=None, is_active=True):
+def create_sales_store(*, business, name=None, code=None, is_active=True):
+    # Default name must be unique per call to avoid unique constraint
+    # collisions when multiple stores are created for the same business
+    if name is None:
+        name = f"Tienda {uuid4().hex[:8]}"
     if code is None:
         code = f"SAL{uuid4().hex[:7].upper()}"
 
@@ -114,6 +118,15 @@ def create_pos_settings(
     allow_split_payments=True,
     require_pin_for_sensitive_actions=False,
 ):
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "create_pos_settings: setting require_pin_for_sensitive_actions=%s for business=%s",
+        require_pin_for_sensitive_actions,
+        getattr(business, "pk", None),
+    )
+
     settings, _created = POSSettings.objects.update_or_create(
         business=business,
         defaults={
@@ -128,6 +141,14 @@ def create_pos_settings(
             "require_pin_for_sensitive_actions": require_pin_for_sensitive_actions,
         },
     )
+    # Ensure the flag is explicitly set and persisted (avoid surprises from
+    # bootstrap or other code paths that might reset defaults).
+    if (
+        getattr(settings, "require_pin_for_sensitive_actions", None)
+        != require_pin_for_sensitive_actions
+    ):
+        settings.require_pin_for_sensitive_actions = require_pin_for_sensitive_actions
+        settings.save(update_fields=["require_pin_for_sensitive_actions", "updated_at"])
     return settings
 
 
@@ -272,6 +293,18 @@ def create_sale(
     if status == SaleStatusChoices.COMPLETED:
         closed_by = closed_by or opened_by
         completed_at = completed_at or timezone.now()
+
+    # Ensure monetary fields are internally consistent so model validation
+    # (which expects total = subtotal - discounts + taxes) does not fail
+    # when tests create a sale by only passing `total_amount`.
+    if subtotal_amount == Decimal("0.00") and total_amount != Decimal("0.00"):
+        subtotal_amount = total_amount
+
+    expected_total = subtotal_amount - discount_amount + tax_amount
+    total_amount = expected_total
+
+    if pending_amount is None:
+        pending_amount = total_amount
 
     return Sale.objects.create(
         business=business,
