@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Cancelar pago{% endblock %}
+{% block content %}<main><h1>Cancelar pago {{ payment.pk }}</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Confirmar cancelación</button></form></main>{% endblock %}

@@ -19,6 +19,8 @@ from django.utils import timezone
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
+from apps.customers.models import CustomerAccountEntry, EntryTypeChoices
+from apps.customers.services import CustomerAccountService
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import decrease_stock, increase_stock
 from apps.sales.models import (
@@ -32,6 +34,9 @@ from apps.sales.models import (
     SaleStatusChoices,
 )
 from apps.users.helpers import can_perform_sensitive_action, can_sell_in_store
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 MONEY_STEP = Decimal("0.01")
@@ -153,6 +158,13 @@ def _get_pos_settings(business):
 
     if settings is None:
         raise ValidationError("El negocio no tiene configuración TPV.")
+
+    # Debug log to help track unexpected value changes during tests
+    logger.info(
+        "_get_pos_settings: require_pin_for_sensitive_actions=%s for business=%s",
+        getattr(settings, "require_pin_for_sensitive_actions", None),
+        getattr(business, "pk", None),
+    )
 
     return settings
 
@@ -1422,6 +1434,12 @@ def complete_sale_return(
     )
 
     pos_settings = _get_pos_settings(business)
+    # Log the POS setting so tests can diagnose unexpected require-pin behavior
+    logger.info(
+        "complete_sale_return: require_pin_for_sensitive_actions=%s for business=%s",
+        getattr(pos_settings, "require_pin_for_sensitive_actions", None),
+        getattr(business, "pk", None),
+    )
     _validate_sensitive_action(
         business=business,
         user=completed_by,
@@ -1542,6 +1560,25 @@ def complete_sale_return(
         ]
     )
 
+    charge = (
+        CustomerAccountEntry.objects.filter(
+            business=business,
+            sale=locked_sale,
+            entry_type=EntryTypeChoices.CHARGE,
+        )
+        .select_related("account")
+        .first()
+    )
+    if charge is not None:
+        CustomerAccountService.reduce_sale_debt_for_return(
+            business=business,
+            account=charge.account,
+            sale=locked_sale,
+            sale_return=locked_return,
+            amount=total_amount,
+            user=completed_by,
+        )
+
     original_lines = list(
         SaleLine.objects.filter(
             business=business,
@@ -1569,6 +1606,11 @@ def complete_sale_return(
         SaleStatusChoices.RETURNED if fully_returned else SaleStatusChoices.COMPLETED
     )
     locked_sale.save(update_fields=["status", "updated_at"])
+
+    # Import local para evitar un ciclo entre los módulos. La Sale ya está bloqueada.
+    from apps.payments.services import recalculate_sale_payment_state
+
+    recalculate_sale_payment_state(locked_sale)
 
     # Payments realizará el reembolso y Billing la rectificativa.
     return locked_return

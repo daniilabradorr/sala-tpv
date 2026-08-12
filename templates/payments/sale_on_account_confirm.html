@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Pasar venta a cuenta{% endblock %}
+{% block content %}<main><h1>Pasar pendiente de venta {{ sale.pk }} a cuenta</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Confirmar</button></form></main>{% endblock %}
