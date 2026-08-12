@@ -1,6 +1,11 @@
 from django.urls import path
 
-from apps.payments.views import PaymentCancelView, PaymentCreateView, PaymentRefundView
+from apps.payments.views import (
+    PaymentCancelView,
+    PaymentCreateView,
+    PaymentRefundView,
+    SaleOnAccountView,
+)
 
 app_name = "payments"
 
@@ -9,6 +14,11 @@ urlpatterns = [
         "stores/<int:store_id>/sales/<int:sale_id>/payments/create/",
         PaymentCreateView.as_view(),
         name="create",
+    ),
+    path(
+        "stores/<int:store_id>/sales/<int:sale_id>/on-account/",
+        SaleOnAccountView.as_view(),
+        name="sale_on_account",
     ),
     path(
         "stores/<int:store_id>/returns/<int:sale_return_id>/refund/",

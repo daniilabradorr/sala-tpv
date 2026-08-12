@@ -5,7 +5,12 @@ from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
 from apps.business_config.models import POSSettings
-from apps.customers.models import CustomerAccountEntry, EntryTypeChoices
+from apps.cash_register.models import CashSession
+from apps.customers.models import (
+    CustomerAccount,
+    CustomerAccountEntry,
+    EntryTypeChoices,
+)
 from apps.customers.services import CustomerAccountService
 from apps.payments.models import (
     Payment,
@@ -75,17 +80,33 @@ def _method(*, business, method_id, refund=False):
     return method
 
 
-def _cash_context(*, sale, method, settings):
-    session = sale.cash_session
-    if session:
-        if session.business_id != sale.business_id or session.store_id != sale.store_id:
-            raise ValidationError({"cash_session": "La sesión de caja no es válida."})
-        if method.affects_cash_register and settings.require_open_cash_register:
-            if not session.is_open:
-                raise ValidationError(
-                    {"cash_session": "La sesión de caja no está abierta."}
-                )
-    elif method.affects_cash_register and settings.require_open_cash_register:
+def _cash_context(*, business, store, method, settings, cash_session_id):
+    session = None
+    if cash_session_id:
+        try:
+            session = CashSession.objects.select_related("cash_register").get(
+                pk=cash_session_id, business=business, store=store
+            )
+        except CashSession.DoesNotExist as exc:
+            raise ValidationError(
+                {"cash_session": "La sesión no pertenece al negocio y tienda actuales."}
+            ) from exc
+        if not session.is_open or not session.cash_register.is_active:
+            raise ValidationError(
+                {"cash_session": "La sesión de caja seleccionada no está operativa."}
+            )
+        if (
+            session.cash_register.business_id != business.pk
+            or session.cash_register.store_id != store.pk
+        ):
+            raise ValidationError(
+                {"cash_session": "La caja de la sesión no es válida."}
+            )
+    if (
+        session is None
+        and method.affects_cash_register
+        and settings.require_open_cash_register
+    ):
         raise ValidationError(
             {"cash_session": "Se requiere una sesión de caja abierta."}
         )
@@ -126,22 +147,34 @@ def _totals(sale):
 def _recalculate_sale_payment_state(locked_sale):
     paid, refunded = _totals(locked_sale)
     pending = max(locked_sale.total_amount - paid, ZERO)
-    if paid == ZERO:
+    returned_total = (
+        locked_sale.returns.filter(status=SaleReturnStatusChoices.COMPLETED).aggregate(
+            total=Sum("total_amount")
+        )["total"]
+        or ZERO
+    )
+    debt_reduction = abs(
+        CustomerAccountEntry.objects.filter(
+            business=locked_sale.business,
+            sale=locked_sale,
+            entry_type=EntryTypeChoices.REFUND,
+            payment__isnull=True,
+        ).aggregate(total=Sum("amount"))["total"]
+        or ZERO
+    )
+    monetary_return_required = min(paid, max(returned_total - debt_reduction, ZERO))
+    if (
+        paid > ZERO
+        and returned_total >= locked_sale.total_amount
+        and refunded >= monetary_return_required
+    ):
+        status = SalePaymentStatusChoices.REFUNDED
+    elif paid == ZERO:
         status = SalePaymentStatusChoices.UNPAID
     elif paid < locked_sale.total_amount:
         status = SalePaymentStatusChoices.PARTIAL
     else:
-        fully_returned = (
-            locked_sale.returns.filter(
-                status=SaleReturnStatusChoices.COMPLETED
-            ).aggregate(total=Sum("total_amount"))["total"]
-            or ZERO
-        ) >= locked_sale.total_amount
-        status = (
-            SalePaymentStatusChoices.REFUNDED
-            if fully_returned and refunded >= paid
-            else SalePaymentStatusChoices.PAID
-        )
+        status = SalePaymentStatusChoices.PAID
     locked_sale.pending_amount = pending
     locked_sale.payment_status = status
     locked_sale.save(update_fields=["pending_amount", "payment_status", "updated_at"])
@@ -149,6 +182,8 @@ def _recalculate_sale_payment_state(locked_sale):
 
 
 def _apply_customer_debt_payment(*, business, sale, payment, user):
+    if payment.status != PaymentStatusChoices.COMPLETED:
+        return None
     charge = (
         CustomerAccountEntry.objects.filter(
             business=business, sale=sale, entry_type=EntryTypeChoices.CHARGE
@@ -161,10 +196,19 @@ def _apply_customer_debt_payment(*, business, sale, payment, user):
     existing = CustomerAccountEntry.objects.filter(payment=payment).first()
     if existing:
         return existing
+    sale_debt = (
+        CustomerAccountEntry.objects.filter(
+            business=business, account=charge.account, sale=sale
+        ).aggregate(total=Sum("amount"))["total"]
+        or ZERO
+    )
+    amount = min(payment.amount, max(sale_debt, ZERO))
+    if amount == ZERO:
+        return None
     return CustomerAccountService.register_payment(
         business=business,
         account=charge.account,
-        amount=payment.amount,
+        amount=amount,
         user=user,
         sale=sale,
         payment=payment,
@@ -181,6 +225,7 @@ def register_sale_payment(
     amount,
     user,
     idempotency_key,
+    cash_session_id=None,
     external_reference="",
     notes="",
 ):
@@ -199,7 +244,6 @@ def register_sale_payment(
         raise ValidationError({"sale": "Solo se pueden cobrar ventas completadas."})
     method = _method(business=business, method_id=method_id)
     amount = _amount(amount)
-    session = _cash_context(sale=sale, method=method, settings=settings)
     existing = _existing(
         business=business,
         key=idempotency_key,
@@ -209,10 +253,18 @@ def register_sale_payment(
         amount=amount,
     )
     if existing:
-        _apply_customer_debt_payment(
-            business=business, sale=sale, payment=existing, user=user
-        )
+        if existing.status == PaymentStatusChoices.COMPLETED:
+            _apply_customer_debt_payment(
+                business=business, sale=sale, payment=existing, user=user
+            )
         return existing
+    session = _cash_context(
+        business=business,
+        store=sale.store,
+        method=method,
+        settings=settings,
+        cash_session_id=cash_session_id,
+    )
     paid, _ = _totals(sale)
     if amount > sale.total_amount - paid:
         raise ValidationError({"amount": "El importe supera lo pendiente de cobro."})
@@ -274,6 +326,7 @@ def register_refund(
     amount,
     user,
     idempotency_key,
+    cash_session_id=None,
     pin=None,
     external_reference="",
     notes="",
@@ -307,7 +360,6 @@ def register_refund(
         raise ValidationError({"sale_return": "La devolución debe estar completada."})
     method = _method(business=business, method_id=method_id, refund=True)
     amount = _amount(amount)
-    session = _cash_context(sale=sale, method=method, settings=settings)
     existing = _existing(
         business=business,
         key=idempotency_key,
@@ -319,6 +371,13 @@ def register_refund(
     )
     if existing:
         return existing
+    session = _cash_context(
+        business=business,
+        store=sale.store,
+        method=method,
+        settings=settings,
+        cash_session_id=cash_session_id,
+    )
     paid, refunded = _totals(sale)
     return_refunded = (
         Payment.objects.filter(
@@ -328,31 +387,103 @@ def register_refund(
         ).aggregate(total=Sum("amount"))["total"]
         or ZERO
     )
-    if return_refunded + amount > returned.total_amount:
+    debt_reduction = (
+        CustomerAccountEntry.objects.filter(
+            business=business,
+            sale=sale,
+            entry_type=EntryTypeChoices.REFUND,
+            payment__isnull=True,
+            notes=f"Reducción de deuda por devolución #{returned.pk}",
+        ).aggregate(total=Sum("amount"))["total"]
+        or ZERO
+    )
+    monetary_capacity = returned.total_amount - abs(debt_reduction)
+    if return_refunded + amount > monetary_capacity:
         raise ValidationError(
-            {"amount": "El importe supera el total de la devolución."}
+            {"amount": "El importe supera la parte monetaria de la devolución."}
         )
     if refunded + amount > paid:
         raise ValidationError(
             {"amount": "No se puede devolver más dinero del cobrado."}
         )
-    payment = Payment.objects.create(
-        business=business,
-        store=sale.store,
-        sale=sale,
-        method=method,
-        cash_session=session,
-        sale_return=returned,
-        payment_type=PaymentTypeChoices.REFUND,
-        amount=amount,
-        status=PaymentStatusChoices.COMPLETED,
-        processed_by=user,
-        idempotency_key=idempotency_key,
-        external_reference=external_reference,
-        notes=notes,
-    )
+    try:
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                business=business,
+                store=sale.store,
+                sale=sale,
+                method=method,
+                cash_session=session,
+                sale_return=returned,
+                payment_type=PaymentTypeChoices.REFUND,
+                amount=amount,
+                status=PaymentStatusChoices.COMPLETED,
+                processed_by=user,
+                idempotency_key=idempotency_key,
+                external_reference=external_reference,
+                notes=notes,
+            )
+    except IntegrityError:
+        payment = _existing(
+            business=business,
+            key=idempotency_key,
+            sale=sale,
+            method=method,
+            payment_type=PaymentTypeChoices.REFUND,
+            amount=amount,
+            sale_return=returned,
+        )
+        if payment is None:
+            raise
     _recalculate_sale_payment_state(sale)
     return payment
+
+
+@transaction.atomic
+def register_sale_on_account(*, business, sale_id, user):
+    """Registra explícitamente como deuda el pendiente actual de una Sale."""
+    _validate_business(business)
+    try:
+        sale = (
+            Sale.objects.select_for_update()
+            .select_related("store", "customer")
+            .get(pk=sale_id, business=business)
+        )
+    except Sale.DoesNotExist as exc:
+        raise ValidationError({"sale": "La venta no pertenece al negocio."}) from exc
+    _validate_user(business=business, store=sale.store, user=user)
+    if sale.status != SaleStatusChoices.COMPLETED:
+        raise ValidationError(
+            {"sale": "Solo una venta completada puede pasar a cuenta."}
+        )
+    if sale.customer_id is None:
+        raise ValidationError({"sale": "La venta debe tener un cliente."})
+    existing = CustomerAccountEntry.objects.filter(
+        business=business,
+        sale=sale,
+        entry_type=EntryTypeChoices.CHARGE,
+    ).first()
+    if existing:
+        return existing
+    try:
+        account = CustomerAccount.objects.get(
+            business=business, customer_id=sale.customer_id
+        )
+    except CustomerAccount.DoesNotExist as exc:
+        raise ValidationError(
+            {"sale": "El cliente no tiene cuenta corriente."}
+        ) from exc
+    _recalculate_sale_payment_state(sale)
+    if sale.pending_amount <= ZERO:
+        raise ValidationError({"sale": "La venta no tiene importe pendiente."})
+    return CustomerAccountService.create_charge(
+        business=business,
+        account=account,
+        amount=sale.pending_amount,
+        user=user,
+        sale=sale,
+        notes=f"Venta #{sale.pk} pasada a cuenta",
+    )[1]
 
 
 @transaction.atomic

@@ -8,6 +8,11 @@ class PaymentMethodAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "business", "is_active", "allows_refund")
     readonly_fields = ("affects_cash_register",)
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None:
+            return (*self.readonly_fields, "code")
+        return self.readonly_fields
+
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):

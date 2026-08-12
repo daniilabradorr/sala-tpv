@@ -386,8 +386,14 @@ class CustomerAccountEntry(TimeStampedModel):
         if self.payment_id:
             if self.payment.business_id != self.business_id:
                 errors["payment"] = "El pago debe pertenecer al mismo negocio."
+            effective_sale = self.sale if self.sale_id else self.payment.sale
             if self.sale_id and self.payment.sale_id != self.sale_id:
                 errors["payment"] = "El pago debe corresponder a la misma venta."
+            if (
+                self.account_id
+                and effective_sale.customer_id != self.account.customer_id
+            ):
+                errors["payment"] = "El pago debe pertenecer al cliente de la cuenta."
         if self.created_by_id:
             if not self.created_by.is_superuser:
                 if self.created_by.business_id != self.business_id:

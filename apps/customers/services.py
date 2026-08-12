@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 
 from apps.customers.models import (
     Customer,
@@ -251,8 +252,14 @@ class CustomerAccountService:
         if payment is not None:
             if payment.business_id != business.pk:
                 raise ValidationError("El pago debe pertenecer al mismo negocio.")
-            if sale is not None and payment.sale_id != sale.pk:
+            if sale is None:
+                sale = payment.sale
+            if payment.sale_id != sale.pk:
                 raise ValidationError("El pago no corresponde a la venta indicada.")
+            if payment.sale.customer_id != locked_account.customer_id:
+                raise ValidationError(
+                    "El pago no pertenece al cliente de la cuenta indicada."
+                )
 
         if check_customer_active and not locked_account.customer.is_active:
             raise ValidationError(
@@ -328,6 +335,17 @@ class CustomerAccountService:
     ):
         """Registra un pago recibido del cliente."""
         amount = cls._positive_amount(amount)
+        if payment is not None:
+            existing = CustomerAccountEntry.objects.filter(payment=payment).first()
+            if existing:
+                if (
+                    existing.business_id != business.pk
+                    or existing.account_id != account.pk
+                ):
+                    raise ValidationError(
+                        "El pago ya está asociado a otra cuenta o negocio."
+                    )
+                return existing.account, existing
         return cls._apply_entry(
             business=business,
             account=account,
@@ -337,6 +355,42 @@ class CustomerAccountService:
             notes=notes,
             sale=sale,
             payment=payment,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def reduce_sale_debt_for_return(
+        cls, *, business, account, sale, sale_return, amount, user=None
+    ):
+        """Reduce deuda de una venta devuelta sin inventar un Payment monetario."""
+        amount = cls._positive_amount(amount)
+        marker = f"Reducción de deuda por devolución #{sale_return.pk}"
+        locked_account = cls._get_locked_account(business=business, account=account)
+        existing = CustomerAccountEntry.objects.filter(
+            business=business,
+            account=locked_account,
+            sale=sale,
+            entry_type=EntryTypeChoices.REFUND,
+            payment__isnull=True,
+            notes=marker,
+        ).first()
+        if existing:
+            return locked_account, existing
+
+        sale_debt = CustomerAccountEntry.objects.filter(
+            business=business, account=locked_account, sale=sale
+        ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        reduction = min(amount, max(sale_debt, Decimal("0.00")))
+        if reduction == Decimal("0.00"):
+            return locked_account, None
+        return cls._apply_entry(
+            business=business,
+            account=locked_account,
+            entry_type=EntryTypeChoices.REFUND,
+            amount_delta=-reduction,
+            user=user,
+            notes=marker,
+            sale=sale,
         )
 
     @classmethod
