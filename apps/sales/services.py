@@ -19,6 +19,8 @@ from django.utils import timezone
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
+from apps.customers.models import CustomerAccountEntry, EntryTypeChoices
+from apps.customers.services import CustomerAccountService
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import decrease_stock, increase_stock
 from apps.sales.models import (
@@ -1543,6 +1545,25 @@ def complete_sale_return(
         update_fields=["total_amount", "status", "completed_at", "updated_at"]
     )
 
+    charge = (
+        CustomerAccountEntry.objects.filter(
+            business=business,
+            sale=locked_sale,
+            entry_type=EntryTypeChoices.CHARGE,
+        )
+        .select_related("account")
+        .first()
+    )
+    if charge is not None:
+        CustomerAccountService.reduce_sale_debt_for_return(
+            business=business,
+            account=charge.account,
+            sale=locked_sale,
+            sale_return=locked_return,
+            amount=total_amount,
+            user=completed_by,
+        )
+
     original_lines = list(
         SaleLine.objects.filter(
             business=business,
@@ -1570,6 +1591,11 @@ def complete_sale_return(
         SaleStatusChoices.RETURNED if fully_returned else SaleStatusChoices.COMPLETED
     )
     locked_sale.save(update_fields=["status", "updated_at"])
+
+    # Import local para evitar un ciclo entre los módulos. La Sale ya está bloqueada.
+    from apps.payments.services import _recalculate_sale_payment_state
+
+    _recalculate_sale_payment_state(locked_sale)
 
     # Payments realizará el reembolso y Billing la rectificativa.
     return locked_return

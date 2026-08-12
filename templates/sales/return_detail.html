@@ -39,6 +39,7 @@
 
     <section>
         <h2>Acciones</h2>
+        {% if return_doc.is_completed %}<p><a href="{% url 'payments:refund' store_id=store.pk sale_return_id=return_doc.pk %}">Registrar reembolso</a></p>{% endif %}
         {% if is_editable %}
             <p><a href="{% url 'sales:return_line_add' store_id=store.pk return_pk=return_doc.pk %}">A&ntilde;adir l&iacute;nea</a></p>
             <form
