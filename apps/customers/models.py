@@ -337,6 +337,13 @@ class CustomerAccountEntry(TimeStampedModel):
                 ),
                 name="chk_custentry_type_sign",
             ),
+            # Un Payment económico real solo puede producir
+            # un movimiento en CustomerAccount.
+            models.UniqueConstraint(
+                fields=["payment"],
+                condition=Q(payment__isnull=False),
+                name="uniq_custentry_payment_not_null",
+            ),
         ]
         indexes = [
             models.Index(
