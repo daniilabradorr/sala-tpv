@@ -67,10 +67,7 @@ class CashRegister(TimeStampedModel):
     code = models.CharField(
         "Código",
         max_length=30,
-        help_text=(
-            "Código corto de la caja dentro de la tienda. "
-            "Ejemplo: CAJA-01."
-        ),
+        help_text=("Código corto de la caja dentro de la tienda. Ejemplo: CAJA-01."),
     )
 
     is_active = models.BooleanField(
@@ -138,9 +135,7 @@ class CashRegister(TimeStampedModel):
             and self.business_id
             and self.store.business_id != self.business_id
         ):
-            errors["store"] = (
-                "La tienda debe pertenecer al mismo negocio."
-            )
+            errors["store"] = "La tienda debe pertenecer al mismo negocio."
 
         if errors:
             raise ValidationError(errors)
@@ -277,14 +272,12 @@ class CashSession(TimeStampedModel):
                 condition=Q(status="open"),
                 name="uniq_cashsession_open_reg",
             ),
-
             models.CheckConstraint(
                 condition=Q(
                     opening_amount__gte=ZERO,
                 ),
                 name="chk_cashsession_opening_gte0",
             ),
-
             models.CheckConstraint(
                 condition=(
                     Q(counted_cash_amount__isnull=True)
@@ -292,7 +285,6 @@ class CashSession(TimeStampedModel):
                 ),
                 name="chk_cashsession_counted_gte0",
             ),
-
             models.CheckConstraint(
                 condition=(
                     Q(
@@ -311,20 +303,17 @@ class CashSession(TimeStampedModel):
                 ),
                 name="chk_cashsession_state_fields",
             ),
-
             models.CheckConstraint(
                 condition=(
                     Q(status="open")
                     | Q(
                         difference_amount=(
-                            F("counted_cash_amount")
-                            - F("expected_cash_amount")
+                            F("counted_cash_amount") - F("expected_cash_amount")
                         )
                     )
                 ),
                 name="chk_cashsession_difference",
             ),
-
             models.CheckConstraint(
                 condition=(
                     Q(closed_at__isnull=True)
@@ -356,16 +345,10 @@ class CashSession(TimeStampedModel):
 
     @property
     def is_open(self):
-        return (
-            self.status == self.Status.OPEN
-            and self.closed_at is None
-        )
+        return self.status == self.Status.OPEN and self.closed_at is None
 
     def __str__(self):
-        return (
-            f"{self.cash_register} · "
-            f"{self.get_status_display()}"
-        )
+        return f"{self.cash_register} · {self.get_status_display()}"
 
     def clean(self):
         super().clean()
@@ -377,86 +360,51 @@ class CashSession(TimeStampedModel):
             and self.business_id
             and self.store.business_id != self.business_id
         ):
-            errors["store"] = (
-                "La tienda debe pertenecer al mismo negocio."
-            )
+            errors["store"] = "La tienda debe pertenecer al mismo negocio."
 
         if self.cash_register_id:
-            if (
-                self.business_id
-                and self.cash_register.business_id
-                != self.business_id
-            ):
-                errors["cash_register"] = (
-                    "La caja debe pertenecer al mismo negocio."
-                )
+            if self.business_id and self.cash_register.business_id != self.business_id:
+                errors["cash_register"] = "La caja debe pertenecer al mismo negocio."
 
-            if (
-                self.store_id
-                and self.cash_register.store_id
-                != self.store_id
-            ):
-                errors["cash_register"] = (
-                    "La caja debe pertenecer a la misma tienda."
-                )
+            if self.store_id and self.cash_register.store_id != self.store_id:
+                errors["cash_register"] = "La caja debe pertenecer a la misma tienda."
 
-        if (
-            self.opened_by_id
-            and not _user_belongs_to_business(
-                self.opened_by,
-                self.business_id,
-            )
+        if self.opened_by_id and not _user_belongs_to_business(
+            self.opened_by,
+            self.business_id,
         ):
             errors["opened_by"] = (
-                "El usuario que abre la caja debe pertenecer "
-                "al mismo negocio."
+                "El usuario que abre la caja debe pertenecer al mismo negocio."
             )
 
-        if (
-            self.closed_by_id
-            and not _user_belongs_to_business(
-                self.closed_by,
-                self.business_id,
-            )
+        if self.closed_by_id and not _user_belongs_to_business(
+            self.closed_by,
+            self.business_id,
         ):
             errors["closed_by"] = (
-                "El usuario que cierra la caja debe pertenecer "
-                "al mismo negocio."
+                "El usuario que cierra la caja debe pertenecer al mismo negocio."
             )
 
-        if (
-            self.opening_amount is not None
-            and self.opening_amount < ZERO
-        ):
-            errors["opening_amount"] = (
-                "El efectivo inicial no puede ser negativo."
-            )
+        if self.opening_amount is not None and self.opening_amount < ZERO:
+            errors["opening_amount"] = "El efectivo inicial no puede ser negativo."
 
-        if (
-            self.counted_cash_amount is not None
-            and self.counted_cash_amount < ZERO
-        ):
-            errors["counted_cash_amount"] = (
-                "El efectivo contado no puede ser negativo."
-            )
+        if self.counted_cash_amount is not None and self.counted_cash_amount < ZERO:
+            errors["counted_cash_amount"] = "El efectivo contado no puede ser negativo."
 
         if self.status == self.Status.OPEN:
             if self.closed_at is not None:
                 errors["closed_at"] = (
-                    "Una sesión abierta no puede tener "
-                    "fecha de cierre."
+                    "Una sesión abierta no puede tener fecha de cierre."
                 )
 
             if self.closed_by_id is not None:
                 errors["closed_by"] = (
-                    "Una sesión abierta no puede tener "
-                    "usuario de cierre."
+                    "Una sesión abierta no puede tener usuario de cierre."
                 )
 
             if self.counted_cash_amount is not None:
                 errors["counted_cash_amount"] = (
-                    "Una sesión abierta no guarda todavía "
-                    "el conteo final."
+                    "Una sesión abierta no guarda todavía el conteo final."
                 )
 
             if self.difference_amount != ZERO:
@@ -466,21 +414,14 @@ class CashSession(TimeStampedModel):
 
         elif self.status == self.Status.CLOSED:
             if self.closed_at is None:
-                errors["closed_at"] = (
-                    "Una sesión cerrada debe tener "
-                    "fecha de cierre."
-                )
+                errors["closed_at"] = "Una sesión cerrada debe tener fecha de cierre."
 
             if self.closed_by_id is None:
-                errors["closed_by"] = (
-                    "Una sesión cerrada debe indicar "
-                    "quién la cerró."
-                )
+                errors["closed_by"] = "Una sesión cerrada debe indicar quién la cerró."
 
             if self.counted_cash_amount is None:
                 errors["counted_cash_amount"] = (
-                    "Una sesión cerrada debe guardar "
-                    "el efectivo contado."
+                    "Una sesión cerrada debe guardar el efectivo contado."
                 )
 
             if (
@@ -488,14 +429,10 @@ class CashSession(TimeStampedModel):
                 and self.expected_cash_amount is not None
             ):
                 expected_difference = (
-                    self.counted_cash_amount
-                    - self.expected_cash_amount
+                    self.counted_cash_amount - self.expected_cash_amount
                 )
 
-                if (
-                    self.difference_amount
-                    != expected_difference
-                ):
+                if self.difference_amount != expected_difference:
                     errors["difference_amount"] = (
                         "La diferencia debe ser contado - esperado."
                     )
@@ -506,14 +443,32 @@ class CashSession(TimeStampedModel):
             and self.closed_at < self.opened_at
         ):
             errors["closed_at"] = (
-                "La fecha de cierre no puede ser "
-                "anterior a la apertura."
+                "La fecha de cierre no puede ser anterior a la apertura."
             )
 
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        if not self._state.adding:
+            original = type(self).objects.get(pk=self.pk)
+            if original.status == self.Status.CLOSED:
+                protected = (
+                    "opening_amount",
+                    "expected_cash_amount",
+                    "counted_cash_amount",
+                    "difference_amount",
+                    "closed_at",
+                    "closed_by_id",
+                    "status",
+                )
+                if any(
+                    getattr(self, field) != getattr(original, field)
+                    for field in protected
+                ):
+                    raise ValidationError(
+                        "Una sesión cerrada es económicamente inmutable."
+                    )
         self.full_clean()
 
         return super().save(*args, **kwargs)
@@ -559,6 +514,10 @@ class CashMovement(TimeStampedModel):
             "Ajuste",
         )
 
+    class AdjustmentDirection(models.TextChoices):
+        IN = "in", "Entrada"
+        OUT = "out", "Salida"
+
     business = models.ForeignKey(
         Business,
         on_delete=models.CASCADE,
@@ -584,6 +543,14 @@ class CashMovement(TimeStampedModel):
         db_index=True,
     )
 
+    adjustment_direction = models.CharField(
+        "Dirección del ajuste",
+        max_length=3,
+        choices=AdjustmentDirection.choices,
+        null=True,
+        blank=True,
+    )
+
     amount = models.DecimalField(
         "Importe",
         max_digits=14,
@@ -591,10 +558,7 @@ class CashMovement(TimeStampedModel):
         validators=[
             MinValueValidator(MIN_CASH_AMOUNT),
         ],
-        help_text=(
-            "Siempre se almacena positivo. "
-            "El tipo indica entrada o salida."
-        ),
+        help_text=("Siempre se almacena positivo. El tipo indica entrada o salida."),
     )
 
     balance_after = models.DecimalField(
@@ -602,8 +566,7 @@ class CashMovement(TimeStampedModel):
         max_digits=14,
         decimal_places=2,
         help_text=(
-            "Snapshot del efectivo esperado después "
-            "de aplicar este movimiento."
+            "Snapshot del efectivo esperado después de aplicar este movimiento."
         ),
     )
 
@@ -650,7 +613,6 @@ class CashMovement(TimeStampedModel):
                 ),
                 name="chk_cashmovement_amount_gt0",
             ),
-
             models.UniqueConstraint(
                 fields=("payment",),
                 condition=Q(
@@ -658,7 +620,6 @@ class CashMovement(TimeStampedModel):
                 ),
                 name="uniq_cashmovement_payment",
             ),
-
             models.CheckConstraint(
                 condition=(
                     Q(
@@ -679,9 +640,21 @@ class CashMovement(TimeStampedModel):
                     )
                     | Q(
                         movement_type="adjustment",
+                        payment__isnull=True,
+                        sale__isnull=True,
                     )
                 ),
                 name="chk_cashmovement_origin",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(movement_type="adjustment", adjustment_direction__isnull=False)
+                    | (
+                        ~Q(movement_type="adjustment")
+                        & Q(adjustment_direction__isnull=True)
+                    )
+                ),
+                name="chk_cashmovement_adjust_dir",
             ),
         ]
 
@@ -715,122 +688,61 @@ class CashMovement(TimeStampedModel):
 
         errors = {}
 
-        if (
-            self.amount is not None
-            and self.amount <= ZERO
-        ):
-            errors["amount"] = (
-                "El importe debe ser mayor que cero."
+        if self.cash_session_id and not self.cash_session.is_open:
+            errors["cash_session"] = (
+                "No se pueden añadir movimientos a una sesión cerrada."
             )
+
+        if self.amount is not None and self.amount <= ZERO:
+            errors["amount"] = "El importe debe ser mayor que cero."
 
         if (
             self.store_id
             and self.business_id
             and self.store.business_id != self.business_id
         ):
-            errors["store"] = (
-                "La tienda debe pertenecer al mismo negocio."
-            )
+            errors["store"] = "La tienda debe pertenecer al mismo negocio."
 
         if self.cash_session_id:
-            if (
-                self.business_id
-                and self.cash_session.business_id
-                != self.business_id
-            ):
-                errors["cash_session"] = (
-                    "La sesión debe pertenecer "
-                    "al mismo negocio."
-                )
+            if self.business_id and self.cash_session.business_id != self.business_id:
+                errors["cash_session"] = "La sesión debe pertenecer al mismo negocio."
 
-            if (
-                self.store_id
-                and self.cash_session.store_id
-                != self.store_id
-            ):
-                errors["cash_session"] = (
-                    "La sesión debe pertenecer "
-                    "a la misma tienda."
-                )
+            if self.store_id and self.cash_session.store_id != self.store_id:
+                errors["cash_session"] = "La sesión debe pertenecer a la misma tienda."
 
         if self.sale_id:
-            if (
-                self.business_id
-                and self.sale.business_id
-                != self.business_id
-            ):
-                errors["sale"] = (
-                    "La venta debe pertenecer "
-                    "al mismo negocio."
-                )
+            if self.business_id and self.sale.business_id != self.business_id:
+                errors["sale"] = "La venta debe pertenecer al mismo negocio."
 
-            if (
-                self.store_id
-                and self.sale.store_id
-                != self.store_id
-            ):
-                errors["sale"] = (
-                    "La venta debe pertenecer "
-                    "a la misma tienda."
-                )
+            if self.store_id and self.sale.store_id != self.store_id:
+                errors["sale"] = "La venta debe pertenecer a la misma tienda."
 
         if self.payment_id:
-            if (
-                self.business_id
-                and self.payment.business_id
-                != self.business_id
-            ):
-                errors["payment"] = (
-                    "El pago debe pertenecer "
-                    "al mismo negocio."
-                )
+            if self.business_id and self.payment.business_id != self.business_id:
+                errors["payment"] = "El pago debe pertenecer al mismo negocio."
 
-            if (
-                self.store_id
-                and self.payment.store_id
-                != self.store_id
-            ):
-                errors["payment"] = (
-                    "El pago debe pertenecer "
-                    "a la misma tienda."
-                )
+            if self.store_id and self.payment.store_id != self.store_id:
+                errors["payment"] = "El pago debe pertenecer a la misma tienda."
 
-            if (
-                self.payment.cash_session_id
-                != self.cash_session_id
-            ):
-                errors["payment"] = (
-                    "El pago debe pertenecer "
-                    "a la misma sesión de caja."
-                )
+            if self.payment.cash_session_id != self.cash_session_id:
+                errors["payment"] = "El pago debe pertenecer a la misma sesión de caja."
 
-            if (
-                self.payment.sale_id
-                != self.sale_id
-            ):
+            if self.payment.sale_id != self.sale_id:
                 errors["sale"] = (
-                    "La venta del movimiento debe "
-                    "coincidir con la venta del pago."
+                    "La venta del movimiento debe coincidir con la venta del pago."
                 )
 
             if not self.payment.method.affects_cash_register:
-                errors["payment"] = (
-                    "El método de pago no afecta "
-                    "a efectivo físico."
-                )
+                errors["payment"] = "El método de pago no afecta a efectivo físico."
 
             from apps.payments.models import (
                 PaymentStatusChoices,
                 PaymentTypeChoices,
             )
 
-            if (
-                self.payment.status
-                != PaymentStatusChoices.COMPLETED
-            ):
+            if self.payment.status != PaymentStatusChoices.COMPLETED:
                 errors["payment"] = (
-                    "Solo un pago completado puede "
-                    "generar movimiento de efectivo."
+                    "Solo un pago completado puede generar movimiento de efectivo."
                 )
 
             if self.movement_type in (
@@ -838,20 +750,13 @@ class CashMovement(TimeStampedModel):
                 self.MovementType.REFUND_CASH,
             ):
                 expected_movement_type = {
-                    PaymentTypeChoices.SALE_PAYMENT: (
-                        self.MovementType.SALE_CASH
-                    ),
-                    PaymentTypeChoices.REFUND: (
-                        self.MovementType.REFUND_CASH
-                    ),
-                }.get(
-                    self.payment.payment_type
-                )
+                    PaymentTypeChoices.SALE_PAYMENT: (self.MovementType.SALE_CASH),
+                    PaymentTypeChoices.REFUND: (self.MovementType.REFUND_CASH),
+                }.get(self.payment.payment_type)
 
                 if self.movement_type != expected_movement_type:
                     errors["movement_type"] = (
-                        "El tipo de movimiento no coincide "
-                        "con la naturaleza del pago."
+                        "El tipo de movimiento no coincide con la naturaleza del pago."
                     )
 
         if self.movement_type in (
@@ -860,15 +765,11 @@ class CashMovement(TimeStampedModel):
         ):
             if not self.payment_id:
                 errors["payment"] = (
-                    "Los movimientos de cobro/reembolso "
-                    "requieren Payment."
+                    "Los movimientos de cobro/reembolso requieren Payment."
                 )
 
             if not self.sale_id:
-                errors["sale"] = (
-                    "Los movimientos de cobro/reembolso "
-                    "requieren Sale."
-                )
+                errors["sale"] = "Los movimientos de cobro/reembolso requieren Sale."
 
         elif self.movement_type in (
             self.MovementType.CASH_IN,
@@ -876,30 +777,25 @@ class CashMovement(TimeStampedModel):
         ):
             if self.payment_id:
                 errors["payment"] = (
-                    "Las entradas y salidas manuales "
-                    "no deben tener Payment."
+                    "Las entradas y salidas manuales no deben tener Payment."
                 )
 
             if self.sale_id:
-                errors["sale"] = (
-                    "Las entradas y salidas manuales "
-                    "no deben tener Sale."
-                )
+                errors["sale"] = "Las entradas y salidas manuales no deben tener Sale."
 
-        # ADJUSTMENT:
-        # no imponemos todavía una regla sobre su origen.
+        if self.movement_type == self.MovementType.ADJUSTMENT:
+            if not self.adjustment_direction:
+                errors["adjustment_direction"] = "Un ajuste requiere dirección."
+            if self.payment_id or self.sale_id:
+                errors["payment"] = "Un ajuste manual no debe tener Payment ni Sale."
+        elif self.adjustment_direction is not None:
+            errors["adjustment_direction"] = "Solo un ajuste puede indicar dirección."
 
-        if (
-            self.created_by_id
-            and not _user_belongs_to_business(
-                self.created_by,
-                self.business_id,
-            )
+        if self.created_by_id and not _user_belongs_to_business(
+            self.created_by,
+            self.business_id,
         ):
-            errors["created_by"] = (
-                "El usuario debe pertenecer "
-                "al mismo negocio."
-            )
+            errors["created_by"] = "El usuario debe pertenecer al mismo negocio."
 
         if errors:
             raise ValidationError(errors)
@@ -911,25 +807,19 @@ class CashMovement(TimeStampedModel):
 
 
 class CashCount(TimeStampedModel):
-    """
-    Fotografía de un arqueo de una CashSession.
+    """Snapshot inmutable de efectivo: REVIEW ilimitado o CLOSING único."""
 
-    difference_amount:
+    class CountType(models.TextChoices):
+        REVIEW = "review", "Revisión"
+        CLOSING = "closing", "Cierre"
 
-        counted_amount - expected_amount
-
-    IMPORTANTE:
-
-    No impongo UniqueConstraint(cash_session).
-
-    El contrato todavía debe decidir si tendremos:
-
-        - un único arqueo final;
-        - varios recuentos/revisiones.
-
-    Por tanto Models no debe tomar esa decisión
-    silenciosamente.
-    """
+    count_type = models.CharField(
+        "Tipo de arqueo",
+        max_length=10,
+        choices=CountType.choices,
+        default=CountType.REVIEW,
+        db_index=True,
+    )
 
     business = models.ForeignKey(
         Business,
@@ -991,19 +881,20 @@ class CashCount(TimeStampedModel):
         )
 
         constraints = [
+            models.UniqueConstraint(
+                fields=("cash_session",),
+                condition=Q(count_type="closing"),
+                name="uniq_cashcount_closing_session",
+            ),
             models.CheckConstraint(
                 condition=Q(
                     counted_amount__gte=ZERO,
                 ),
                 name="chk_cashcount_counted_gte0",
             ),
-
             models.CheckConstraint(
                 condition=Q(
-                    difference_amount=(
-                        F("counted_amount")
-                        - F("expected_amount")
-                    )
+                    difference_amount=(F("counted_amount") - F("expected_amount"))
                 ),
                 name="chk_cashcount_difference",
             ),
@@ -1022,8 +913,7 @@ class CashCount(TimeStampedModel):
 
     def __str__(self):
         return (
-            f"Arqueo · sesión #{self.cash_session_id} · "
-            f"contado {self.counted_amount}"
+            f"Arqueo · sesión #{self.cash_session_id} · contado {self.counted_amount}"
         )
 
     def clean(self):
@@ -1031,27 +921,13 @@ class CashCount(TimeStampedModel):
 
         errors = {}
 
-        if (
-            self.counted_amount is not None
-            and self.counted_amount < ZERO
-        ):
-            errors["counted_amount"] = (
-                "El efectivo contado no puede ser negativo."
-            )
+        if self.counted_amount is not None and self.counted_amount < ZERO:
+            errors["counted_amount"] = "El efectivo contado no puede ser negativo."
 
-        if (
-            self.counted_amount is not None
-            and self.expected_amount is not None
-        ):
-            expected_difference = (
-                self.counted_amount
-                - self.expected_amount
-            )
+        if self.counted_amount is not None and self.expected_amount is not None:
+            expected_difference = self.counted_amount - self.expected_amount
 
-            if (
-                self.difference_amount
-                != expected_difference
-            ):
+            if self.difference_amount != expected_difference:
                 errors["difference_amount"] = (
                     "La diferencia debe ser contado - esperado."
                 )
@@ -1059,63 +935,31 @@ class CashCount(TimeStampedModel):
         if (
             self.store_id
             and self.business_id
-            and self.store.business_id
-            != self.business_id
+            and self.store.business_id != self.business_id
         ):
-            errors["store"] = (
-                "La tienda debe pertenecer "
-                "al mismo negocio."
-            )
+            errors["store"] = "La tienda debe pertenecer al mismo negocio."
 
         if self.cash_session_id:
-            if (
-                self.business_id
-                and self.cash_session.business_id
-                != self.business_id
-            ):
-                errors["cash_session"] = (
-                    "La sesión debe pertenecer "
-                    "al mismo negocio."
-                )
+            if self.business_id and self.cash_session.business_id != self.business_id:
+                errors["cash_session"] = "La sesión debe pertenecer al mismo negocio."
 
-            if (
-                self.store_id
-                and self.cash_session.store_id
-                != self.store_id
-            ):
-                errors["cash_session"] = (
-                    "La sesión debe pertenecer "
-                    "a la misma tienda."
-                )
+            if self.store_id and self.cash_session.store_id != self.store_id:
+                errors["cash_session"] = "La sesión debe pertenecer a la misma tienda."
 
-        if (
-            self.counted_by_id
-            and not _user_belongs_to_business(
-                self.counted_by,
-                self.business_id,
-            )
+        if self.counted_by_id and not _user_belongs_to_business(
+            self.counted_by,
+            self.business_id,
         ):
-            errors["counted_by"] = (
-                "El usuario debe pertenecer "
-                "al mismo negocio."
-            )
+            errors["counted_by"] = "El usuario debe pertenecer al mismo negocio."
 
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        """
-        CashCount representa una fotografía histórica.
-
-        Una vez creado no debe editarse.
-        Si existe un nuevo recuento se crea otro CashCount,
-        hasta que decidamos el contrato final de cardinalidad.
-        """
+        """Preserva el snapshot; cada nuevo recuento crea otra fila."""
 
         if not self._state.adding:
-            raise ValidationError(
-                "Un arqueo histórico no debe modificarse."
-            )
+            raise ValidationError("Un arqueo histórico no debe modificarse.")
 
         self.full_clean()
 

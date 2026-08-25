@@ -1,4 +1,6 @@
 import uuid
+from apps.cash_register.models import CashSession
+from apps.cash_register.test_factories import create_cash_register
 from apps.payments.models import (
     Payment,
     PaymentMethod,
@@ -257,6 +259,15 @@ class CustomerAccountServiceTests(TestCase):
             store=create_sales_store(business=business),
             opened_by=user,
             customer=customer,
+        )
+
+    def _cash_session(self, store):
+        register = create_cash_register(business=self.business, store=store)
+        return CashSession.objects.create(
+            business=self.business,
+            store=store,
+            cash_register=register,
+            opened_by=self.user,
         )
 
     def test_update_account_settings_success_zero_positive_and_no_entries(self):
@@ -574,6 +585,7 @@ class CustomerAccountServiceTests(TestCase):
             store=store,
             sale=sale,
             method=method,
+            cash_session=self._cash_session(store),
             sale_return=sale_return,
             payment_type=PaymentTypeChoices.REFUND,
             amount=Decimal("3.00"),
@@ -650,6 +662,7 @@ class CustomerAccountServiceTests(TestCase):
             store=store,
             sale=sale,
             method=method,
+            cash_session=self._cash_session(store),
             sale_return=sale_return,
             payment_type=PaymentTypeChoices.REFUND,
             amount=Decimal("3.00"),
