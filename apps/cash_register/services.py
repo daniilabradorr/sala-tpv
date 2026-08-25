@@ -385,16 +385,32 @@ class CashRegisterService:
         counted_amount,
         notes="",
     ):
+        if not business_exists(business):
+            raise ValidationError({"business": "El negocio no existe o está inactivo."})
+        if not is_authenticated_user(user) or not belongs_to_business(user, business):
+            raise ValidationError({"user": "El usuario no es válido para el negocio."})
         counted = self._nonnegative_amount(counted_amount, "counted_amount")
         with transaction.atomic():
-            store = self.repository.get_store(business=business, store_id=store_id)
+            try:
+                store = self.repository.get_store(business=business, store_id=store_id)
+            except Store.DoesNotExist as exc:
+                raise ValidationError(
+                    {"store": "La tienda no pertenece al negocio."}
+                ) from exc
+            if not store.is_active:
+                raise ValidationError({"store": "La tienda está inactiva."})
             if not can_access_store(user, store):
                 raise ValidationError(
                     {"user": "El usuario no puede operar en la tienda."}
                 )
-            session = self.repository.get_cash_session_for_update(
-                business=business, store=store, cash_session_id=cash_session_id
-            )
+            try:
+                session = self.repository.get_cash_session_for_update(
+                    business=business, store=store, cash_session_id=cash_session_id
+                )
+            except CashSession.DoesNotExist as exc:
+                raise ValidationError(
+                    {"cash_session": "La sesión no es válida."}
+                ) from exc
             if session.cash_register_id != cash_register_id or not session.is_open:
                 raise ValidationError(
                     {"cash_session": "La sesión no está abierta en la caja."}
@@ -423,21 +439,42 @@ class CashRegisterService:
         pin=None,
         notes="",
     ):
+        if not business_exists(business):
+            raise ValidationError({"business": "El negocio no existe o está inactivo."})
+        if not is_authenticated_user(user) or not belongs_to_business(user, business):
+            raise ValidationError({"user": "El usuario no es válido para el negocio."})
         counted = self._nonnegative_amount(counted_cash_amount, "counted_cash_amount")
         with transaction.atomic():
-            store = self.repository.get_store(business=business, store_id=store_id)
+            try:
+                store = self.repository.get_store(business=business, store_id=store_id)
+            except Store.DoesNotExist as exc:
+                raise ValidationError(
+                    {"store": "La tienda no pertenece al negocio."}
+                ) from exc
+            if not store.is_active:
+                raise ValidationError({"store": "La tienda está inactiva."})
             if not can_close_cash_register(user, store):
                 raise ValidationError(
                     {"user": "El usuario no tiene permiso para cerrar caja."}
                 )
-            settings = POSSettings.objects.get(business=business)
+            try:
+                settings = POSSettings.objects.get(business=business)
+            except POSSettings.DoesNotExist as exc:
+                raise ValidationError(
+                    {"business": "El negocio no tiene configuración TPV."}
+                ) from exc
             if settings.require_pin_for_sensitive_actions and (
                 not pin or not user.check_pin(pin)
             ):
                 raise ValidationError({"pin": "El PIN indicado no es válido."})
-            session = self.repository.get_cash_session_for_update(
-                business=business, store=store, cash_session_id=cash_session_id
-            )
+            try:
+                session = self.repository.get_cash_session_for_update(
+                    business=business, store=store, cash_session_id=cash_session_id
+                )
+            except CashSession.DoesNotExist as exc:
+                raise ValidationError(
+                    {"cash_session": "La sesión no es válida."}
+                ) from exc
             if session.cash_register_id != cash_register_id or not session.is_open:
                 raise ValidationError(
                     {"cash_session": "La sesión ya está cerrada o no es válida."}

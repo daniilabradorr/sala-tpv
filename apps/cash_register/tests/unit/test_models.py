@@ -32,6 +32,7 @@ from apps.sales.tests.factories import (
     create_sale_return,
 )
 
+
 class CashRegisterModelTests(TestCase):
     def setUp(self):  # noqa: N802
         self.business = create_cash_business()
@@ -312,10 +313,7 @@ class CashSessionModelTests(TestCase):
             opening_amount=opening_amount,
             expected_cash_amount=expected_cash_amount,
             counted_cash_amount=counted_cash_amount,
-            difference_amount=(
-                counted_cash_amount
-                - expected_cash_amount
-            ),
+            difference_amount=(counted_cash_amount - expected_cash_amount),
         )
 
     # ==========================================================
@@ -848,11 +846,9 @@ class CashSessionModelTests(TestCase):
                 CashSession.objects.filter(
                     pk=session.pk,
                 ).update(
-                    closed_at=(
-                        session.opened_at
-                        - timedelta(seconds=1)
-                    ),
+                    closed_at=(session.opened_at - timedelta(seconds=1)),
                 )
+
 
 class CashMovementModelTests(TestCase):
     def setUp(self):  # noqa: N802
@@ -950,12 +946,14 @@ class CashMovementModelTests(TestCase):
         movement_type=CashMovement.MovementType.CASH_IN,
         amount=Decimal("10.00"),
         balance_after=Decimal("110.00"),
+        adjustment_direction=None,
     ):
         return CashMovement.objects.create(
             business=self.business,
             store=self.store,
             cash_session=self.session,
             movement_type=movement_type,
+            adjustment_direction=adjustment_direction,
             amount=amount,
             balance_after=balance_after,
             created_by=self.user,
@@ -1064,9 +1062,10 @@ class CashMovementModelTests(TestCase):
         self.assertIsNone(movement.payment)
         self.assertIsNone(movement.sale)
 
-    def test_create_adjustment_without_origin_success(self):
+    def test_create_adjustment_in_without_origin_success(self):
         movement = self._create_manual_movement(
             movement_type=CashMovement.MovementType.ADJUSTMENT,
+            adjustment_direction=CashMovement.AdjustmentDirection.IN,
             amount=Decimal("5.00"),
             balance_after=Decimal("105.00"),
         )
@@ -1077,6 +1076,18 @@ class CashMovementModelTests(TestCase):
         )
         self.assertIsNone(movement.payment)
         self.assertIsNone(movement.sale)
+
+    def test_adjustment_requires_direction(self):
+        with self.assertRaises(ValidationError):
+            self._create_manual_movement(
+                movement_type=CashMovement.MovementType.ADJUSTMENT,
+            )
+
+    def test_non_adjustment_rejects_direction(self):
+        with self.assertRaises(ValidationError):
+            self._create_manual_movement(
+                adjustment_direction=CashMovement.AdjustmentDirection.IN,
+            )
 
     # ==========================================================
     # Amount
@@ -1437,10 +1448,7 @@ class CashCountModelTests(TestCase):
             cash_session=self.session,
             counted_amount=counted_amount,
             expected_amount=expected_amount,
-            difference_amount=(
-                counted_amount
-                - expected_amount
-            ),
+            difference_amount=(counted_amount - expected_amount),
             counted_by=self.user,
             notes=notes,
         )
@@ -1524,11 +1532,9 @@ class CashCountModelTests(TestCase):
                 cash_session=self.session,
                 counted_amount=Decimal("90.00"),
                 expected_amount=Decimal("100.00"),
-
                 # Incorrecto:
                 # debería ser -10.00
                 difference_amount=Decimal("0.00"),
-
                 counted_by=self.user,
             )
 
@@ -1560,13 +1566,10 @@ class CashCountModelTests(TestCase):
         with self.assertRaises(ValidationError):
             CashCount.objects.create(
                 business=self.business,
-
                 # Indicamos Store original
                 store=self.store,
-
                 # Pero Session de otra Store
                 cash_session=other_session,
-
                 counted_amount=Decimal("100.00"),
                 expected_amount=Decimal("100.00"),
                 difference_amount=Decimal("0.00"),

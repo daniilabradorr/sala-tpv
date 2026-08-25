@@ -805,25 +805,7 @@ class CashMovement(TimeStampedModel):
 
 
 class CashCount(TimeStampedModel):
-    """
-    Fotografía de un arqueo de una CashSession.
-
-    difference_amount:
-
-        counted_amount - expected_amount
-
-    IMPORTANTE:
-
-    No impongo UniqueConstraint(cash_session).
-
-    El contrato todavía debe decidir si tendremos:
-
-        - un único arqueo final;
-        - varios recuentos/revisiones.
-
-    Por tanto Models no debe tomar esa decisión
-    silenciosamente.
-    """
+    """Snapshot inmutable de efectivo: REVIEW ilimitado o CLOSING único."""
 
     class CountType(models.TextChoices):
         REVIEW = "review", "Revisión"
@@ -972,13 +954,7 @@ class CashCount(TimeStampedModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        """
-        CashCount representa una fotografía histórica.
-
-        Una vez creado no debe editarse.
-        Si existe un nuevo recuento se crea otro CashCount,
-        hasta que decidamos el contrato final de cardinalidad.
-        """
+        """Preserva el snapshot; cada nuevo recuento crea otra fila."""
 
         if not self._state.adding:
             raise ValidationError("Un arqueo histórico no debe modificarse.")

@@ -1,6 +1,7 @@
 """Tests unitarios de formularios del módulo sales."""
 
 from decimal import Decimal
+import uuid
 
 from django.test import TestCase
 from django.utils import timezone
@@ -72,6 +73,7 @@ class SaleFormsTests(TestCase):
             business=business or self.business,
             store=store or self.store,
             name=name,
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
         )
 
     def create_cash_session(
@@ -83,6 +85,14 @@ class SaleFormsTests(TestCase):
             cash_register=cash_register,
             status=status,
             closed_at=timezone.now() if status == CashSession.Status.CLOSED else None,
+            closed_by=(opened_by or self.owner)
+            if status == CashSession.Status.CLOSED
+            else None,
+            counted_cash_amount=Decimal("0.00")
+            if status == CashSession.Status.CLOSED
+            else None,
+            expected_cash_amount=Decimal("0.00"),
+            difference_amount=Decimal("0.00"),
             opened_by=opened_by or self.owner,
         )
 
