@@ -13,7 +13,7 @@ from apps.cash_register.test_factories import (
     create_cash_store,
 )
 from apps.users.models import RoleChoices
-from apps.users.tests.factories import create_user
+from apps.users.tests.factories import create_store_access, create_user
 
 
 class CashRegisterServiceTests(TestCase):
@@ -128,6 +128,36 @@ class CashRegisterServiceTests(TestCase):
         self.session.refresh_from_db()
         self.assertEqual(self.session.status, CashSession.Status.OPEN)
 
+    def test_created_movement_rolls_back_when_session_save_fails(self):
+        with patch.object(
+            CashSession, "save", side_effect=RuntimeError("session save failure")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.service.register_cash_in(**self.common(), amount=Decimal("20"))
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.expected_cash_amount, Decimal("100.00"))
+        self.assertFalse(
+            CashMovement.objects.filter(cash_session=self.session).exists()
+        )
+
+    def test_created_closing_count_rolls_back_when_session_save_fails(self):
+        with patch.object(
+            CashSession, "save", side_effect=RuntimeError("session save failure")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.service.close_cash_session(
+                    **self.common(), counted_cash_amount=Decimal("100")
+                )
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, CashSession.Status.OPEN)
+        self.assertIsNone(self.session.counted_cash_amount)
+        self.assertIsNone(self.session.closed_at)
+        self.assertFalse(
+            CashCount.objects.filter(
+                cash_session=self.session, count_type=CashCount.CountType.CLOSING
+            ).exists()
+        )
+
     def test_review_rejects_inactive_store_and_business(self):
         self.store.is_active = False
         self.store.save()
@@ -142,4 +172,134 @@ class CashRegisterServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             self.service.review_cash_count(
                 **self.common(), counted_amount=Decimal("100")
+            )
+
+    def test_open_zero_and_rejects_negative(self):
+        register = create_cash_register(
+            business=self.business, store=self.store, code="SECOND"
+        )
+        session = self.service.open_cash_session(
+            business=self.business,
+            store_id=self.store.pk,
+            cash_register_id=register.pk,
+            user=self.user,
+            opening_amount=Decimal("0.00"),
+        )
+        self.assertEqual(session.expected_cash_amount, Decimal("0.00"))
+        third = create_cash_register(
+            business=self.business, store=self.store, code="THIRD"
+        )
+        with self.assertRaises(ValidationError):
+            self.service.open_cash_session(
+                business=self.business,
+                store_id=self.store.pk,
+                cash_register_id=third.pk,
+                user=self.user,
+                opening_amount=Decimal("-1.00"),
+            )
+
+    def test_open_rejects_inactive_store_register_and_second_open(self):
+        with self.assertRaises(ValidationError):
+            self.service.open_cash_session(
+                business=self.business,
+                store_id=self.store.pk,
+                cash_register_id=self.register.pk,
+                user=self.user,
+                opening_amount=Decimal("1.00"),
+            )
+        inactive = create_cash_register(
+            business=self.business,
+            store=self.store,
+            code="INACTIVE",
+            is_active=False,
+        )
+        with self.assertRaises(ValidationError):
+            self.service.open_cash_session(
+                business=self.business,
+                store_id=self.store.pk,
+                cash_register_id=inactive.pk,
+                user=self.user,
+                opening_amount=Decimal("1.00"),
+            )
+        self.store.is_active = False
+        self.store.save()
+        with self.assertRaises(ValidationError):
+            self.service.open_cash_session(
+                business=self.business,
+                store_id=self.store.pk,
+                cash_register_id=inactive.pk,
+                user=self.user,
+                opening_amount=Decimal("1.00"),
+            )
+
+    def test_reopen_after_correct_close(self):
+        self.service.close_cash_session(
+            **self.common(), counted_cash_amount=Decimal("100.00")
+        )
+        reopened = self.service.open_cash_session(
+            business=self.business,
+            store_id=self.store.pk,
+            cash_register_id=self.register.pk,
+            user=self.user,
+            opening_amount=Decimal("25.00"),
+        )
+        self.assertTrue(reopened.is_open)
+
+    def test_open_rejects_user_without_open_permission(self):
+        register = create_cash_register(
+            business=self.business, store=self.store, code="NO-PERM"
+        )
+        cashier = create_user(
+            business=self.business, email="no-open@test.com", role=RoleChoices.CASHIER
+        )
+        create_store_access(
+            business=self.business,
+            user=cashier,
+            store=self.store,
+            can_open_cash=False,
+        )
+        with self.assertRaises(ValidationError):
+            self.service.open_cash_session(
+                business=self.business,
+                store_id=self.store.pk,
+                cash_register_id=register.pk,
+                user=cashier,
+                opening_amount=Decimal("1.00"),
+            )
+
+    def test_close_pin_empty_wrong_and_correct(self):
+        settings = self.business.pos_settings
+        settings.require_pin_for_sensitive_actions = True
+        settings.save()
+        for pin in (None, "wrong"):
+            with self.assertRaises(ValidationError):
+                self.service.close_cash_session(
+                    **self.common(), counted_cash_amount=Decimal("100"), pin=pin
+                )
+        session, _count = self.service.close_cash_session(
+            **self.common(), counted_cash_amount=Decimal("100"), pin="1234"
+        )
+        self.assertEqual(session.status, CashSession.Status.CLOSED)
+
+    def test_close_rejects_user_without_permission_and_missing_settings(self):
+        cashier = create_user(
+            business=self.business,
+            email="no-close@test.com",
+            role=RoleChoices.CASHIER,
+        )
+        create_store_access(
+            business=self.business,
+            user=cashier,
+            store=self.store,
+            can_close_cash=False,
+        )
+        with self.assertRaises(ValidationError):
+            self.service.close_cash_session(
+                **{**self.common(), "user": cashier},
+                counted_cash_amount=Decimal("100"),
+            )
+        POSSettings.objects.filter(business=self.business).delete()
+        with self.assertRaises(ValidationError):
+            self.service.close_cash_session(
+                **self.common(), counted_cash_amount=Decimal("100")
             )

@@ -1089,6 +1089,15 @@ class CashMovementModelTests(TestCase):
                 adjustment_direction=CashMovement.AdjustmentDirection.IN,
             )
 
+    def test_database_rejects_adjustment_origin_bypass(self):
+        movement = self._create_manual_movement(
+            movement_type=CashMovement.MovementType.ADJUSTMENT,
+            adjustment_direction=CashMovement.AdjustmentDirection.IN,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CashMovement.objects.filter(pk=movement.pk).update(sale=self.sale)
+
     # ==========================================================
     # Amount
     # ==========================================================

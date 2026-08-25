@@ -5,15 +5,20 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from apps.cash_register.models import CashMovement, CashSession
+from apps.cash_register.services import CashRegisterService
 from apps.cash_register.test_factories import (
     create_cash_business,
     create_cash_register,
     create_cash_store,
 )
-from apps.payments.models import Payment, PaymentMethod
-from apps.payments.services import register_sale_payment
-from apps.sales.models import SaleStatusChoices
-from apps.sales.tests.factories import create_pos_settings, create_sale
+from apps.payments.models import Payment, PaymentMethod, PaymentTypeChoices
+from apps.payments.services import register_refund, register_sale_payment
+from apps.sales.models import SaleReturnStatusChoices, SaleStatusChoices
+from apps.sales.tests.factories import (
+    create_pos_settings,
+    create_sale,
+    create_sale_return,
+)
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_user
 
@@ -92,3 +97,56 @@ class PaymentCashIntegrationTests(TestCase):
         self.session.refresh_from_db()
         self.assertFalse(Payment.objects.exists())
         self.assertEqual(self.session.expected_cash_amount, Decimal("100.00"))
+
+    def test_cash_refund_uses_current_refund_session_and_retry_is_idempotent(self):
+        self.sale.cash_session = self.session
+        self.sale.save(update_fields=["cash_session", "updated_at"])
+        self.pay(method=self.cash)
+        CashRegisterService().close_cash_session(
+            business=self.business,
+            store_id=self.store.pk,
+            cash_register_id=self.session.cash_register_id,
+            cash_session_id=self.session.pk,
+            user=self.user,
+            counted_cash_amount=Decimal("150.00"),
+        )
+        current = CashRegisterService().open_cash_session(
+            business=self.business,
+            store_id=self.store.pk,
+            cash_register_id=self.session.cash_register_id,
+            user=self.user,
+            opening_amount=Decimal("100.00"),
+        )
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("20.00"),
+        )
+        key = uuid.uuid4()
+        arguments = {
+            "business": self.business,
+            "sale_return_id": returned.pk,
+            "method_id": self.cash.pk,
+            "amount": Decimal("20.00"),
+            "user": self.user,
+            "idempotency_key": key,
+            "cash_session_id": current.pk,
+        }
+        payment = register_refund(**arguments)
+        retry = register_refund(**arguments)
+        movement = CashMovement.objects.get(payment=payment)
+        current.refresh_from_db()
+        self.assertEqual(payment, retry)
+        self.assertEqual(payment.payment_type, PaymentTypeChoices.REFUND)
+        self.assertEqual(payment.cash_session, current)
+        self.assertNotEqual(payment.cash_session, self.session)
+        self.assertEqual(movement.movement_type, CashMovement.MovementType.REFUND_CASH)
+        self.assertEqual(movement.cash_session, current)
+        self.assertEqual(movement.amount, Decimal("20.00"))
+        self.assertEqual(movement.balance_after, Decimal("80.00"))
+        self.assertEqual(current.expected_cash_amount, Decimal("80.00"))
+        self.assertEqual(Payment.objects.filter(idempotency_key=key).count(), 1)
+        self.assertEqual(CashMovement.objects.filter(payment=payment).count(), 1)

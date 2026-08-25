@@ -640,6 +640,8 @@ class CashMovement(TimeStampedModel):
                     )
                     | Q(
                         movement_type="adjustment",
+                        payment__isnull=True,
+                        sale__isnull=True,
                     )
                 ),
                 name="chk_cashmovement_origin",

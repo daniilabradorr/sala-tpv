@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.cash_register.forms import (
@@ -11,6 +12,7 @@ from apps.cash_register.forms import (
     CashSessionCloseForm,
     CashSessionOpenForm,
 )
+from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import (
     get_cash_registers_for_store,
     get_cash_session_counts,
@@ -61,9 +63,12 @@ def register_list(request, store_id):
 @login_required
 def session_detail(request, store_id, session_id):
     store = _store(request, store_id)
-    session = get_cash_session_detail(
-        business=request.user.business, store=store, cash_session_id=session_id
-    )
+    try:
+        session = get_cash_session_detail(
+            business=request.user.business, store=store, cash_session_id=session_id
+        )
+    except CashSession.DoesNotExist as exc:
+        raise Http404("La sesión de caja no existe.") from exc
     return render(
         request,
         "cash_register/session_detail.html",
@@ -109,9 +114,12 @@ def open_session(request, store_id):
 
 def _session_action(request, store_id, session_id, form_class, method):
     store = _store(request, store_id)
-    session = get_cash_session_detail(
-        business=request.user.business, store=store, cash_session_id=session_id
-    )
+    try:
+        session = get_cash_session_detail(
+            business=request.user.business, store=store, cash_session_id=session_id
+        )
+    except CashSession.DoesNotExist as exc:
+        raise Http404("La sesión de caja no existe.") from exc
     form = form_class(request.POST or None)
     if request.method == "POST" and form.is_valid():
         data = form.cleaned_data
