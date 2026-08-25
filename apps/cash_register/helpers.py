@@ -26,12 +26,7 @@ def cash_register_pertenece_business_store(
     Comprueba que la caja pertenezca exactamente
     al Business y Store indicados.
     """
-    if (
-        business is None
-        or not business.pk
-        or not store_id
-        or not cash_register_id
-    ):
+    if business is None or not business.pk or not store_id or not cash_register_id:
         return False
 
     return CashRegister.objects.filter(
@@ -55,12 +50,7 @@ def verify_cash_register_and_store_active(
     - la CashRegister pertenece a ese Business;
     - la CashRegister está activa.
     """
-    if (
-        business is None
-        or not business.pk
-        or not store_id
-        or not cash_register_id
-    ):
+    if business is None or not business.pk or not store_id or not cash_register_id:
         return False
 
     return CashRegister.objects.filter(

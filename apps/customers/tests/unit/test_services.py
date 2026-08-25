@@ -19,6 +19,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from apps.cash_register.models import CashRegister, CashSession
 from apps.customers.models import (
     Customer,
     CustomerAccount,
@@ -257,6 +258,20 @@ class CustomerAccountServiceTests(TestCase):
             store=create_sales_store(business=business),
             opened_by=user,
             customer=customer,
+        )
+
+    def _cash_session(self, *, store):
+        cash_register = CashRegister.objects.create(
+            business=self.business,
+            store=store,
+            name=f"Caja {uuid.uuid4().hex[:8]}",
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
+        )
+        return CashSession.objects.create(
+            business=self.business,
+            store=store,
+            cash_register=cash_register,
+            opened_by=self.user,
         )
 
     def test_update_account_settings_success_zero_positive_and_no_entries(self):
@@ -568,6 +583,7 @@ class CustomerAccountServiceTests(TestCase):
             name="Tarjeta",
             code="card",
         )
+        session = self._cash_session(store=store)
 
         refund_payment = Payment.objects.create(
             business=self.business,
@@ -580,6 +596,7 @@ class CustomerAccountServiceTests(TestCase):
             status=PaymentStatusChoices.COMPLETED,
             processed_by=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session=session,
         )
 
         account_1, entry_1 = CustomerAccountService.register_refund(
@@ -644,6 +661,7 @@ class CustomerAccountServiceTests(TestCase):
             name="Tarjeta",
             code="card",
         )
+        session = self._cash_session(store=store)
 
         refund_payment = Payment.objects.create(
             business=self.business,
@@ -656,6 +674,7 @@ class CustomerAccountServiceTests(TestCase):
             status=PaymentStatusChoices.COMPLETED,
             processed_by=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session=session,
         )
 
         CustomerAccountService.register_refund(

@@ -3,6 +3,7 @@
 from decimal import Decimal
 import uuid
 
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -79,22 +80,24 @@ class SaleFormsTests(TestCase):
     def create_cash_session(
         self, *, cash_register, status=CashSession.Status.OPEN, opened_by=None
     ):
-        return CashSession.objects.create(
+        opened_by = opened_by or self.owner
+        session = CashSession.objects.create(
             business=cash_register.business,
             store=cash_register.store,
             cash_register=cash_register,
-            status=status,
-            closed_at=timezone.now() if status == CashSession.Status.CLOSED else None,
-            closed_by=(opened_by or self.owner)
-            if status == CashSession.Status.CLOSED
-            else None,
-            counted_cash_amount=Decimal("0.00")
-            if status == CashSession.Status.CLOSED
-            else None,
             expected_cash_amount=Decimal("0.00"),
-            difference_amount=Decimal("0.00"),
-            opened_by=opened_by or self.owner,
+            opened_by=opened_by,
         )
+        if status == CashSession.Status.CLOSED:
+            session.status = CashSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.closed_by = opened_by
+            session.counted_cash_amount = Decimal("0.00")
+            session.difference_amount = (
+                session.counted_cash_amount - session.expected_cash_amount
+            )
+            session.save()
+        return session
 
     def test_filter_form_rejects_reversed_date_range(self):
         form = SaleFilterForm(
@@ -275,20 +278,8 @@ class SaleFormsTests(TestCase):
     def test_open_form_rejects_open_session_with_closed_at(self):
         register = self.create_cash_register()
         session = self.create_cash_session(cash_register=register)
-        CashSession.objects.filter(pk=session.pk).update(closed_at=timezone.now())
-        form = SaleOpenForm(
-            data={
-                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
-                "cash_register": register.pk,
-                "cash_session": session.pk,
-            },
-            business=self.business,
-            store=self.store,
-            user=self.owner,
-        )
-
-        self.assertFalse(form.is_valid())
-        self.assertIn("cash_session", form.errors)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CashSession.objects.filter(pk=session.pk).update(closed_at=timezone.now())
 
     def test_open_form_rejects_cash_register_without_session(self):
         register = self.create_cash_register()

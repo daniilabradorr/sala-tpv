@@ -28,10 +28,9 @@ class CashRegisterServiceTests(TestCase):
         )
         self.user.set_pin("1234")
         self.user.save()
-        POSSettings.objects.create(
-            business=self.business,
-            require_pin_for_sensitive_actions=False,
-        )
+        settings = POSSettings.objects.get(business=self.business)
+        settings.require_pin_for_sensitive_actions = False
+        settings.save()
         self.service = CashRegisterService()
         self.session = self.service.open_cash_session(
             business=self.business,

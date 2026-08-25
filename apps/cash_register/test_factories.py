@@ -34,10 +34,15 @@ def create_cash_register(
     *,
     business,
     store,
-    name="Caja principal",
-    code="CAJA-01",
+    name=None,
+    code=None,
     is_active=True,
 ):
+    if name is None:
+        name = f"Caja {uuid4().hex[:8]}"
+    if code is None:
+        code = f"CAJA-{uuid4().hex[:8].upper()}"
+
     return CashRegister.objects.create(
         business=business,
         store=store,
