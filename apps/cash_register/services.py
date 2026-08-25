@@ -327,13 +327,16 @@ class CashRegisterService:
                 )
             if not session.is_open:
                 raise ValidationError({"cash_session": "La sesión está cerrada."})
-            direction = Decimal("1.00")
+            direction = Decimal("1")
             if movement_type == CashMovement.MovementType.CASH_OUT or (
                 movement_type == CashMovement.MovementType.ADJUSTMENT
                 and adjustment_direction == CashMovement.AdjustmentDirection.OUT
             ):
-                direction = Decimal("-1.00")
-            balance = session.expected_cash_amount + direction * amount
+                direction = Decimal("-1")
+            balance = (session.expected_cash_amount + direction * amount).quantize(
+                MONEY_STEP,
+                rounding=ROUND_HALF_UP,
+            )
             if balance < ZERO and direction < ZERO and not (reason or "").strip():
                 raise ValidationError(
                     {"reason": "El motivo es obligatorio si el saldo queda negativo."}

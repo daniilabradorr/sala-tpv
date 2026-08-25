@@ -255,8 +255,9 @@ class PaymentsTests(TestCase):
                 idempotency_key=uuid.uuid4(),
                 cash_session_id=closed.pk,
             )
-        with self.assertRaises(ValidationError):
-            self.pay("10", self.cash)
+        payment = self.pay("10", self.cash)
+        self.assertEqual(payment.cash_session_id, self.session.pk)
+        self.assertEqual(payment.status, PaymentStatusChoices.COMPLETED)
 
     def test_cash_session_from_other_business_or_store_is_rejected(self):
         other_store = create_sales_store(business=self.business)
