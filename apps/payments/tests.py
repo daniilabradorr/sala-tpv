@@ -129,18 +129,23 @@ class PaymentsTests(TestCase):
             name=f"Caja {uuid.uuid4()}",
             code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
         )
-        return CashSession.objects.create(
+        session = CashSession.objects.create(
             business=business,
             store=store,
             cash_register=register,
             opened_by=opened_by,
-            status=(CashSession.Status.OPEN if open else CashSession.Status.CLOSED),
-            closed_at=None if open else timezone.now(),
-            closed_by=None if open else opened_by,
-            counted_cash_amount=None if open else Decimal("0.00"),
             expected_cash_amount=Decimal("0.00"),
-            difference_amount=Decimal("0.00"),
         )
+        if not open:
+            session.status = CashSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.closed_by = opened_by
+            session.counted_cash_amount = Decimal("0.00")
+            session.difference_amount = (
+                session.counted_cash_amount - session.expected_cash_amount
+            )
+            session.save()
+        return session
 
     def test_payment_uses_current_session_not_historical_sale_session(self):
         historical = self.create_session()
@@ -621,6 +626,7 @@ class PaymentsTests(TestCase):
                 status=status,
                 processed_by=self.user,
                 idempotency_key=key,
+                cash_session=self.session,
             )
             replay = self.pay("10", key=key)
             self.assertEqual(replay.status, status)
