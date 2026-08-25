@@ -1,6 +1,7 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from threading import Barrier
 
 from django.core.exceptions import ValidationError
 from django.db import connections
@@ -39,9 +40,12 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         )
 
     def run_threads(self, *operations):
+        barrier = Barrier(len(operations))
+
         def execute(operation):
             connections.close_all()
             try:
+                barrier.wait()
                 operation()
                 return True
             except ValidationError:
@@ -174,10 +178,12 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         if results[0]:
             self.assertIsNotNone(payment)
             self.assertIsNotNone(movement)
+            self.assertEqual(movement.cash_session, session)
             self.assertEqual(session.expected_cash_amount, Decimal("120.00"))
             self.assertEqual(closing.expected_amount, Decimal("120.00"))
         else:
             self.assertIsNone(payment)
             self.assertIsNone(movement)
+            self.assertFalse(CashMovement.objects.filter(cash_session=session).exists())
             self.assertEqual(session.expected_cash_amount, Decimal("100.00"))
             self.assertEqual(closing.expected_amount, Decimal("100.00"))
