@@ -3,7 +3,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
 from apps.customers.models import (
@@ -204,6 +204,73 @@ class CustomerAccountService:
             ) from exc
 
     @classmethod
+    def _get_existing_payment_entry(
+        cls,
+        *,
+        business,
+        account,
+        payment,
+        sale,
+        entry_type,
+        amount,
+    ):
+        """
+        Devuelve el CustomerAccountEntry ya asociado a un Payment.
+
+        Sirve como protección idempotente para PAYMENT y REFUND.
+
+        La misma operación económica no puede reutilizarse con:
+        - otra cuenta;
+        - otro Business;
+        - otra Sale;
+        - otro tipo de movimiento;
+        - otro importe.
+        """
+        if payment is None:
+            return None
+
+        if payment.business_id != business.pk:
+            raise ValidationError("El pago debe pertenecer al mismo negocio.")
+
+        effective_sale = sale or payment.sale
+
+        if payment.sale_id != effective_sale.pk:
+            raise ValidationError("El pago no corresponde a la venta indicada.")
+
+        if effective_sale.business_id != business.pk:
+            raise ValidationError("La venta debe pertenecer al mismo negocio.")
+
+        if effective_sale.customer_id != account.customer_id:
+            raise ValidationError(
+                "El pago no pertenece al cliente de la cuenta indicada."
+            )
+
+        existing = (
+            CustomerAccountEntry.objects.select_related("account", "sale", "payment")
+            .filter(payment=payment)
+            .first()
+        )
+
+        if existing is None:
+            return None
+
+        expected_amount = -amount
+
+        if (
+            existing.business_id != business.pk
+            or existing.account_id != account.pk
+            or existing.sale_id != effective_sale.pk
+            or existing.entry_type != entry_type
+            or existing.amount != expected_amount
+        ):
+            raise ValidationError(
+                "El pago ya está asociado a un movimiento de cuenta "
+                "con datos diferentes."
+            )
+
+        return existing
+
+    @classmethod
     @transaction.atomic
     def update_account_settings(cls, *, business, account, credit_limit, is_blocked):
         """Actualiza límite de crédito y bloqueo sin modificar balance."""
@@ -331,31 +398,61 @@ class CustomerAccountService:
 
     @classmethod
     def register_payment(
-        cls, *, business, account, amount, user=None, notes="", sale=None, payment=None
+        cls,
+        *,
+        business,
+        account,
+        amount,
+        user=None,
+        notes="",
+        sale=None,
+        payment=None,
     ):
-        """Registra un pago recibido del cliente."""
+        """Registra un pago recibido del cliente de forma idempotente."""
         amount = cls._positive_amount(amount)
+
         if payment is not None:
-            existing = CustomerAccountEntry.objects.filter(payment=payment).first()
-            if existing:
-                if (
-                    existing.business_id != business.pk
-                    or existing.account_id != account.pk
-                ):
-                    raise ValidationError(
-                        "El pago ya está asociado a otra cuenta o negocio."
-                    )
+            existing = cls._get_existing_payment_entry(
+                business=business,
+                account=account,
+                payment=payment,
+                sale=sale,
+                entry_type=EntryTypeChoices.PAYMENT,
+                amount=amount,
+            )
+
+            if existing is not None:
                 return existing.account, existing
-        return cls._apply_entry(
-            business=business,
-            account=account,
-            entry_type=EntryTypeChoices.PAYMENT,
-            amount_delta=-amount,
-            user=user,
-            notes=notes,
-            sale=sale,
-            payment=payment,
-        )
+
+        try:
+            return cls._apply_entry(
+                business=business,
+                account=account,
+                entry_type=EntryTypeChoices.PAYMENT,
+                amount_delta=-amount,
+                user=user,
+                notes=notes,
+                sale=sale,
+                payment=payment,
+            )
+
+        except IntegrityError:
+            if payment is None:
+                raise
+
+            existing = cls._get_existing_payment_entry(
+                business=business,
+                account=account,
+                payment=payment,
+                sale=sale,
+                entry_type=EntryTypeChoices.PAYMENT,
+                amount=amount,
+            )
+
+            if existing is not None:
+                return existing.account, existing
+
+            raise
 
     @classmethod
     @transaction.atomic
@@ -395,20 +492,61 @@ class CustomerAccountService:
 
     @classmethod
     def register_refund(
-        cls, *, business, account, amount, user=None, notes="", sale=None, payment=None
+        cls,
+        *,
+        business,
+        account,
+        amount,
+        user=None,
+        notes="",
+        sale=None,
+        payment=None,
     ):
-        """Registra un reembolso a favor del cliente."""
+        """Registra un reembolso a favor del cliente de forma idempotente."""
         amount = cls._positive_amount(amount)
-        return cls._apply_entry(
-            business=business,
-            account=account,
-            entry_type=EntryTypeChoices.REFUND,
-            amount_delta=-amount,
-            user=user,
-            notes=notes,
-            sale=sale,
-            payment=payment,
-        )
+
+        if payment is not None:
+            existing = cls._get_existing_payment_entry(
+                business=business,
+                account=account,
+                payment=payment,
+                sale=sale,
+                entry_type=EntryTypeChoices.REFUND,
+                amount=amount,
+            )
+
+            if existing is not None:
+                return existing.account, existing
+
+        try:
+            return cls._apply_entry(
+                business=business,
+                account=account,
+                entry_type=EntryTypeChoices.REFUND,
+                amount_delta=-amount,
+                user=user,
+                notes=notes,
+                sale=sale,
+                payment=payment,
+            )
+
+        except IntegrityError:
+            if payment is None:
+                raise
+
+            existing = cls._get_existing_payment_entry(
+                business=business,
+                account=account,
+                payment=payment,
+                sale=sale,
+                entry_type=EntryTypeChoices.REFUND,
+                amount=amount,
+            )
+
+            if existing is not None:
+                return existing.account, existing
+
+            raise
 
     @classmethod
     def create_adjustment(cls, *, business, account, amount_delta, user=None, notes):

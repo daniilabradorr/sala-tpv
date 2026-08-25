@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>Sesión {{ session.pk }}</h1><p>Esperado: {{ session.expected_cash_amount }}</p><h2>Movimientos</h2>{% for item in movements %}<p>{{ item }}</p>{% endfor %}<h2>Arqueos</h2>{% for item in counts %}<p>{{ item }}</p>{% endfor %}{% endblock %}

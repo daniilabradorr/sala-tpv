@@ -1,9 +1,25 @@
+import uuid
+from apps.payments.models import (
+    Payment,
+    PaymentMethod,
+    PaymentStatusChoices,
+    PaymentTypeChoices,
+)
+
+from apps.sales.models import SaleReturnStatusChoices
+
+from apps.sales.tests.factories import (
+    create_sale,
+    create_sale_return,
+    create_sales_store,
+)
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from apps.cash_register.models import CashRegister, CashSession
 from apps.customers.models import (
     Customer,
     CustomerAccount,
@@ -18,7 +34,6 @@ from apps.customers.services import (
     _validate_user_business,
 )
 from apps.customers.tests.factories import create_account, create_customer_user
-from apps.sales.tests.factories import create_sale, create_sales_store
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_business, create_user
 
@@ -243,6 +258,20 @@ class CustomerAccountServiceTests(TestCase):
             store=create_sales_store(business=business),
             opened_by=user,
             customer=customer,
+        )
+
+    def _cash_session(self, *, store):
+        cash_register = CashRegister.objects.create(
+            business=self.business,
+            store=store,
+            name=f"Caja {uuid.uuid4().hex[:8]}",
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
+        )
+        return CashSession.objects.create(
+            business=self.business,
+            store=store,
+            cash_register=cash_register,
+            opened_by=self.user,
         )
 
     def test_update_account_settings_success_zero_positive_and_no_entries(self):
@@ -526,3 +555,143 @@ class CustomerAccountServiceTests(TestCase):
                 user=self.user,
             )
         self.assertTrue(spy.called)
+
+    def test_register_refund_with_payment_is_idempotent(self):
+        store = create_sales_store(
+            business=self.business,
+        )
+
+        sale = create_sale(
+            business=self.business,
+            store=store,
+            opened_by=self.user,
+            customer=self.account.customer,
+            total_amount=Decimal("10.00"),
+        )
+
+        sale_return = create_sale_return(
+            business=self.business,
+            store=store,
+            original_sale=sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("3.00"),
+        )
+
+        method = PaymentMethod.objects.create(
+            business=self.business,
+            name="Tarjeta",
+            code="card",
+        )
+        session = self._cash_session(store=store)
+
+        refund_payment = Payment.objects.create(
+            business=self.business,
+            store=store,
+            sale=sale,
+            method=method,
+            sale_return=sale_return,
+            payment_type=PaymentTypeChoices.REFUND,
+            amount=Decimal("3.00"),
+            status=PaymentStatusChoices.COMPLETED,
+            processed_by=self.user,
+            idempotency_key=uuid.uuid4(),
+            cash_session=session,
+        )
+
+        account_1, entry_1 = CustomerAccountService.register_refund(
+            business=self.business,
+            account=self.account,
+            amount=Decimal("3.00"),
+            user=self.user,
+            sale=sale,
+            payment=refund_payment,
+            notes="Refund test",
+        )
+
+        account_2, entry_2 = CustomerAccountService.register_refund(
+            business=self.business,
+            account=self.account,
+            amount=Decimal("3.00"),
+            user=self.user,
+            sale=sale,
+            payment=refund_payment,
+            notes="Refund test",
+        )
+
+        self.assertEqual(entry_1.pk, entry_2.pk)
+        self.assertEqual(account_1.pk, account_2.pk)
+
+        self.assertEqual(
+            CustomerAccountEntry.objects.filter(payment=refund_payment).count(),
+            1,
+        )
+
+        self.account.refresh_from_db()
+
+        self.assertEqual(
+            self.account.balance,
+            Decimal("-3.00"),
+        )
+
+    def test_register_refund_rejects_same_payment_with_different_amount(self):
+        store = create_sales_store(
+            business=self.business,
+        )
+
+        sale = create_sale(
+            business=self.business,
+            store=store,
+            opened_by=self.user,
+            customer=self.account.customer,
+            total_amount=Decimal("10.00"),
+        )
+
+        sale_return = create_sale_return(
+            business=self.business,
+            store=store,
+            original_sale=sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("3.00"),
+        )
+
+        method = PaymentMethod.objects.create(
+            business=self.business,
+            name="Tarjeta",
+            code="card",
+        )
+        session = self._cash_session(store=store)
+
+        refund_payment = Payment.objects.create(
+            business=self.business,
+            store=store,
+            sale=sale,
+            method=method,
+            sale_return=sale_return,
+            payment_type=PaymentTypeChoices.REFUND,
+            amount=Decimal("3.00"),
+            status=PaymentStatusChoices.COMPLETED,
+            processed_by=self.user,
+            idempotency_key=uuid.uuid4(),
+            cash_session=session,
+        )
+
+        CustomerAccountService.register_refund(
+            business=self.business,
+            account=self.account,
+            amount=Decimal("3.00"),
+            user=self.user,
+            sale=sale,
+            payment=refund_payment,
+        )
+
+        with self.assertRaises(ValidationError):
+            CustomerAccountService.register_refund(
+                business=self.business,
+                account=self.account,
+                amount=Decimal("2.00"),
+                user=self.user,
+                sale=sale,
+                payment=refund_payment,
+            )

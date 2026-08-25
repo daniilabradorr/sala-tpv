@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django import forms
 
@@ -8,9 +9,11 @@ from apps.payments.models import PaymentMethod
 
 class _PaymentForm(forms.Form):
     method = forms.ModelChoiceField(queryset=PaymentMethod.objects.none())
-    amount = forms.DecimalField(max_digits=14, decimal_places=2, min_value=0.01)
+    amount = forms.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal("0.01")
+    )
     cash_session = forms.ModelChoiceField(
-        queryset=CashSession.objects.none(), required=False
+        queryset=CashSession.objects.none(), required=True
     )
     external_reference = forms.CharField(max_length=150, required=False)
     notes = forms.CharField(required=False, widget=forms.Textarea)

@@ -74,6 +74,7 @@ class PaymentsTests(TestCase):
             status=SaleStatusChoices.COMPLETED,
             total_amount=Decimal("100"),
         )
+        self.session = self.create_session()
 
     def pay(self, amount, method=None, key=None):
         return register_sale_payment(
@@ -83,6 +84,7 @@ class PaymentsTests(TestCase):
             amount=amount,
             user=self.user,
             idempotency_key=key or uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
 
     def test_method_enforces_cash_register_flag_and_business_code_unique(self):
@@ -103,6 +105,7 @@ class PaymentsTests(TestCase):
             business=self.other_business, name="B", code="card"
         )
         form = PaymentCreateForm(business=self.business, store=self.store)
+        self.assertTrue(form.fields["cash_session"].required)
         self.assertNotIn(foreign, form.fields["method"].queryset)
         self.assertEqual(form.fields["idempotency_key"].widget.input_type, "hidden")
         invalid = PaymentCreateForm(
@@ -115,24 +118,42 @@ class PaymentsTests(TestCase):
     def create_session(self, *, business=None, store=None, open=True):
         business = business or self.business
         store = store or self.store
-        register = CashRegister.objects.create(
-            business=business, store=store, name=f"Caja {uuid.uuid4()}"
+        opened_by = (
+            self.user
+            if business == self.business
+            else create_sales_user(business=business)
         )
-        return CashSession.objects.create(
+        register = CashRegister.objects.create(
+            business=business,
+            store=store,
+            name=f"Caja {uuid.uuid4()}",
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
+        )
+        session = CashSession.objects.create(
             business=business,
             store=store,
             cash_register=register,
-            opened_by=self.user,
-            status=(CashSession.Status.OPEN if open else CashSession.Status.CLOSED),
-            closed_at=None if open else timezone.now(),
-            closed_by=None if open else self.user,
+            opened_by=opened_by,
+            expected_cash_amount=Decimal("0.00"),
         )
+        if not open:
+            session.status = CashSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.closed_by = opened_by
+            session.counted_cash_amount = Decimal("0.00")
+            session.difference_amount = (
+                session.counted_cash_amount - session.expected_cash_amount
+            )
+            session.save()
+        return session
 
     def test_payment_uses_current_session_not_historical_sale_session(self):
         historical = self.create_session()
         historical.status = CashSession.Status.CLOSED
         historical.closed_at = timezone.now()
         historical.closed_by = self.user
+        historical.counted_cash_amount = historical.expected_cash_amount
+        historical.difference_amount = Decimal("0.00")
         historical.save()
         current = self.create_session()
         self.sale.cash_session = historical
@@ -175,6 +196,7 @@ class PaymentsTests(TestCase):
                 amount=Decimal("1"),
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_partial_payment_return_only_refunds_excess_paid(self):
@@ -200,6 +222,7 @@ class PaymentsTests(TestCase):
             amount=Decimal("10"),
             user=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
         self.assertEqual(p.amount, Decimal("10"))
         recalc = recalculate_sale_payment_state(self.sale)
@@ -214,6 +237,7 @@ class PaymentsTests(TestCase):
                 amount=Decimal("1"),
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_cash_session_is_scoped_and_must_be_operational(self):
@@ -231,8 +255,9 @@ class PaymentsTests(TestCase):
                 idempotency_key=uuid.uuid4(),
                 cash_session_id=closed.pk,
             )
-        with self.assertRaises(ValidationError):
-            self.pay("10", self.cash)
+        payment = self.pay("10", self.cash)
+        self.assertEqual(payment.cash_session_id, self.session.pk)
+        self.assertEqual(payment.status, PaymentStatusChoices.COMPLETED)
 
     def test_cash_session_from_other_business_or_store_is_rejected(self):
         other_store = create_sales_store(business=self.business)
@@ -251,7 +276,10 @@ class PaymentsTests(TestCase):
         foreign_store = create_sales_store(business=self.other_business)
         foreign_user = create_sales_user(business=self.other_business)
         foreign_register = CashRegister.objects.create(
-            business=self.other_business, store=foreign_store, name="Caja extranjera"
+            business=self.other_business,
+            store=foreign_store,
+            name="Caja extranjera",
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
         )
         foreign_session = CashSession.objects.create(
             business=self.other_business,
@@ -344,6 +372,7 @@ class PaymentsTests(TestCase):
                 amount=10,
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_pending_failed_cancelled_do_not_count_in_summary(self):
@@ -387,6 +416,7 @@ class PaymentsTests(TestCase):
             amount=100,
             user=self.user,
             idempotency_key=key,
+            cash_session_id=self.session.pk,
         )
         same = register_refund(
             business=self.business,
@@ -395,6 +425,7 @@ class PaymentsTests(TestCase):
             amount=100,
             user=self.user,
             idempotency_key=key,
+            cash_session_id=self.session.pk,
         )
         self.assertEqual(refund.pk, same.pk)
         self.sale.refresh_from_db()
@@ -408,6 +439,7 @@ class PaymentsTests(TestCase):
                 amount=1,
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_refund_requires_completed_return_refundable_method_and_real_money(self):
@@ -426,6 +458,7 @@ class PaymentsTests(TestCase):
                 amount=10,
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
         returned.status = SaleReturnStatusChoices.COMPLETED
         returned.completed_at = self.sale.completed_at
@@ -440,6 +473,7 @@ class PaymentsTests(TestCase):
                 amount=10,
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_refund_requires_sensitive_permission_and_valid_pin(self):
@@ -464,6 +498,7 @@ class PaymentsTests(TestCase):
                 user=self.user,
                 pin="wrong",
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
         refund = register_refund(
             business=self.business,
@@ -473,6 +508,7 @@ class PaymentsTests(TestCase):
             user=self.user,
             pin="1234",
             idempotency_key=uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
         self.assertEqual(refund.status, PaymentStatusChoices.COMPLETED)
 
@@ -488,6 +524,7 @@ class PaymentsTests(TestCase):
                 amount=20,
                 user=cashier,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_cancel_pending_is_idempotent_and_completed_is_terminal(self):
@@ -590,6 +627,7 @@ class PaymentsTests(TestCase):
                 status=status,
                 processed_by=self.user,
                 idempotency_key=key,
+                cash_session=self.session,
             )
             replay = self.pay("10", key=key)
             self.assertEqual(replay.status, status)
@@ -703,6 +741,7 @@ class PaymentsTests(TestCase):
             amount=10,
             user=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
         self.assertEqual(monetary.amount, Decimal("10"))
         self.sale.refresh_from_db()
@@ -718,6 +757,7 @@ class PaymentsTests(TestCase):
                 amount=1,
                 user=self.user,
                 idempotency_key=uuid.uuid4(),
+                cash_session_id=self.session.pk,
             )
 
     def test_partial_return_reduces_collectable_amount(self):
@@ -753,6 +793,7 @@ class PaymentsTests(TestCase):
             amount=20,
             user=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.pending_amount, Decimal("0"))
@@ -775,6 +816,7 @@ class PaymentsTests(TestCase):
             amount=100,
             user=self.user,
             idempotency_key=uuid.uuid4(),
+            cash_session_id=self.session.pk,
         )
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.pending_amount, Decimal("0"))
@@ -805,6 +847,20 @@ class PaymentModelTests(TestCase):
 
 
 class PaymentConcurrencyTests(TransactionTestCase):
+    def create_session(self, *, business, store, user):
+        register = CashRegister.objects.create(
+            business=business,
+            store=store,
+            name=f"Caja {uuid.uuid4()}",
+            code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
+        )
+        return CashSession.objects.create(
+            business=business,
+            store=store,
+            cash_register=register,
+            opened_by=user,
+        )
+
     @skipUnlessDBFeature("has_select_for_update")
     def test_two_concurrent_payments_cannot_overpay(self):
         business = create_sales_business()
@@ -821,6 +877,7 @@ class PaymentConcurrencyTests(TransactionTestCase):
             status=SaleStatusChoices.COMPLETED,
             total_amount=Decimal("100"),
         )
+        session = self.create_session(business=business, store=store, user=user)
 
         def register(key):
             connections.close_all()
@@ -832,6 +889,7 @@ class PaymentConcurrencyTests(TransactionTestCase):
                     amount=70,
                     user=user,
                     idempotency_key=key,
+                    cash_session_id=session.pk,
                 )
                 return True
             except ValidationError:
@@ -865,6 +923,7 @@ class PaymentConcurrencyTests(TransactionTestCase):
             status=SaleStatusChoices.COMPLETED,
             total_amount=Decimal("100"),
         )
+        session = self.create_session(business=business, store=store, user=user)
         register_sale_payment(
             business=business,
             sale_id=sale.pk,
@@ -872,6 +931,7 @@ class PaymentConcurrencyTests(TransactionTestCase):
             amount=100,
             user=user,
             idempotency_key=uuid.uuid4(),
+            cash_session_id=session.pk,
         )
         returned = create_sale_return(
             business=business,
@@ -893,6 +953,7 @@ class PaymentConcurrencyTests(TransactionTestCase):
                     amount=20,
                     user=user,
                     idempotency_key=key,
+                    cash_session_id=session.pk,
                 ).pk
             finally:
                 connections.close_all()
