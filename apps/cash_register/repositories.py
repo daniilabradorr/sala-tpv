@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from apps.cash_register.models import CashRegister, CashSession
+from apps.cash_register.models import CashCount, CashMovement, CashRegister, CashSession
 from apps.core.models import Business
 from apps.stores.models import Store
 from apps.users.models import CustomUser
@@ -49,14 +49,10 @@ class CashRegisterRepository:
         la primera sesión todavía no existe ninguna CashSession
         que podamos bloquear.
         """
-        return (
-            CashRegister.objects
-            .select_for_update()
-            .get(
-                pk=cash_register_id,
-                business=business,
-                store=store,
-            )
+        return CashRegister.objects.select_for_update().get(
+            pk=cash_register_id,
+            business=business,
+            store=store,
         )
 
     def get_open_session(
@@ -67,14 +63,10 @@ class CashRegisterRepository:
         """
         Devuelve la sesión OPEN actual de la caja, si existe.
         """
-        return (
-            CashSession.objects
-            .filter(
-                cash_register=cash_register,
-                status=CashSession.Status.OPEN,
-            )
-            .first()
-        )
+        return CashSession.objects.filter(
+            cash_register=cash_register,
+            status=CashSession.Status.OPEN,
+        ).first()
 
     def create_cash_session(
         self,
@@ -102,3 +94,16 @@ class CashRegisterRepository:
             counted_cash_amount=None,
             difference_amount=Decimal("0.00"),
         )
+
+    def get_cash_session_for_update(self, *, business, store, cash_session_id):
+        return (
+            CashSession.objects.select_for_update()
+            .select_related("cash_register")
+            .get(pk=cash_session_id, business=business, store=store)
+        )
+
+    def create_cash_movement(self, **values):
+        return CashMovement.objects.create(**values)
+
+    def create_cash_count(self, **values):
+        return CashCount.objects.create(**values)

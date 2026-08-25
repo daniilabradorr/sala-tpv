@@ -1,6 +1,5 @@
 from apps.cash_register.models import CashRegister
 from apps.core.models import Business
-from apps.stores.models import Store
 
 
 def business_exists(
