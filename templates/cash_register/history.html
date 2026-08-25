@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>Histórico de cierres</h1>{% for session in sessions %}<p>{{ session }}</p>{% empty %}<p>Sin cierres.</p>{% endfor %}{% endblock %}

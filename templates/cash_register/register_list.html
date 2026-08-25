@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>Cajas · {{ store.name }}</h1>{% for register in cash_registers %}<p>{{ register.name }} ({{ register.code }})</p>{% empty %}<p>No hay cajas.</p>{% endfor %}{% endblock %}
