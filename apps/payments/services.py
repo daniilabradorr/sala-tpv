@@ -6,6 +6,7 @@ from django.db.models import Sum
 
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
+from apps.cash_register.services import register_payment_cash_movement
 from apps.customers.models import (
     CustomerAccount,
     CustomerAccountEntry,
@@ -81,11 +82,17 @@ def _method(*, business, method_id, refund=False):
 
 
 def _cash_context(*, business, store, method, settings, cash_session_id):
+    if not cash_session_id:
+        raise ValidationError(
+            {"cash_session": "Todo pago completado requiere una sesión de caja."}
+        )
     session = None
     if cash_session_id:
         try:
-            session = CashSession.objects.select_related("cash_register").get(
-                pk=cash_session_id, business=business, store=store
+            session = (
+                CashSession.objects.select_for_update()
+                .select_related("cash_register")
+                .get(pk=cash_session_id, business=business, store=store)
             )
         except CashSession.DoesNotExist as exc:
             raise ValidationError(
@@ -102,18 +109,20 @@ def _cash_context(*, business, store, method, settings, cash_session_id):
             raise ValidationError(
                 {"cash_session": "La caja de la sesión no es válida."}
             )
-    if (
-        session is None
-        and method.affects_cash_register
-        and settings.require_open_cash_register
-    ):
-        raise ValidationError(
-            {"cash_session": "Se requiere una sesión de caja abierta."}
-        )
     return session
 
 
-def _existing(*, business, key, sale, method, payment_type, amount, sale_return=None):
+def _existing(
+    *,
+    business,
+    key,
+    sale,
+    method,
+    payment_type,
+    amount,
+    sale_return=None,
+    cash_session_id=None,
+):
     payment = Payment.objects.filter(business=business, idempotency_key=key).first()
     if not payment:
         return None
@@ -123,6 +132,7 @@ def _existing(*, business, key, sale, method, payment_type, amount, sale_return=
         and payment.payment_type == payment_type
         and payment.amount == amount
         and payment.sale_return_id == getattr(sale_return, "pk", None)
+        and payment.cash_session_id == cash_session_id
     )
     if not compatible:
         raise ValidationError(
@@ -271,6 +281,7 @@ def register_sale_payment(
         method=method,
         payment_type=PaymentTypeChoices.SALE_PAYMENT,
         amount=amount,
+        cash_session_id=cash_session_id,
     )
     if existing:
         if existing.status == PaymentStatusChoices.COMPLETED:
@@ -319,6 +330,7 @@ def register_sale_payment(
                 external_reference=external_reference,
                 notes=notes,
             )
+            register_payment_cash_movement(payment=payment, locked_session=session)
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -327,6 +339,7 @@ def register_sale_payment(
             method=method,
             payment_type=PaymentTypeChoices.SALE_PAYMENT,
             amount=amount,
+            cash_session_id=cash_session_id,
         )
         if payment is None:
             raise
@@ -388,6 +401,7 @@ def register_refund(
         payment_type=PaymentTypeChoices.REFUND,
         amount=amount,
         sale_return=returned,
+        cash_session_id=cash_session_id,
     )
     if existing:
         return existing
@@ -455,6 +469,7 @@ def register_refund(
                 external_reference=external_reference,
                 notes=notes,
             )
+            register_payment_cash_movement(payment=payment, locked_session=session)
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -464,6 +479,7 @@ def register_refund(
             payment_type=PaymentTypeChoices.REFUND,
             amount=amount,
             sale_return=returned,
+            cash_session_id=cash_session_id,
         )
         if payment is None:
             raise

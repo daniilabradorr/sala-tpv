@@ -13,18 +13,12 @@ from apps.users.tests.factories import create_user
 from datetime import timedelta
 from decimal import Decimal
 
-from decimal import Decimal
 from uuid import uuid4
 
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-from django.test import TestCase
 
 from apps.cash_register.models import (
     CashCount,
     CashMovement,
-    CashRegister,
-    CashSession,
 )
 from apps.payments.models import (
     Payment,
@@ -1361,7 +1355,7 @@ class CashMovementModelTests(TestCase):
                 )
 
     def test_database_rejects_duplicate_payment(self):
-        movement_1 = CashMovement.objects.create(
+        CashMovement.objects.create(
             business=self.business,
             store=self.store,
             cash_session=self.session,

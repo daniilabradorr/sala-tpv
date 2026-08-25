@@ -396,6 +396,13 @@ class Payment(TimeStampedModel):
                 ],
                 name="uniq_payment_business_idempotency",
             ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(status=PaymentStatusChoices.COMPLETED)
+                    | Q(cash_session__isnull=False)
+                ),
+                name="chk_payment_completed_session",
+            ),
         ]
 
         indexes = [
@@ -555,6 +562,8 @@ class Payment(TimeStampedModel):
                 errors["cash_session"] = (
                     "La sesión de caja debe pertenecer a la misma tienda que el pago."
                 )
+        elif self.status == PaymentStatusChoices.COMPLETED:
+            errors["cash_session"] = "Un pago completado requiere una sesión de caja."
 
         # ==========================================================
         # Refund / SaleReturn
