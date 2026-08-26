@@ -39,7 +39,13 @@ class BillingDocumentRelationTypeChoices(models.TextChoices):
 
 
 class BillingSeries(TimeStampedModel):
-    """Fiscal numbering series. Number allocation belongs to the billing service."""
+    """Fiscal numbering series. Number allocation belongs to the billing service.
+
+    Because numbering may restart each year, the service must derive an
+    unambiguous visible identity from ``prefix`` and ``year`` (or an equivalent
+    approved representation). It must not duplicate the year when the configured
+    prefix already contains it.
+    """
 
     business = models.ForeignKey(
         "core.Business", on_delete=models.PROTECT, related_name="billing_series"
@@ -182,7 +188,16 @@ class BillingDocument(TimeStampedModel):
         blank=True,
     )
 
-    series_text = models.CharField("Serie emitida", max_length=50, blank=True)
+    series_text = models.CharField(
+        "Serie emitida",
+        max_length=50,
+        blank=True,
+        help_text=(
+            "Snapshot de la identidad fiscal visible e inequívoca de la serie. "
+            "El servicio de emisión debe construirla a partir del prefijo y el "
+            "año, o una representación equivalente aprobada, sin duplicar el año."
+        ),
+    )
     number = models.PositiveBigIntegerField("Número", null=True, blank=True)
     document_type = models.CharField(
         "Tipo de documento", max_length=2, choices=BillingDocumentTypeChoices.choices
@@ -301,6 +316,21 @@ class BillingDocument(TimeStampedModel):
         self.idempotency_fingerprint = (
             (self.idempotency_fingerprint or "").strip().lower()
         )
+        issuer_fields = (
+            "issuer_legal_name",
+            "issuer_tax_identifier",
+            "issuer_address_line_1",
+            "issuer_address_line_2",
+            "issuer_postal_code",
+            "issuer_city",
+            "issuer_province",
+            "issuer_country_code",
+        )
+        for field in issuer_fields:
+            value = (getattr(self, field) or "").strip()
+            if field in {"issuer_tax_identifier", "issuer_country_code"}:
+                value = value.upper()
+            setattr(self, field, value)
 
         if (
             self.store_id
@@ -313,6 +343,10 @@ class BillingDocument(TimeStampedModel):
                 errors["series"] = "La serie debe pertenecer al mismo negocio."
             elif self.series.store_id and self.series.store_id != self.store_id:
                 errors["series"] = "La serie debe pertenecer a la tienda del documento."
+            if self.series.document_type != self.document_type:
+                errors["series"] = (
+                    "El tipo de documento debe coincidir con el tipo de la serie."
+                )
             if (
                 self.series.cash_register_id != self.cash_register_id
                 and self.series.cash_register_id
@@ -368,6 +402,14 @@ class BillingDocument(TimeStampedModel):
                 "issued_by": self.issued_by_id,
                 "idempotency_key": self.idempotency_key,
                 "idempotency_fingerprint": self.idempotency_fingerprint,
+                "description": self.description,
+                "issuer_legal_name": self.issuer_legal_name,
+                "issuer_tax_identifier": self.issuer_tax_identifier,
+                "issuer_address_line_1": self.issuer_address_line_1,
+                "issuer_postal_code": self.issuer_postal_code,
+                "issuer_city": self.issuer_city,
+                "issuer_province": self.issuer_province,
+                "issuer_country_code": self.issuer_country_code,
             }
             for field, value in required.items():
                 if value in (None, ""):
@@ -377,6 +419,23 @@ class BillingDocument(TimeStampedModel):
             if self.idempotency_fingerprint and len(self.idempotency_fingerprint) != 64:
                 errors["idempotency_fingerprint"] = (
                     "El fingerprint SHA-256 debe tener 64 caracteres."
+                )
+            elif self.idempotency_fingerprint and not set(
+                self.idempotency_fingerprint
+            ).issubset(set("0123456789abcdef")):
+                errors["idempotency_fingerprint"] = (
+                    "El fingerprint SHA-256 debe ser hexadecimal."
+                )
+            if (
+                self.document_type
+                in {
+                    BillingDocumentTypeChoices.F1,
+                    BillingDocumentTypeChoices.F3,
+                }
+                and not self.customer_id
+            ):
+                errors["customer"] = (
+                    "Los documentos F1 y F3 emitidos requieren un cliente."
                 )
         if errors:
             raise ValidationError(errors)
@@ -394,9 +453,30 @@ class BillingDocument(TimeStampedModel):
 
 
 class IssuedDocumentChildMixin:
-    """Guard normal writes to snapshots owned by an issued document."""
+    """Guard normal writes to snapshots owned by an issued document.
+
+    Bulk queryset operations bypass model methods. Services and admin code must
+    therefore never use them to mutate historical fiscal document children.
+    """
 
     def _ensure_document_is_editable(self):
+        if self.pk:
+            original_document_id = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("billing_document_id", flat=True)
+                .first()
+            )
+            if (
+                original_document_id
+                and BillingDocument.objects.filter(
+                    pk=original_document_id,
+                    status=BillingDocumentStatusChoices.ISSUED,
+                ).exists()
+            ):
+                raise ValidationError(
+                    "No se puede modificar el contenido de un documento emitido."
+                )
         if (
             self.billing_document_id
             and self.billing_document.status == BillingDocumentStatusChoices.ISSUED
