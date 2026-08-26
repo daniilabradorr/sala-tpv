@@ -45,7 +45,21 @@ class BillingSeries(TimeStampedModel):
     unambiguous visible identity from ``prefix`` and ``year`` (or an equivalent
     approved representation). It must not duplicate the year when the configured
     prefix already contains it.
+
+    Once this series has issued documents, normal ``save()`` calls cannot alter
+    its fiscal identity. Bulk queryset operations bypass model methods, so
+    services and admin code must not use them for those critical fields.
     """
+
+    IMMUTABLE_IDENTITY_FIELDS = (
+        "business_id",
+        "store_id",
+        "cash_register_id",
+        "document_type",
+        "prefix",
+        "year",
+        "padding",
+    )
 
     business = models.ForeignKey(
         "core.Business", on_delete=models.PROTECT, related_name="billing_series"
@@ -131,6 +145,28 @@ class BillingSeries(TimeStampedModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        if self.pk:
+            original = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values(*self.IMMUTABLE_IDENTITY_FIELDS)
+                .first()
+            )
+            has_issued_documents = (
+                original
+                and BillingDocument.objects.filter(
+                    series_id=self.pk,
+                    status=BillingDocumentStatusChoices.ISSUED,
+                ).exists()
+            )
+            if has_issued_documents and any(
+                original[field] != getattr(self, field)
+                for field in self.IMMUTABLE_IDENTITY_FIELDS
+            ):
+                raise ValidationError(
+                    "No se puede modificar la identidad de una serie que ya tiene "
+                    "documentos emitidos."
+                )
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -190,7 +226,7 @@ class BillingDocument(TimeStampedModel):
 
     series_text = models.CharField(
         "Serie emitida",
-        max_length=50,
+        max_length=64,
         blank=True,
         help_text=(
             "Snapshot de la identidad fiscal visible e inequívoca de la serie. "
@@ -597,7 +633,12 @@ class BillingTaxBreakdown(IssuedDocumentChildMixin, TimeStampedModel):
 
 
 class BillingDocumentRelation(TimeStampedModel):
-    """Historical link from the new document to the original document."""
+    """Historical link from the new document to the original document.
+
+    Once the source document is issued, normal ``save()`` and ``delete()`` calls
+    cannot rewrite this history. Bulk queryset operations bypass this guard and
+    must not be used for historical fiscal relations.
+    """
 
     business = models.ForeignKey(
         "core.Business",
@@ -651,6 +692,39 @@ class BillingDocumentRelation(TimeStampedModel):
         if errors:
             raise ValidationError(errors)
 
+    def _ensure_source_is_editable(self):
+        if self.pk:
+            original_source_id = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("source_document_id", flat=True)
+                .first()
+            )
+            if (
+                original_source_id
+                and BillingDocument.objects.filter(
+                    pk=original_source_id,
+                    status=BillingDocumentStatusChoices.ISSUED,
+                ).exists()
+            ):
+                raise ValidationError(
+                    "No se puede modificar una relación cuyo documento origen "
+                    "ya fue emitido."
+                )
+        if (
+            self.source_document_id
+            and self.source_document.status == BillingDocumentStatusChoices.ISSUED
+        ):
+            raise ValidationError(
+                "No se puede modificar una relación cuyo documento origen "
+                "ya fue emitido."
+            )
+
     def save(self, *args, **kwargs):
+        self._ensure_source_is_editable()
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_source_is_editable()
+        return super().delete(*args, **kwargs)
