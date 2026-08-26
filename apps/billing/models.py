@@ -122,11 +122,14 @@ class BillingSeries(TimeStampedModel):
     def __str__(self):
         return f"{self.prefix} ({self.year})"
 
+    def _normalize_fields(self):
+        self.name = (self.name or "").strip()
+        self.prefix = (self.prefix or "").strip().upper()
+
     def clean(self):
         super().clean()
         errors = {}
-        self.name = (self.name or "").strip()
-        self.prefix = (self.prefix or "").strip().upper()
+        self._normalize_fields()
         if not self.name:
             errors["name"] = "El nombre de la serie es obligatorio."
         if not self.prefix:
@@ -145,6 +148,7 @@ class BillingSeries(TimeStampedModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        self._normalize_fields()
         if self.pk:
             original = (
                 type(self)
