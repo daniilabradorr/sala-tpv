@@ -12,7 +12,11 @@ from apps.billing.models import (
     BillingDocumentTypeChoices,
     BillingSeries,
 )
-from apps.billing.services import issue_sale_document
+from apps.billing.services import (
+    BillingAlreadyIssued,
+    BillingIdempotencyConflict,
+    issue_sale_document,
+)
 from apps.business_config.models import BusinessProfile
 from apps.sales.models import SaleStatusChoices
 from apps.sales.tests.factories import (
@@ -74,7 +78,7 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
                 barrier.wait()
                 return (True, operation().pk)
             except ValidationError as exc:
-                return (False, type(exc).__name__)
+                return (False, exc)
             finally:
                 connections.close_all()
 
@@ -97,6 +101,8 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
             [self.operation(sale, uuid.uuid4()), self.operation(sale, uuid.uuid4())]
         )
         self.assertEqual(sum(success for success, _ in results), 1)
+        failure = next(value for success, value in results if not success)
+        self.assertIsInstance(failure, BillingAlreadyIssued)
         self.assertEqual(BillingDocument.objects.count(), 1)
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
@@ -128,5 +134,21 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             {result for _, result in results}, {BillingDocument.objects.get().pk}
         )
+        self.series.refresh_from_db()
+        self.assertEqual(self.series.current_number, 1)
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_distinct_sales_same_key_has_one_controlled_winner(self):
+        first_sale, second_sale = self.make_sale(), self.make_sale()
+        key = uuid.uuid4()
+        results = self.run_threads(
+            [self.operation(first_sale, key), self.operation(second_sale, key)]
+        )
+        successes = [value for success, value in results if success]
+        failures = [value for success, value in results if not success]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIsInstance(failures[0], BillingIdempotencyConflict)
+        self.assertEqual(BillingDocument.objects.count(), 1)
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
