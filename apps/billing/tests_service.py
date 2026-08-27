@@ -300,9 +300,10 @@ class BillingEmissionServiceTests(TestCase):
     def test_superuser_is_allowed(self):
         sale = self.make_sale()
         series = self.make_series(BillingDocumentTypeChoices.F2)
-        superuser = create_sales_user(
-            business=self.business, role=RoleChoices.OWNER, is_superuser=True
-        )
+        superuser = create_sales_user(business=self.business, role=RoleChoices.OWNER)
+        superuser.is_superuser = True
+        superuser.is_staff = True
+        superuser.save(update_fields=["is_superuser", "is_staff", "updated_at"])
         self.assertTrue(
             issue_sale_document(
                 business=self.business,

@@ -143,7 +143,7 @@ def _lock_sale(*, business, sale_id):
         raise BillingServiceError({"business": "El negocio no existe."})
     try:
         return (
-            Sale.objects.select_for_update()
+            Sale.objects.select_for_update(of=("self",))
             .select_related(
                 "business", "store", "cash_register", "cash_session", "customer"
             )
