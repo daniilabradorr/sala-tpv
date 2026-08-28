@@ -11,6 +11,8 @@ from apps.billing.models import (
     BillingSeries,
 )
 
+_UNSET = object()
+
 
 def _document_queryset():
     relations = BillingDocumentRelation.objects.select_related(
@@ -86,16 +88,20 @@ def issued_original_documents_for_sale(*, business, sale):
 
 
 def active_billing_series(
-    *, business, document_type, year, store=None, cash_register=None
+    *, business, document_type, year, store=_UNSET, cash_register=_UNSET
 ):
     if business is None:
         return BillingSeries.objects.none()
     queryset = BillingSeries.objects.filter(
         business=business, is_active=True, document_type=document_type, year=year
     ).select_related("store", "cash_register")
-    if store is not None:
+    if store is None:
+        queryset = queryset.filter(store__isnull=True)
+    elif store is not _UNSET:
         queryset = queryset.filter(Q(store__isnull=True) | Q(store=store))
-    if cash_register is not None:
+    if cash_register is None:
+        queryset = queryset.filter(cash_register__isnull=True)
+    elif cash_register is not _UNSET:
         queryset = queryset.filter(
             Q(cash_register__isnull=True) | Q(cash_register=cash_register)
         )

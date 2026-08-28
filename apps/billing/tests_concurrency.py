@@ -16,12 +16,15 @@ from apps.billing.services import (
     BillingAlreadyIssued,
     BillingIdempotencyConflict,
     issue_sale_document,
+    issue_sale_return_rectification,
 )
 from apps.business_config.models import BusinessProfile
-from apps.sales.models import SaleStatusChoices
+from apps.sales.models import SaleReturnStatusChoices, SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
     create_sale_line,
+    create_sale_return,
+    create_sale_return_line,
     create_sales_business,
     create_sales_product,
     create_sales_store,
@@ -152,3 +155,110 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(BillingDocument.objects.count(), 1)
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
+
+
+class BillingRectificationConcurrencyTests(BillingEmissionConcurrencyTests):
+    def setUp(self):
+        super().setUp()
+        self.rectification_series = BillingSeries.objects.create(
+            business=self.business,
+            store=self.store,
+            name="Rectificativas simplificadas",
+            document_type=BillingDocumentTypeChoices.R5,
+            prefix="R5",
+            year=timezone.localdate().year,
+        )
+
+    def make_return(self):
+        sale = self.make_sale()
+        issue_sale_document(
+            business=self.business,
+            sale_id=sale.pk,
+            series_id=self.series.pk,
+            issued_by=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.user,
+        )
+        create_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=sale.lines.get(),
+        )
+        return_doc.status = SaleReturnStatusChoices.COMPLETED
+        return_doc.completed_at = timezone.now()
+        return_doc.save()
+        return return_doc
+
+    def rectification_operation(self, return_doc, key):
+        return lambda: issue_sale_return_rectification(
+            business=self.business,
+            sale_return_id=return_doc.pk,
+            series_id=self.rectification_series.pk,
+            issued_by=self.user,
+            idempotency_key=key,
+        )
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_same_return_same_key_is_concurrently_idempotent(self):
+        return_doc = self.make_return()
+        key = uuid.uuid4()
+        results = self.run_threads([self.rectification_operation(return_doc, key)] * 2)
+        self.assertTrue(all(success for success, _ in results))
+        self.assertEqual(len({value for _, value in results}), 1)
+        self.assertEqual(
+            BillingDocument.objects.filter(sale_return=return_doc).count(), 1
+        )
+        self.rectification_series.refresh_from_db()
+        self.assertEqual(self.rectification_series.current_number, 1)
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_same_return_different_keys_issues_once(self):
+        return_doc = self.make_return()
+        results = self.run_threads(
+            [
+                self.rectification_operation(return_doc, uuid.uuid4()),
+                self.rectification_operation(return_doc, uuid.uuid4()),
+            ]
+        )
+        self.assertEqual(sum(success for success, _ in results), 1)
+        failure = next(value for success, value in results if not success)
+        self.assertIsInstance(failure, BillingAlreadyIssued)
+        self.rectification_series.refresh_from_db()
+        self.assertEqual(self.rectification_series.current_number, 1)
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_distinct_returns_share_series_with_consecutive_numbers(self):
+        first, second = self.make_return(), self.make_return()
+        results = self.run_threads(
+            [
+                self.rectification_operation(first, uuid.uuid4()),
+                self.rectification_operation(second, uuid.uuid4()),
+            ]
+        )
+        self.assertTrue(all(success for success, _ in results))
+        numbers = BillingDocument.objects.filter(sale_return__isnull=False).values_list(
+            "number", flat=True
+        )
+        self.assertEqual(set(numbers), {1, 2})
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_distinct_returns_same_key_has_one_controlled_winner(self):
+        first, second = self.make_return(), self.make_return()
+        key = uuid.uuid4()
+        results = self.run_threads(
+            [
+                self.rectification_operation(first, key),
+                self.rectification_operation(second, key),
+            ]
+        )
+        self.assertEqual(sum(success for success, _ in results), 1)
+        failure = next(value for success, value in results if not success)
+        self.assertIsInstance(failure, BillingIdempotencyConflict)
+        self.assertEqual(
+            BillingDocument.objects.filter(sale_return__isnull=False).count(), 1
+        )

@@ -810,6 +810,88 @@ def _copy_document_snapshot(document):
     return {field: getattr(document, field) for field in fields}
 
 
+def _companion_fingerprint(*, business, sale_return, target, series_id, anchor):
+    return _fingerprint(
+        {
+            "version": 1,
+            "operation": "issue_sale_return_companion_f3",
+            "business_id": business.pk,
+            "sale_return_id": sale_return.pk,
+            "target_document_id": target.pk,
+            "series_id": series_id,
+            "recipient_anchor_document_id": anchor.pk,
+        }
+    )
+
+
+def _resolve_rectification_retry(
+    *,
+    existing,
+    business,
+    sale_return,
+    original,
+    document_type,
+    series_id,
+    fingerprint,
+    initial_f3,
+    companion_series_id,
+    key,
+):
+    if existing is None:
+        return None
+    rectifies = existing.outgoing_relations.filter(
+        business=business,
+        relation_type=BillingDocumentRelationTypeChoices.RECTIFIES,
+        target_document=original,
+    )
+    if (
+        existing.status != BillingDocumentStatusChoices.ISSUED
+        or existing.sale_return_id != sale_return.pk
+        or existing.document_type != document_type
+        or existing.series_id != series_id
+        or existing.idempotency_fingerprint != fingerprint
+        or rectifies.count() != 1
+    ):
+        _idempotency_conflict()
+    if initial_f3 is None:
+        return existing
+
+    companion_key = uuid.uuid5(key, "netxodo:billing:sale-return-companion-f3")
+    companion_fingerprint = _companion_fingerprint(
+        business=business,
+        sale_return=sale_return,
+        target=existing,
+        series_id=companion_series_id,
+        anchor=initial_f3,
+    )
+    companions = list(
+        BillingDocument.objects.filter(
+            business=business,
+            sale_return=sale_return,
+            document_type=BillingDocumentTypeChoices.F3,
+            status=BillingDocumentStatusChoices.ISSUED,
+            idempotency_key=companion_key,
+            outgoing_relations__business=business,
+            outgoing_relations__relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
+            outgoing_relations__target_document=existing,
+        ).distinct()
+    )
+    expected_recipient = _copy_document_snapshot(initial_f3)
+    if (
+        len(companions) != 1
+        or companions[0].series_id != companion_series_id
+        or companions[0].idempotency_fingerprint != companion_fingerprint
+        or any(
+            getattr(companions[0], field) != value
+            for field, value in expected_recipient.items()
+        )
+    ):
+        raise BillingUnsupportedFiscalCase(
+            "La rectificativa no tiene una F3 complementaria emitida coherente."
+        )
+    return existing
+
+
 def _resolve_return_original(*, business, sale_return, sale):
     originals = list(
         BillingDocument.objects.filter(
@@ -851,6 +933,41 @@ def _initial_f3_for_f2(*, business, original):
     if len(candidates) > 1:
         raise BillingUnsupportedFiscalCase("La F2 tiene múltiples F3 sustitutivas.")
     return candidates[0] if candidates else None
+
+
+def _fiscal_amounts_are_consistent(*, gross, discount, taxable, tax, total, rate):
+    return (
+        gross - discount == taxable
+        and _money(taxable * rate / Decimal("100")) == tax
+        and taxable + tax == total
+    )
+
+
+def _partial_taxable_allocation(*, amount, rate, expected, remaining):
+    """Find the closest cent base that represents ``amount`` exactly."""
+    estimated = amount / (Decimal("1") + rate / Decimal("100"))
+    centre = _money(estimated)
+    candidates = []
+    # Two cents on either side covers half-up boundaries for supported rates;
+    # also inspect the proportional expectation to make the choice stable.
+    for anchor in (centre, _money(expected)):
+        for offset in range(-2, 3):
+            taxable = anchor + MONEY_STEP * offset
+            tax = _money(taxable * rate / Decimal("100"))
+            if (
+                taxable >= 0
+                and tax >= 0
+                and taxable <= remaining["taxable_base_amount"]
+                and tax <= remaining["tax_amount"]
+                and taxable + tax == amount
+            ):
+                candidates.append((abs(taxable - expected), taxable, tax))
+    if not candidates:
+        raise BillingUnsupportedFiscalCase(
+            "El importe devuelto no admite una asignación fiscal consistente."
+        )
+    _, taxable, tax = min(set(candidates), key=lambda item: (item[0], item[1]))
+    return taxable, tax
 
 
 def _rectification_snapshots(*, original, sale_return):
@@ -898,6 +1015,17 @@ def _rectification_snapshots(*, original, sale_return):
                 "line_total",
             )
         }
+        if not _fiscal_amounts_are_consistent(
+            gross=remaining["gross_base_amount"],
+            discount=remaining["discount_amount"],
+            taxable=remaining["taxable_base_amount"],
+            tax=remaining["tax_amount"],
+            total=remaining["line_total"],
+            rate=original_line.tax_rate,
+        ):
+            raise BillingUnsupportedFiscalCase(
+                "La línea fiscal original contiene importes incoherentes."
+            )
         allocation = None
         for historical in history:
             if historical.quantity > remaining_quantity:
@@ -905,27 +1033,68 @@ def _rectification_snapshots(*, original, sale_return):
                     "Las devoluciones exceden la cantidad fiscal original."
                 )
             consumes_rest = historical.quantity == remaining_quantity
-            part = {}
-            for field in remaining:
-                if consumes_rest:
-                    part[field] = remaining[field]
-                else:
-                    part[field] = _money(
-                        getattr(original_line, field)
+            if consumes_rest:
+                part = remaining.copy()
+                if historical.amount != part[
+                    "line_total"
+                ] or not _fiscal_amounts_are_consistent(
+                    gross=part["gross_base_amount"],
+                    discount=part["discount_amount"],
+                    taxable=part["taxable_base_amount"],
+                    tax=part["tax_amount"],
+                    total=part["line_total"],
+                    rate=original_line.tax_rate,
+                ):
+                    raise BillingUnsupportedFiscalCase(
+                        "Los residuos fiscales no forman una línea consistente."
+                    )
+            else:
+                expected_taxable = (
+                    original_line.taxable_base_amount
+                    * historical.quantity
+                    / original_line.quantity
+                )
+                taxable, tax = _partial_taxable_allocation(
+                    amount=historical.amount,
+                    rate=original_line.tax_rate,
+                    expected=expected_taxable,
+                    remaining=remaining,
+                )
+                discount = min(
+                    remaining["discount_amount"],
+                    _money(
+                        original_line.discount_amount
                         * historical.quantity
                         / original_line.quantity
+                    ),
+                )
+                part = {
+                    "discount_amount": discount,
+                    "taxable_base_amount": taxable,
+                    "tax_amount": tax,
+                    "line_total": historical.amount,
+                    "gross_base_amount": taxable + discount,
+                }
+                if part["gross_base_amount"] > remaining[
+                    "gross_base_amount"
+                ] or not _fiscal_amounts_are_consistent(
+                    gross=part["gross_base_amount"],
+                    discount=part["discount_amount"],
+                    taxable=part["taxable_base_amount"],
+                    tax=part["tax_amount"],
+                    total=part["line_total"],
+                    rate=original_line.tax_rate,
+                ):
+                    raise BillingUnsupportedFiscalCase(
+                        "La asignación parcial excede o contradice el snapshot fiscal."
                     )
-            # Sales owns the frozen commercial total; reconcile components to it.
-            part["line_total"] = historical.amount
-            part["taxable_base_amount"] = _money(
-                part["line_total"] - part["tax_amount"]
-            )
-            part["gross_base_amount"] = _money(
-                part["taxable_base_amount"] + part["discount_amount"]
-            )
             remaining_quantity -= historical.quantity
             for field in remaining:
                 remaining[field] = _money(remaining[field] - part[field])
+                if remaining[field] < 0:
+                    raise BillingUnsupportedFiscalCase(
+                        "Las devoluciones exceden los importes fiscales originales."
+                    )
             if historical.pk == return_line.pk:
                 allocation = part
                 break
@@ -1055,15 +1224,20 @@ def issue_sale_return_rectification(
             companion_f3=companion_payload,
         )
     )
-    existing = _attempt_for_key(business=business, key=key)
-    if existing:
-        if (
-            existing.status == BillingDocumentStatusChoices.ISSUED
-            and existing.sale_return_id == sale_return.pk
-            and existing.idempotency_fingerprint == fingerprint
-        ):
-            return existing
-        _idempotency_conflict()
+    existing = _resolve_rectification_retry(
+        existing=_attempt_for_key(business=business, key=key),
+        business=business,
+        sale_return=sale_return,
+        original=original,
+        document_type=document_type,
+        series_id=series_id,
+        fingerprint=fingerprint,
+        initial_f3=initial_f3,
+        companion_series_id=companion_series_id,
+        key=key,
+    )
+    if existing is not None:
+        return existing
     if BillingDocument.objects.filter(
         business=business,
         sale_return=sale_return,
@@ -1133,16 +1307,12 @@ def issue_sale_return_rectification(
     companion = None
     if initial_f3:
         companion_key = uuid.uuid5(key, "netxodo:billing:sale-return-companion-f3")
-        companion_fingerprint = _fingerprint(
-            {
-                "version": 1,
-                "operation": "issue_sale_return_companion_f3",
-                "business_id": business.pk,
-                "sale_return_id": sale_return.pk,
-                "target_document_id": document.pk,
-                "series_id": companion_series_id,
-                "recipient_anchor_document_id": initial_f3.pk,
-            }
+        companion_fingerprint = _companion_fingerprint(
+            business=business,
+            sale_return=sale_return,
+            target=document,
+            series_id=companion_series_id,
+            anchor=initial_f3,
         )
         companion = BillingDocument(
             business=business,
@@ -1160,7 +1330,18 @@ def issue_sale_return_rectification(
             **_issuer_snapshot(business),
             **_copy_document_snapshot(initial_f3),
         )
-        companion.save()
+        try:
+            with transaction.atomic():
+                companion.save()
+        except (IntegrityError, ValidationError):
+            winner = _attempt_for_key(business=business, key=companion_key)
+            if winner is None:
+                raise
+            if winner.status != BillingDocumentStatusChoices.ISSUED:
+                raise BillingServiceError(
+                    "La clave derivada de la F3 referencia un borrador inconsistente."
+                )
+            _idempotency_conflict()
         _copy_children(source=document, target=companion)
         BillingDocumentRelation(
             business=business,
