@@ -26,15 +26,9 @@ def resolve_tax_rate(explicit_tax_rate, default_tax_rate):
 
 def get_business_default_tax_rate(business):
     """Compatibility wrapper over Catalog's canonical default Tax."""
-    try:
-        from apps.catalog.services import (
-            BusinessDefaultTaxResolutionError,
-            resolve_business_default_tax,
-        )
+    from apps.catalog.services import resolve_business_default_tax
 
-        return resolve_business_default_tax(business=business).rate
-    except BusinessDefaultTaxResolutionError:
-        return None
+    return resolve_business_default_tax(business=business).rate
 
 
 def calculate_final_price(base_price, tax_rate):
