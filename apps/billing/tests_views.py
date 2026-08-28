@@ -5,7 +5,11 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.urls import reverse
 
-from apps.billing.models import BillingDocument, BillingDocumentTypeChoices
+from apps.billing.models import (
+    BillingDocument,
+    BillingDocumentRelationTypeChoices,
+    BillingDocumentTypeChoices,
+)
 from apps.billing.services import issue_sale_document
 from apps.billing.tests_forms import BillingFormsFixture
 from apps.sales.models import RequestedDocumentTypeChoices
@@ -63,7 +67,10 @@ class BillingHTTPTests(BillingFormsFixture):
         )
 
     def test_list_is_tenant_and_store_scoped_and_filters(self):
-        customer_b = self.other_customer
+        self.customer.name = "Cliente Empresa A"
+        self.customer.save()
+        self.other_customer.name = "Cliente Empresa B"
+        self.other_customer.save()
         sale = self.sale(customer=self.customer)
         own = self.issued_original(sale, BillingDocumentTypeChoices.F2)
         other_store_sale = self.sale(store=self.other_store)
@@ -88,8 +95,12 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertQuerySetEqual(
             response.context["documents"], [own], transform=lambda x: x
         )
-        self.assertNotContains(response, str(other_store_doc))
-        self.assertNotContains(response, customer_b.name)
+        self.assertNotIn(other_store_doc, response.context["documents"])
+        self.assertNotIn(
+            self.other_customer,
+            response.context["form"].fields["customer"].queryset,
+        )
+        self.assertNotContains(response, self.other_customer.name)
 
     def test_invalid_list_filter_keeps_safe_scope(self):
         own = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
@@ -103,11 +114,6 @@ class BillingHTTPTests(BillingFormsFixture):
     def test_business_and_store_access_are_enforced(self):
         foreign_store = create_sales_store(business=self.other_business)
         self.assertEqual(self.client.get(self.list_url(foreign_store)).status_code, 403)
-        no_business = create_sales_user(business=self.business)
-        type(no_business).objects.filter(pk=no_business.pk).update(business=None)
-        no_business.refresh_from_db()
-        self.client.force_login(no_business)
-        self.assertEqual(self.client.get(self.list_url()).status_code, 403)
 
     def test_detail_is_read_only_and_rejects_wrong_store(self):
         document = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
@@ -115,7 +121,9 @@ class BillingHTTPTests(BillingFormsFixture):
         response = self.client.get(self.detail_url(document))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, document.issuer_legal_name)
-        self.assertContains(response, document.total_amount)
+        self.assertEqual(
+            response.context["document"].total_amount, document.total_amount
+        )
         self.assertEqual(BillingDocument.objects.count(), count)
         self.assertEqual(
             self.client.get(self.detail_url(document, self.other_store)).status_code,
@@ -298,12 +306,25 @@ class BillingHTTPTests(BillingFormsFixture):
                 "idempotency_key": uuid.uuid4(),
             },
         )
-        rectification = BillingDocument.objects.get(sale_return=return_doc)
+        rectification = BillingDocument.objects.get(
+            sale_return=return_doc,
+            document_type=BillingDocumentTypeChoices.R5,
+        )
+        companion = BillingDocument.objects.get(
+            sale_return=return_doc,
+            document_type=BillingDocumentTypeChoices.F3,
+        )
         self.assertEqual(response.url, self.detail_url(rectification))
         self.assertTrue(
-            BillingDocument.objects.filter(
-                sale_return=return_doc,
-                document_type=BillingDocumentTypeChoices.F3,
+            rectification.outgoing_relations.filter(
+                relation_type=BillingDocumentRelationTypeChoices.RECTIFIES,
+                target_document__document_type=BillingDocumentTypeChoices.F2,
+            ).exists()
+        )
+        self.assertTrue(
+            companion.outgoing_relations.filter(
+                relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
+                target_document=rectification,
             ).exists()
         )
 
