@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Documento fiscal {{ document }}{% endblock %}
+{% block content %}
+<main><h1>{{ document }}</h1>
+  <dl><dt>Tipo</dt><dd>{{ document.get_document_type_display }}</dd><dt>Estado</dt><dd>{{ document.get_status_display }}</dd><dt>Fecha de operación</dt><dd>{{ document.operation_date }}</dd><dt>Emitido</dt><dd>{{ document.issued_at }}</dd><dt>Venta</dt><dd>{{ document.sale|default:"—" }}</dd><dt>Devolución</dt><dd>{{ document.sale_return|default:"—" }}</dd><dt>Cliente</dt><dd>{{ document.customer|default:"—" }}</dd></dl>
+  <h2>Emisor</h2><p>{{ document.issuer_legal_name }} — {{ document.issuer_tax_identifier }}</p><p>{{ document.issuer_address_line_1 }} {{ document.issuer_address_line_2 }}, {{ document.issuer_postal_code }} {{ document.issuer_city }}, {{ document.issuer_province }} {{ document.issuer_country_code }}</p>
+  <h2>Destinatario</h2><p>{{ document.recipient_legal_name|default:document.recipient_name }} — {{ document.recipient_tax_identifier }}</p><p>{{ document.recipient_address_line_1 }}, {{ document.recipient_postal_code }} {{ document.recipient_city }}, {{ document.recipient_province }} {{ document.recipient_country_code }}</p>
+  <h2>Totales</h2><p>Subtotal: {{ document.subtotal_amount }} EUR · Descuento: {{ document.discount_amount }} EUR · IVA: {{ document.tax_amount }} EUR · Total: {{ document.total_amount }} EUR</p>
+  <h2>Líneas</h2>{% for line in document.lines.all %}<p>{{ line.product_name }} × {{ line.quantity }} — {{ line.line_total }} EUR</p>{% empty %}<p>Sin líneas.</p>{% endfor %}
+  <h2>Desglose fiscal</h2>{% for tax in document.tax_breakdowns.all %}<p>{{ tax.tax_type }} {{ tax.tax_rate }}% — Base {{ tax.taxable_base_amount }} EUR — Cuota {{ tax.tax_amount }} EUR</p>{% empty %}<p>Sin desglose.</p>{% endfor %}
+  <h2>Relaciones salientes</h2>{% for relation in document.outgoing_relations.all %}<p>{{ relation.get_relation_type_display }}: <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=relation.target_document.pk %}">{{ relation.target_document }}</a></p>{% empty %}<p>Ninguna.</p>{% endfor %}
+  <h2>Relaciones entrantes</h2>{% for relation in document.incoming_relations.all %}<p>{{ relation.get_relation_type_display }}: <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=relation.source_document.pk %}">{{ relation.source_document }}</a></p>{% empty %}<p>Ninguna.</p>{% endfor %}
+  <p><a href="{% url 'billing:document_list' store_id=store.pk %}">Volver al listado</a></p>
+</main>
+{% endblock %}

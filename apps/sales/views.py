@@ -18,6 +18,15 @@ from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views import View
 
+from apps.billing.models import (
+    BillingDocumentStatusChoices,
+    BillingDocumentTypeChoices,
+)
+from apps.billing.selectors import (
+    billing_documents_for_sale,
+    billing_documents_for_sale_return,
+)
+
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
@@ -316,6 +325,22 @@ class SaleDetailView(
     def get(self, request, store_id, sale_pk):
         sale = self.get_sale()
 
+        issued_documents = billing_documents_for_sale(
+            business=_get_business(request), sale=sale
+        ).filter(status=BillingDocumentStatusChoices.ISSUED)
+        has_original = issued_documents.filter(
+            document_type__in=[
+                BillingDocumentTypeChoices.F1,
+                BillingDocumentTypeChoices.F2,
+            ]
+        ).exists()
+        has_f2 = issued_documents.filter(
+            document_type=BillingDocumentTypeChoices.F2
+        ).exists()
+        has_f3 = issued_documents.filter(
+            document_type=BillingDocumentTypeChoices.F3
+        ).exists()
+
         returnable_lines = sale.lines.none()
 
         if sale.is_completed:
@@ -334,6 +359,8 @@ class SaleDetailView(
             "is_completed": sale.is_completed,
             "is_cancelled": sale.is_cancelled,
             "is_returned": sale.is_returned,
+            "show_issue_billing_action": sale.is_completed and not has_original,
+            "show_substitute_f3_action": sale.is_completed and has_f2 and not has_f3,
         }
 
         return render(
@@ -1039,6 +1066,22 @@ class SaleReturnDetailView(
 
     def get(self, request, store_id, return_pk):
         return_doc = self.get_sale_return()
+        has_rectification = (
+            billing_documents_for_sale_return(
+                business=_get_business(request), sale_return=return_doc
+            )
+            .filter(
+                status=BillingDocumentStatusChoices.ISSUED,
+                document_type__in=[
+                    BillingDocumentTypeChoices.R1,
+                    BillingDocumentTypeChoices.R2,
+                    BillingDocumentTypeChoices.R3,
+                    BillingDocumentTypeChoices.R4,
+                    BillingDocumentTypeChoices.R5,
+                ],
+            )
+            .exists()
+        )
         complete_form = SaleReturnCompleteForm(
             return_doc=return_doc,
             user=request.user,
@@ -1056,6 +1099,9 @@ class SaleReturnDetailView(
                 "is_completed": return_doc.is_completed,
                 "is_cancelled": return_doc.is_cancelled,
                 "complete_form": complete_form,
+                "show_rectification_action": (
+                    return_doc.is_completed and not has_rectification
+                ),
             },
         )
 
