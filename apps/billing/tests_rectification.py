@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -116,6 +117,12 @@ class SaleReturnRectificationTests(TestCase):
         )
 
     def assert_fiscal_invariants(self, line):
+        self.assertEqual(
+            line.gross_base_amount,
+            (line.unit_base_price * line.quantity).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ),
+        )
         self.assertEqual(
             line.gross_base_amount - line.discount_amount, line.taxable_base_amount
         )
@@ -277,6 +284,7 @@ class SaleReturnRectificationTests(TestCase):
         )
         type(fiscal).objects.filter(pk=fiscal.pk).update(
             quantity=Decimal("2.000"),
+            unit_base_price=Decimal("0.50"),
             gross_base_amount=Decimal("1.00"),
             discount_amount=Decimal("0.13"),
             taxable_base_amount=Decimal("0.87"),
@@ -299,6 +307,81 @@ class SaleReturnRectificationTests(TestCase):
         )
         self.assert_fiscal_invariants(line)
 
+    def test_missing_source_sale_line_fails_closed_without_consuming_number(self):
+        sale, sale_line = self.completed_sale()
+        original = self.issue_original(sale, BillingDocumentTypeChoices.F2)
+        original.lines.update(source_sale_line=None)
+        return_doc = self.completed_return(sale, sale_line)
+        series = self.series(BillingDocumentTypeChoices.R5, "R5NOSOURCE")
+        with self.assertRaises(BillingUnsupportedFiscalCase):
+            issue_sale_return_rectification(
+                business=self.business,
+                sale_return_id=return_doc.pk,
+                series_id=series.pk,
+                issued_by=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+        series.refresh_from_db()
+        self.assertEqual(series.current_number, 0)
+        self.assertFalse(
+            BillingDocument.objects.filter(sale_return=return_doc).exists()
+        )
+
+    def test_companion_failure_after_numbering_rolls_back_entire_operation(self):
+        sale, sale_line = self.completed_sale()
+        self.issue_original(sale, BillingDocumentTypeChoices.F2)
+        customer = create_sales_customer(
+            business=self.business,
+            legal_name="Rollback Recipient SL",
+            tax_identifier="B44332211",
+        )
+        substitute_simplified_document(
+            business=self.business,
+            sale_id=sale.pk,
+            customer=customer,
+            series_id=self.series(BillingDocumentTypeChoices.F3, "F3ROLLBASE").pk,
+            issued_by=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        return_doc = self.completed_return(sale, sale_line)
+        r5_series = self.series(BillingDocumentTypeChoices.R5, "R5ROLL")
+        f3_series = self.series(BillingDocumentTypeChoices.F3, "F3ROLL")
+        from apps.billing import services
+
+        real_finalize = services._finalize_return_document
+        calls = 0
+
+        def fail_after_companion_numbering(**kwargs):
+            nonlocal calls
+            calls += 1
+            real_finalize(**kwargs)
+            if calls == 2:
+                raise BillingUnsupportedFiscalCase("Fallo inyectado tras numeración.")
+
+        with (
+            patch(
+                "apps.billing.services._finalize_return_document",
+                side_effect=fail_after_companion_numbering,
+            ),
+            self.assertRaises(BillingUnsupportedFiscalCase),
+        ):
+            issue_sale_return_rectification(
+                business=self.business,
+                sale_return_id=return_doc.pk,
+                series_id=r5_series.pk,
+                companion_f3_series_id=f3_series.pk,
+                issued_by=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+        r5_series.refresh_from_db()
+        f3_series.refresh_from_db()
+        return_doc.refresh_from_db()
+        self.assertEqual((r5_series.current_number, f3_series.current_number), (0, 0))
+        self.assertIsNone(return_doc.original_billing_document_id)
+        self.assertFalse(
+            BillingDocument.objects.filter(sale_return=return_doc).exists()
+        )
+
     def test_impossible_amount_fails_closed_and_rolls_back_anchor(self):
         sale, sale_line = self.completed_sale()
         self.issue_original(sale, BillingDocumentTypeChoices.F2)
@@ -318,3 +401,37 @@ class SaleReturnRectificationTests(TestCase):
         self.assertFalse(
             BillingDocument.objects.filter(sale_return=return_doc).exists()
         )
+
+    def test_three_partial_returns_reconstruct_full_snapshot_exactly(self):
+        sale, sale_line = self.completed_sale(quantity=Decimal("3.000"))
+        original = self.issue_original(sale, BillingDocumentTypeChoices.F2)
+        returns = [
+            self.completed_return(sale, sale_line, quantity=Decimal("1.000"))
+            for _ in range(3)
+        ]
+        series = self.series(BillingDocumentTypeChoices.R5, "R5PARTS")
+        documents = [
+            issue_sale_return_rectification(
+                business=self.business,
+                sale_return_id=return_doc.pk,
+                series_id=series.pk,
+                issued_by=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+            for return_doc in returns
+        ]
+        lines = [document.lines.get() for document in documents]
+        for line in lines:
+            self.assert_fiscal_invariants(line)
+        original_line = original.lines.get()
+        for field in (
+            "gross_base_amount",
+            "discount_amount",
+            "taxable_base_amount",
+            "tax_amount",
+            "line_total",
+        ):
+            self.assertEqual(
+                sum((getattr(line, field) for line in lines), Decimal("0.00")),
+                -getattr(original_line, field),
+            )

@@ -847,7 +847,10 @@ def _resolve_rectification_retry(
     if (
         existing.status != BillingDocumentStatusChoices.ISSUED
         or existing.sale_return_id != sale_return.pk
+        or existing.sale_id != sale_return.original_sale_id
         or existing.document_type != document_type
+        or existing.rectification_method
+        != BillingRectificationMethodChoices.DIFFERENCES
         or existing.series_id != series_id
         or existing.idempotency_fingerprint != fingerprint
         or rectifies.count() != 1
@@ -893,28 +896,29 @@ def _resolve_rectification_retry(
 
 
 def _resolve_return_original(*, business, sale_return, sale):
-    originals = list(
-        BillingDocument.objects.filter(
-            business=business,
-            sale=sale,
-            status=BillingDocumentStatusChoices.ISSUED,
-            document_type__in=[
-                BillingDocumentTypeChoices.F1,
-                BillingDocumentTypeChoices.F2,
-            ],
-        ).prefetch_related("lines")
-    )
-    if sale_return.original_billing_document_id:
-        original = sale_return.original_billing_document
-        if original not in originals:
+    original_queryset = BillingDocument.objects.filter(
+        business=business,
+        sale=sale,
+        status=BillingDocumentStatusChoices.ISSUED,
+        document_type__in=[
+            BillingDocumentTypeChoices.F1,
+            BillingDocumentTypeChoices.F2,
+        ],
+    ).prefetch_related("lines")
+    anchor_id = sale_return.original_billing_document_id
+    if anchor_id is not None:
+        try:
+            return original_queryset.get(pk=anchor_id)
+        except BillingDocument.DoesNotExist as exc:
             raise BillingUnsupportedFiscalCase(
                 "El documento fiscal original no pertenece a una historia válida."
-            )
-        return original
+            ) from exc
+
+    originals = list(original_queryset)
     if len(originals) != 1:
         raise BillingUnsupportedFiscalCase("La historia fiscal original es ambigua.")
     original = originals[0]
-    sale_return.original_billing_document = original
+    sale_return.original_billing_document_id = original.pk
     sale_return.save(update_fields=["original_billing_document", "updated_at"])
     return original
 
@@ -935,9 +939,12 @@ def _initial_f3_for_f2(*, business, original):
     return candidates[0] if candidates else None
 
 
-def _fiscal_amounts_are_consistent(*, gross, discount, taxable, tax, total, rate):
+def _fiscal_amounts_are_consistent(
+    *, gross, discount, taxable, tax, total, rate, quantity, unit_base_price
+):
     return (
-        gross - discount == taxable
+        _money(unit_base_price * quantity) == gross
+        and gross - discount == taxable
         and _money(taxable * rate / Decimal("100")) == tax
         and taxable + tax == total
     )
@@ -1022,6 +1029,8 @@ def _rectification_snapshots(*, original, sale_return):
             tax=remaining["tax_amount"],
             total=remaining["line_total"],
             rate=original_line.tax_rate,
+            quantity=original_line.quantity,
+            unit_base_price=original_line.unit_base_price,
         ):
             raise BillingUnsupportedFiscalCase(
                 "La línea fiscal original contiene importes incoherentes."
@@ -1044,6 +1053,8 @@ def _rectification_snapshots(*, original, sale_return):
                     tax=part["tax_amount"],
                     total=part["line_total"],
                     rate=original_line.tax_rate,
+                    quantity=remaining_quantity,
+                    unit_base_price=original_line.unit_base_price,
                 ):
                     raise BillingUnsupportedFiscalCase(
                         "Los residuos fiscales no forman una línea consistente."
@@ -1060,30 +1071,29 @@ def _rectification_snapshots(*, original, sale_return):
                     expected=expected_taxable,
                     remaining=remaining,
                 )
-                discount = min(
-                    remaining["discount_amount"],
-                    _money(
-                        original_line.discount_amount
-                        * historical.quantity
-                        / original_line.quantity
-                    ),
-                )
+                gross = _money(original_line.unit_base_price * historical.quantity)
+                discount = gross - taxable
                 part = {
                     "discount_amount": discount,
                     "taxable_base_amount": taxable,
                     "tax_amount": tax,
                     "line_total": historical.amount,
-                    "gross_base_amount": taxable + discount,
+                    "gross_base_amount": gross,
                 }
-                if part["gross_base_amount"] > remaining[
-                    "gross_base_amount"
-                ] or not _fiscal_amounts_are_consistent(
-                    gross=part["gross_base_amount"],
-                    discount=part["discount_amount"],
-                    taxable=part["taxable_base_amount"],
-                    tax=part["tax_amount"],
-                    total=part["line_total"],
-                    rate=original_line.tax_rate,
+                if (
+                    discount < 0
+                    or discount > remaining["discount_amount"]
+                    or gross > remaining["gross_base_amount"]
+                    or not _fiscal_amounts_are_consistent(
+                        gross=part["gross_base_amount"],
+                        discount=part["discount_amount"],
+                        taxable=part["taxable_base_amount"],
+                        tax=part["tax_amount"],
+                        total=part["line_total"],
+                        rate=original_line.tax_rate,
+                        quantity=historical.quantity,
+                        unit_base_price=original_line.unit_base_price,
+                    )
                 ):
                     raise BillingUnsupportedFiscalCase(
                         "La asignación parcial excede o contradice el snapshot fiscal."
@@ -1160,10 +1170,8 @@ def issue_sale_return_rectification(
         else None
     )
     try:
-        sale_return = (
-            SaleReturn.objects.select_for_update(of=("self",))
-            .select_related("original_billing_document")
-            .get(pk=sale_return_id, business=business)
+        sale_return = SaleReturn.objects.select_for_update(of=("self",)).get(
+            pk=sale_return_id, business=business
         )
     except SaleReturn.DoesNotExist as exc:
         raise BillingServiceError(
