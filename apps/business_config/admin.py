@@ -14,7 +14,6 @@ class BusinessProfileAdmin(admin.ModelAdmin):
         "trade_name",
         "tax_identifier",
         "currency_code",
-        "default_tax_rate",
         "updated_at",
     )
     search_fields = (
@@ -36,7 +35,6 @@ class BusinessProfileAdmin(admin.ModelAdmin):
                     "legal_name",
                     "tax_identifier",
                     "trade_name",
-                    "default_tax_rate",
                 )
             },
         ),

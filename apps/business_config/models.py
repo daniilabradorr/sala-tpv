@@ -82,7 +82,8 @@ class BusinessProfile(TimeStampedModel):
         return super().save(*args, **kwargs)
 
     def resolve_tax_rate(self, explicit_tax_rate=None):
-        return resolve_tax_rate(explicit_tax_rate, self.default_tax_rate)
+        default_tax_rate = get_business_default_tax_rate(self.business)
+        return resolve_tax_rate(explicit_tax_rate, default_tax_rate)
 
     def __str__(self) -> str:
         return f"Perfil · {self.business.name}"

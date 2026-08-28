@@ -568,15 +568,6 @@ def _issue_draft(*, document, business, sale, document_type, issued_by, issue_mo
     return document
 
 
-def _return_operation_date(sale_return):
-    completed_at = sale_return.completed_at
-    return (
-        timezone.localtime(completed_at).date()
-        if timezone.is_aware(completed_at)
-        else completed_at.date()
-    )
-
-
 @transaction.atomic
 def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_key):
     """Atomically create and issue an F1/F2 snapshot from a completed Sale."""
@@ -1357,7 +1348,9 @@ def issue_sale_return_rectification(
             target_document=document,
             relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
         ).save()
-    operation_date = _return_operation_date(sale_return)
+    # A rectification keeps the historical operation date of the fiscal
+    # document it rectifies; the return completion date is not a fiscal source.
+    operation_date = original.operation_date
     locked_series = _lock_series(
         series_id=series_id,
         business=business,
