@@ -63,6 +63,21 @@ def billing_document_detail(*, business, document_id):
     return get_object_or_404(_document_queryset(), business=business, pk=document_id)
 
 
+def issued_billing_document(*, business, document_id):
+    """Return one tenant-scoped issued document, or ``None`` when unavailable."""
+    if business is None or document_id is None:
+        return None
+    return (
+        _document_queryset()
+        .filter(
+            business=business,
+            pk=document_id,
+            status=BillingDocumentStatusChoices.ISSUED,
+        )
+        .first()
+    )
+
+
 def billing_documents_for_sale(*, business, sale):
     return billing_document_list(business=business, sale=sale)
 

@@ -5,7 +5,6 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.billing.models import (
-    BillingDocument,
     BillingDocumentRelationTypeChoices,
     BillingDocumentStatusChoices,
     BillingDocumentTypeChoices,
@@ -13,6 +12,7 @@ from apps.billing.models import (
 )
 from apps.billing.selectors import (
     active_billing_series,
+    issued_billing_document,
     issued_original_documents_for_sale,
 )
 from apps.customers.models import Customer
@@ -102,17 +102,16 @@ class SaleReturnRectificationForm(forms.Form):
         sale = sale_return.original_sale
         candidates = []
         if sale_return.original_billing_document_id:
-            candidate = BillingDocument.objects.filter(
-                pk=sale_return.original_billing_document_id,
+            candidate = issued_billing_document(
                 business=business,
-                sale=sale,
-                status=BillingDocumentStatusChoices.ISSUED,
-                document_type__in=[
-                    BillingDocumentTypeChoices.F1,
-                    BillingDocumentTypeChoices.F2,
-                ],
-            ).first()
-            if candidate:
+                document_id=sale_return.original_billing_document_id,
+            )
+            if (
+                candidate
+                and candidate.sale_id == sale.pk
+                and candidate.document_type
+                in [BillingDocumentTypeChoices.F1, BillingDocumentTypeChoices.F2]
+            ):
                 candidates = [candidate]
         else:
             candidates = list(
