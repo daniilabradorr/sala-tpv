@@ -713,6 +713,14 @@ class SaleReturn(TimeStampedModel):
         related_name="returns",
         help_text="Venta sobre la que se realiza la devolución.",
     )
+    original_billing_document = models.ForeignKey(
+        "billing.BillingDocument",
+        verbose_name="Documento fiscal original",
+        on_delete=models.PROTECT,
+        related_name="anchored_sale_returns",
+        null=True,
+        blank=True,
+    )
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -833,6 +841,28 @@ class SaleReturn(TimeStampedModel):
                 errors["store"] = (
                     "La devolución debe realizarse en la tienda de la venta original."
                 )
+        if self.original_billing_document_id:
+            document = self.original_billing_document
+            if document.business_id != self.business_id:
+                errors["original_billing_document"] = (
+                    "El documento fiscal debe pertenecer al mismo negocio."
+                )
+            elif document.store_id != self.store_id:
+                errors["original_billing_document"] = (
+                    "El documento fiscal debe pertenecer a la misma tienda."
+                )
+            elif document.sale_id != self.original_sale_id:
+                errors["original_billing_document"] = (
+                    "El documento fiscal debe corresponder a la venta original."
+                )
+            elif document.status != "issued" or document.document_type not in {
+                "F1",
+                "F2",
+                "F3",
+            }:
+                errors["original_billing_document"] = (
+                    "Debe indicarse un documento original F1/F2/F3 emitido."
+                )
 
         if self.created_by_id and self.business_id:
             if (
@@ -862,6 +892,22 @@ class SaleReturn(TimeStampedModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        if self.pk:
+            original_id = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("original_billing_document_id", flat=True)
+                .first()
+            )
+            if (
+                original_id is not None
+                and original_id != self.original_billing_document_id
+            ):
+                raise ValidationError(
+                    {
+                        "original_billing_document": "El documento fiscal original es inmutable."
+                    }
+                )
         self.full_clean()
         return super().save(*args, **kwargs)
 

@@ -24,7 +24,6 @@ class BusinessProfileForm(forms.ModelForm):
             "logo_url",
             "receipt_footer",
             "return_policy",
-            "default_tax_rate",
         ]
         widgets = {
             "receipt_footer": forms.Textarea(attrs={"rows": 3}),

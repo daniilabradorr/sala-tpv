@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}Emitir documento fiscal{% endblock %}{% block content %}<main><h1>Emitir documento fiscal</h1><form method="post">{% csrf_token %}{{ form.non_field_errors }}{{ form.as_p }}<button type="submit">Emitir</button></form></main>{% endblock %}

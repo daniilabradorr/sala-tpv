@@ -33,6 +33,11 @@ class BillingDocumentStatusChoices(models.TextChoices):
     ISSUED = "issued", "Emitido"
 
 
+class BillingRectificationMethodChoices(models.TextChoices):
+    DIFFERENCES = "I", "Por diferencias"
+    SUBSTITUTION = "S", "Por sustitución"
+
+
 class BillingDocumentRelationTypeChoices(models.TextChoices):
     SUBSTITUTES = "substitutes", "Sustituye"
     RECTIFIES = "rectifies", "Rectifica"
@@ -210,6 +215,13 @@ class BillingDocument(TimeStampedModel):
         null=True,
         blank=True,
     )
+    sale_return = models.ForeignKey(
+        "sales.SaleReturn",
+        on_delete=models.PROTECT,
+        related_name="billing_documents",
+        null=True,
+        blank=True,
+    )
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.PROTECT,
@@ -241,6 +253,12 @@ class BillingDocument(TimeStampedModel):
     number = models.PositiveBigIntegerField("Número", null=True, blank=True)
     document_type = models.CharField(
         "Tipo de documento", max_length=2, choices=BillingDocumentTypeChoices.choices
+    )
+    rectification_method = models.CharField(
+        max_length=1,
+        choices=BillingRectificationMethodChoices.choices,
+        null=True,
+        blank=True,
     )
     status = models.CharField(
         "Estado",
@@ -317,6 +335,27 @@ class BillingDocument(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(number__isnull=True) | Q(number__gt=0),
                 name="chk_billdoc_number_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        document_type__in=["F1", "F2", "F3"],
+                        rectification_method__isnull=True,
+                    )
+                    | Q(
+                        document_type__in=["R1", "R2", "R3", "R4", "R5"],
+                        rectification_method__in=["I", "S"],
+                    )
+                ),
+                name="chk_billdoc_rectification_method",
+            ),
+            models.UniqueConstraint(
+                fields=["sale_return"],
+                condition=Q(
+                    sale_return__isnull=False,
+                    document_type__in=["R1", "R2", "R3", "R4", "R5"],
+                ),
+                name="uniq_billdoc_return_rectification",
             ),
         ]
         indexes = [
@@ -422,6 +461,26 @@ class BillingDocument(TimeStampedModel):
                 and self.sale.cash_session_id != self.cash_session_id
             ):
                 errors["cash_session"] = "La sesión debe coincidir con la de la venta."
+        if self.sale_return_id:
+            if self.sale_return.business_id != self.business_id:
+                errors["sale_return"] = (
+                    "La devolución debe pertenecer al mismo negocio."
+                )
+            elif self.sale_return.store_id != self.store_id:
+                errors["sale_return"] = (
+                    "La devolución debe pertenecer a la misma tienda."
+                )
+            elif self.sale_return.original_sale_id != self.sale_id:
+                errors["sale_return"] = (
+                    "La devolución debe corresponder a la venta del documento."
+                )
+        is_rectification = self.document_type in {"R1", "R2", "R3", "R4", "R5"}
+        if is_rectification and not self.rectification_method:
+            errors["rectification_method"] = "Las rectificativas requieren método."
+        elif not is_rectification and self.rectification_method is not None:
+            errors["rectification_method"] = (
+                "Los documentos F no admiten método rectificativo."
+            )
         if self.customer_id and self.customer.business_id != self.business_id:
             errors["customer"] = "El cliente debe pertenecer al mismo negocio."
         if self.issued_by_id and not self.issued_by.is_superuser:
@@ -542,6 +601,13 @@ class BillingDocumentLine(IssuedDocumentChildMixin, TimeStampedModel):
     billing_document = models.ForeignKey(
         BillingDocument, on_delete=models.PROTECT, related_name="lines"
     )
+    source_sale_line = models.ForeignKey(
+        "sales.SaleLine",
+        on_delete=models.PROTECT,
+        related_name="billing_document_lines",
+        null=True,
+        blank=True,
+    )
     product_name = models.CharField(max_length=180)
     sku = models.CharField(max_length=80, blank=True)
     quantity = models.DecimalField(max_digits=14, decimal_places=3)
@@ -572,6 +638,13 @@ class BillingDocumentLine(IssuedDocumentChildMixin, TimeStampedModel):
                 name="idx_billline_bus_document",
             )
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["billing_document", "source_sale_line"],
+                condition=Q(source_sale_line__isnull=False),
+                name="uniq_billline_document_source",
+            )
+        ]
 
     def clean(self):
         super().clean()
@@ -586,6 +659,19 @@ class BillingDocumentLine(IssuedDocumentChildMixin, TimeStampedModel):
             errors["billing_document"] = (
                 "El documento debe pertenecer al mismo negocio."
             )
+        if self.source_sale_line_id:
+            if self.source_sale_line.business_id != self.business_id:
+                errors["source_sale_line"] = (
+                    "La línea origen debe pertenecer al mismo negocio."
+                )
+            elif (
+                self.billing_document_id
+                and self.billing_document.sale_id
+                and self.source_sale_line.sale_id != self.billing_document.sale_id
+            ):
+                errors["source_sale_line"] = (
+                    "La línea origen debe pertenecer a la venta del documento."
+                )
         if not self.product_name:
             errors["product_name"] = "El nombre histórico del producto es obligatorio."
         if not self.unit:

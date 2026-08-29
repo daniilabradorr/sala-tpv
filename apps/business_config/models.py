@@ -58,6 +58,10 @@ class BusinessProfile(TimeStampedModel):
     receipt_footer = models.TextField("pie de ticket", blank=True)
     return_policy = models.TextField("política de devoluciones", blank=True)
 
+    # LEGACY/DEPRECATED schema compatibility only. This field is not a fiscal
+    # source; Catalog Tax.is_default is canonical. The historical help_text is
+    # deliberately retained as migration state to avoid a documentation-only
+    # AlterField migration; user-facing forms/admin no longer expose the field.
     default_tax_rate = models.DecimalField(
         "IVA por defecto",
         max_digits=5,
@@ -82,7 +86,10 @@ class BusinessProfile(TimeStampedModel):
         return super().save(*args, **kwargs)
 
     def resolve_tax_rate(self, explicit_tax_rate=None):
-        return resolve_tax_rate(explicit_tax_rate, self.default_tax_rate)
+        if explicit_tax_rate is not None:
+            return resolve_tax_rate(explicit_tax_rate, None)
+        default_tax_rate = get_business_default_tax_rate(self.business)
+        return resolve_tax_rate(explicit_tax_rate, default_tax_rate)
 
     def __str__(self) -> str:
         return f"Perfil · {self.business.name}"
@@ -165,6 +172,8 @@ class POSSettings(TimeStampedModel):
         return super().save(*args, **kwargs)
 
     def resolve_tax_rate(self, explicit_tax_rate=None):
+        if explicit_tax_rate is not None:
+            return resolve_tax_rate(explicit_tax_rate, None)
         default_tax_rate = get_business_default_tax_rate(self.business)
         return resolve_tax_rate(explicit_tax_rate, default_tax_rate)
 

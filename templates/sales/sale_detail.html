@@ -59,6 +59,8 @@
         {% endif %}
 
         {% if is_completed %}
+            {% if show_issue_billing_action %}<p><a href="{% url 'billing:issue_sale_document' store_id=store.pk sale_pk=sale.pk %}">Emitir documento fiscal</a></p>{% endif %}
+            {% if show_substitute_f3_action %}<p><a href="{% url 'billing:substitute_simplified_document' store_id=store.pk sale_pk=sale.pk %}">Emitir F3 / factura completa sustitutiva</a></p>{% endif %}
             {% if sale.pending_amount > 0 %}<p><a href="{% url 'payments:create' store_id=store.pk sale_id=sale.pk %}">Registrar cobro</a></p>{% endif %}
             {% if sale.pending_amount > 0 and sale.customer %}<p><a href="{% url 'payments:sale_on_account' store_id=store.pk sale_id=sale.pk %}">Pasar pendiente a cuenta del cliente</a></p>{% endif %}
             <p><a href="{% url 'sales:return_create' store_id=store.pk sale_pk=sale.pk %}">Crear devolucion</a></p>

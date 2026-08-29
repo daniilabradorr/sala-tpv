@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Documentos fiscales{% endblock %}
+{% block content %}
+<main><h1>Documentos fiscales</h1>
+  <form method="get">{{ form.non_field_errors }}{{ form.as_p }}<button type="submit">Filtrar</button></form>
+  {% for document in documents %}<p><a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">{{ document }}</a> — {{ document.get_status_display }} — {{ document.total_amount }} EUR</p>{% empty %}<p>No hay documentos.</p>{% endfor %}
+</main>
+{% endblock %}
