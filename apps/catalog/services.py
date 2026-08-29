@@ -26,6 +26,27 @@ class ProductTaxResolutionError(Exception):
     pass
 
 
+class BusinessDefaultTaxResolutionError(Exception):
+    """Raised when a business has no active canonical default Tax."""
+
+
+def resolve_business_default_tax(*, business) -> Tax:
+    """Return the active ``Tax.is_default`` for exactly this business."""
+    business_id = getattr(business, "pk", None)
+    if not business_id:
+        raise BusinessDefaultTaxResolutionError(
+            "No se puede resolver el impuesto por defecto sin un negocio persistido."
+        )
+    default_tax = Tax.objects.filter(
+        business_id=business_id, is_default=True, is_active=True
+    ).first()
+    if default_tax is None:
+        raise BusinessDefaultTaxResolutionError(
+            "No existe un impuesto por defecto activo para el negocio."
+        )
+    return default_tax
+
+
 def resolve_product_tax(product: Product) -> Tax:
     """
     Resuelve qué impuesto debe aplicarse a un producto.
@@ -68,15 +89,9 @@ def resolve_product_tax(product: Product) -> Tax:
 
         return tax
 
-    default_tax = Tax.objects.filter(
-        business_id=product.business_id,
-        is_default=True,
-        is_active=True,
-    ).first()
-
-    if default_tax:
-        return default_tax
-
-    raise ProductTaxResolutionError(
-        f"No existe un impuesto por defecto activo para el negocio del producto '{product.name}'."
-    )
+    try:
+        return resolve_business_default_tax(business=product.business)
+    except BusinessDefaultTaxResolutionError as exc:
+        raise ProductTaxResolutionError(
+            f"No existe un impuesto por defecto activo para el negocio del producto '{product.name}'."
+        ) from exc

@@ -29,7 +29,6 @@ def bootstrap_business_configuration(business):
             "currency_code": "EUR",  # Euro
             "receipt_footer": "Gracias por su visita.",
             "return_policy": "",
-            "default_tax_rate": Decimal("21.00"),
         },
     )
 

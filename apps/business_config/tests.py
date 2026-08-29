@@ -6,6 +6,8 @@ from django.test import TestCase
 from apps.business_config.helpers import get_display_price, resolve_tax_rate
 from apps.business_config.models import BusinessProfile, POSSettings
 from apps.business_config.services import bootstrap_business_configuration
+from apps.catalog.models import Tax
+from apps.catalog.services import BusinessDefaultTaxResolutionError
 from apps.core.models import Business
 
 
@@ -51,13 +53,23 @@ class BusinessProfileTaxTests(TestCase):
     def test_default_tax_rate_is_21_by_default(self):
         self.assertEqual(self.profile.default_tax_rate, Decimal("21.00"))
 
-    def test_default_tax_rate_is_used_as_fallback(self):
+    def canonical_tax(self, rate=Decimal("10.00")):
+        return Tax.objects.create(
+            business=self.business,
+            name=f"IVA {rate}",
+            code=f"IVA_{rate}",
+            rate=rate,
+            is_default=True,
+        )
+
+    def test_canonical_tax_is_used_as_fallback(self):
+        tax = self.canonical_tax()
         self.profile.default_tax_rate = Decimal("21.00")
         self.profile.save()
 
         effective_tax_rate = self.profile.resolve_tax_rate()
 
-        self.assertEqual(effective_tax_rate, Decimal("21.00"))
+        self.assertEqual(effective_tax_rate, tax.rate)
 
     def test_explicit_tax_rate_overrides_default_tax_rate(self):
         self.profile.default_tax_rate = Decimal("21.00")
@@ -81,6 +93,13 @@ class POSSettingsPriceRulesTests(TestCase):
         self.settings = self.business.pos_settings
         self.profile.default_tax_rate = Decimal("21.00")
         self.profile.save()
+        Tax.objects.create(
+            business=self.business,
+            name="IVA 21",
+            code="IVA_21",
+            rate=Decimal("21.00"),
+            is_default=True,
+        )
 
     def test_prices_include_tax_true_only_changes_display_price(self):
         self.settings.prices_include_tax = True
@@ -123,6 +142,39 @@ class POSSettingsPriceRulesTests(TestCase):
 
         self.assertEqual(base_price, Decimal("10.00"))
         self.assertEqual(display_price, Decimal("12.10"))
+
+
+class MissingCanonicalTaxTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name="Sin configuración fiscal")
+
+    def test_pos_settings_tax_resolution_fails_closed(self):
+        with self.assertRaises(BusinessDefaultTaxResolutionError):
+            self.business.pos_settings.resolve_tax_rate()
+
+    def test_final_price_does_not_treat_missing_tax_as_zero(self):
+        with self.assertRaises(BusinessDefaultTaxResolutionError):
+            self.business.pos_settings.calculate_final_price(Decimal("10.00"))
+
+    def test_legacy_profile_rate_cannot_rescue_missing_tax(self):
+        self.business.profile.default_tax_rate = Decimal("21.00")
+        self.business.profile.save()
+
+        with self.assertRaises(BusinessDefaultTaxResolutionError):
+            self.business.profile.resolve_tax_rate()
+
+    def test_other_business_default_tax_is_not_used(self):
+        other_business = Business.objects.create(name="Con configuración fiscal")
+        Tax.objects.create(
+            business=other_business,
+            name="IVA 10",
+            code="IVA_10",
+            rate=Decimal("10.00"),
+            is_default=True,
+        )
+
+        with self.assertRaises(BusinessDefaultTaxResolutionError):
+            self.business.pos_settings.resolve_tax_rate()
 
 
 class POSSettingsValidationTests(TestCase):

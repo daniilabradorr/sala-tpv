@@ -1,7 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.core.exceptions import ObjectDoesNotExist
-
 TWOPLACES = Decimal("0.01")
 ONE_HUNDRED = Decimal("100")
 
@@ -27,10 +25,10 @@ def resolve_tax_rate(explicit_tax_rate, default_tax_rate):
 
 
 def get_business_default_tax_rate(business):
-    try:
-        return business.profile.default_tax_rate
-    except ObjectDoesNotExist:
-        return None
+    """Compatibility wrapper over Catalog's canonical default Tax."""
+    from apps.catalog.services import resolve_business_default_tax
+
+    return resolve_business_default_tax(business=business).rate
 
 
 def calculate_final_price(base_price, tax_rate):

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from apps.business_config.models import BusinessProfile
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
     SaleReturnStatusChoices,
+    Sale,
     SaleStatusChoices,
 )
 from apps.sales.tests.factories import (
@@ -141,12 +143,18 @@ class SaleReturnRectificationTests(TestCase):
             tax_identifier="B87654321",
         )
         sale, sale_line = self.completed_sale(invoice=True, customer=customer)
+        Sale.objects.filter(pk=sale.pk).update(
+            completed_at=timezone.make_aware(datetime(2020, 8, 10, 12))
+        )
         original = self.issue_original(sale, BillingDocumentTypeChoices.F1)
         customer.legal_name = "Mutable Recipient SL"
         customer.save()
         self.product.name = "Mutable product"
         self.product.save()
         return_doc = self.completed_return(sale, sale_line)
+        self.assertNotEqual(
+            original.operation_date, timezone.localtime(return_doc.completed_at).date()
+        )
         series = self.series(BillingDocumentTypeChoices.R1, "R1")
         before = timezone.now()
         rectification = issue_sale_return_rectification(
@@ -165,7 +173,7 @@ class SaleReturnRectificationTests(TestCase):
         self.assertGreaterEqual(rectification.issued_at, before)
         self.assertEqual(
             rectification.operation_date,
-            timezone.localtime(return_doc.completed_at).date(),
+            original.operation_date,
         )
         self.assertEqual(
             rectification.recipient_legal_name, original.recipient_legal_name
@@ -187,8 +195,14 @@ class SaleReturnRectificationTests(TestCase):
 
     def test_f2_return_issues_r5_and_retry_does_not_consume_number(self):
         sale, sale_line = self.completed_sale()
+        Sale.objects.filter(pk=sale.pk).update(
+            completed_at=timezone.make_aware(datetime(2020, 8, 11, 12))
+        )
         original = self.issue_original(sale, BillingDocumentTypeChoices.F2)
         return_doc = self.completed_return(sale, sale_line)
+        self.assertNotEqual(
+            original.operation_date, timezone.localtime(return_doc.completed_at).date()
+        )
         series = self.series(BillingDocumentTypeChoices.R5, "R5")
         key = uuid.uuid4()
         first = issue_sale_return_rectification(
@@ -207,6 +221,8 @@ class SaleReturnRectificationTests(TestCase):
         )
         self.assertEqual(first.pk, retry.pk)
         self.assertEqual(first.document_type, BillingDocumentTypeChoices.R5)
+        self.assertEqual(first.operation_date, original.operation_date)
+        self.assertEqual(retry.operation_date, original.operation_date)
         self.assertEqual(first.outgoing_relations.get().target_document_id, original.pk)
         series.refresh_from_db()
         self.assertEqual(series.current_number, 1)
