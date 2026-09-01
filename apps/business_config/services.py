@@ -1,60 +1,68 @@
 from decimal import Decimal
-import logging
 
 from django.db import transaction
 
 from apps.business_config.models import BusinessProfile, POSSettings
 
-logger = logging.getLogger(__name__)
-
 
 @transaction.atomic
-def bootstrap_business_configuration(business):
-    profile, profile_created = BusinessProfile.objects.get_or_create(
+def create_business_configuration(
+    *,
+    business,
+    legal_name,
+    tax_identifier,
+    phone,
+    email,
+    address_line_1,
+    postal_code,
+    city,
+    province,
+    trade_name="",
+    address_line_2="",
+    country_code="ES",
+    currency_code="EUR",
+    brand_name="",
+    website="",
+    logo_url="",
+    receipt_footer="",
+    return_policy="",
+):
+    """Create the configuration supplied during an explicit business setup.
+
+    The one-to-one constraints deliberately reject a second configuration for
+    the same business rather than silently returning existing records.
+    """
+    profile = BusinessProfile.objects.create(
         business=business,
-        defaults={
-            "legal_name": business.name,
-            "tax_identifier": "PENDIENTE",  # lo dejo asi porque todavia esta pendiente
-            "trade_name": business.name,
-            "brand_name": business.name,
-            # ahora mismo esto lo dejo demomento, en cuanto se haga onboarding de negocio quitarlo hardcodeado y que se pida al usuario, pero para pruebas de momento lo dejo asi
-            "phone": "000000000",
-            "email": f"business-{business.pk}@example.com",
-            # phone y email cuando impleetemos onboarding hay que quitaro
-            "address_line_1": "pendiente de onboarding",
-            "postal_code": "00000",
-            "city": "Pendiente",
-            "province": "Pendiente",
-            "country_code": "ES",  # España
-            "currency_code": "EUR",  # Euro
-            "receipt_footer": "Gracias por su visita.",
-            "return_policy": "",
-        },
+        legal_name=legal_name,
+        tax_identifier=tax_identifier,
+        trade_name=trade_name,
+        phone=phone,
+        email=email,
+        website=website,
+        address_line_1=address_line_1,
+        address_line_2=address_line_2,
+        postal_code=postal_code,
+        city=city,
+        province=province,
+        country_code=country_code,
+        currency_code=currency_code,
+        brand_name=brand_name,
+        logo_url=logo_url,
+        receipt_footer=receipt_footer,
+        return_policy=return_policy,
     )
 
-    settings, settings_created = POSSettings.objects.get_or_create(
+    settings = POSSettings.objects.create(
         business=business,
-        defaults={
-            "prices_include_tax": True,
-            "enable_stock_control": True,
-            "allow_sale_without_stock": False,
-            "allow_manual_price": True,
-            "allow_manual_discounts": True,
-            "max_manual_discount_percent": Decimal("20.00"),
-            "require_open_cash_register": True,
-            "allow_split_payments": True,
-            "require_pin_for_sensitive_actions": True,
-        },
+        prices_include_tax=True,
+        enable_stock_control=True,
+        allow_sale_without_stock=False,
+        allow_manual_price=True,
+        allow_manual_discounts=True,
+        max_manual_discount_percent=Decimal("20.00"),
+        require_open_cash_register=True,
+        allow_split_payments=True,
+        require_pin_for_sensitive_actions=True,
     )
-
-    logger.info(
-        (
-            "Bootstrap de configuración para business_id=%s "
-            "(profile_created=%s, settings_created=%s)"
-        ),
-        business.id,
-        profile_created,
-        settings_created,
-    )
-
     return profile, settings

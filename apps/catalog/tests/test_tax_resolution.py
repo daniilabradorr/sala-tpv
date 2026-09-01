@@ -5,12 +5,24 @@ from django.test import TestCase
 
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
 from apps.catalog.tests.factories import create_product, create_tax
+from apps.business_config.services import create_business_configuration
 from apps.users.tests.factories import create_business
 
 
 class ProductTaxResolutionTests(TestCase):
     def setUp(self):
         self.business = create_business()
+        create_business_configuration(
+            business=self.business,
+            legal_name="Negocio Test SL",
+            tax_identifier="B12345678",
+            phone="600123123",
+            email="fiscal@example.test",
+            address_line_1="Calle Test 1",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
 
     def test_active_product_tax_wins_over_default(self):
         default = create_tax(business=self.business, is_default=True)

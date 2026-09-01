@@ -12,7 +12,7 @@ from apps.billing.forms import (
 )
 from apps.billing.models import BillingDocumentTypeChoices, BillingSeries
 from apps.billing.services import issue_sale_document, substitute_simplified_document
-from apps.business_config.models import BusinessProfile
+from apps.business_config.services import create_business_configuration
 from apps.cash_register.test_factories import create_cash_register
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
@@ -44,18 +44,17 @@ class BillingFormsFixture(TestCase):
             business=self.business, legal_name="Cliente SL", tax_identifier="B87654321"
         )
         self.other_customer = create_sales_customer(business=self.other_business)
-        profile = BusinessProfile.objects.get(business=self.business)
-        for field, value in {
-            "legal_name": "Emisor SL",
-            "tax_identifier": "B12345678",
-            "address_line_1": "Calle 1",
-            "postal_code": "28001",
-            "city": "Madrid",
-            "province": "Madrid",
-            "country_code": "ES",
-        }.items():
-            setattr(profile, field, value)
-        profile.save()
+        create_business_configuration(
+            business=self.business,
+            legal_name="Emisor SL",
+            tax_identifier="B12345678",
+            phone="600000000",
+            email="billing@example.test",
+            address_line_1="Calle 1",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
         tax = create_sales_tax(business=self.business)
         self.product = create_sales_product(business=self.business, tax=tax)
 

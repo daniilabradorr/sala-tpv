@@ -25,7 +25,7 @@ from apps.billing.services import (
     issue_sale_document,
     substitute_simplified_document,
 )
-from apps.business_config.models import BusinessProfile
+from apps.business_config.services import create_business_configuration
 from apps.sales.models import RequestedDocumentTypeChoices, Sale, SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
@@ -46,21 +46,18 @@ class BillingEmissionServiceTests(TestCase):
         self.business = create_sales_business()
         self.store = create_sales_store(business=self.business)
         self.user = create_sales_user(business=self.business)
-        self.profile = BusinessProfile.objects.get(business=self.business)
-        for field, value in {
-            "legal_name": "Netxodo SL",
-            "tax_identifier": "B12345678",
-            "phone": "600000000",
-            "email": "billing@example.test",
-            "address_line_1": "Calle Mayor 1",
-            "address_line_2": "2.º B",
-            "postal_code": "28001",
-            "city": "Madrid",
-            "province": "Madrid",
-            "country_code": "ES",
-        }.items():
-            setattr(self.profile, field, value)
-        self.profile.save()
+        self.profile, _ = create_business_configuration(
+            business=self.business,
+            legal_name="Netxodo SL",
+            tax_identifier="B12345678",
+            phone="600000000",
+            email="billing@example.test",
+            address_line_1="Calle Mayor 1",
+            address_line_2="2.º B",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
         tax = create_sales_tax(business=self.business)
         self.product = create_sales_product(business=self.business, tax=tax)
 

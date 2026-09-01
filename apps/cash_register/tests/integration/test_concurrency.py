@@ -35,7 +35,7 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
             email="cash-concurrency-owner@test.com",
             role=RoleChoices.OWNER,
         )
-        settings = POSSettings.objects.get(business=self.business)
+        settings = POSSettings.objects.create(business=self.business)
         settings.require_pin_for_sensitive_actions = False
         settings.save()
 
