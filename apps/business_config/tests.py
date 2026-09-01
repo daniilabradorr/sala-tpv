@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
 from django.test import TestCase
 
 from apps.business_config.helpers import get_display_price, resolve_tax_rate
@@ -68,7 +67,7 @@ class BusinessConfigurationCreationTests(TestCase):
         business = Business.objects.create(name="Sala Norte")
         create_configuration(business)
 
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises(ValidationError):
             create_configuration(business)
 
         self.assertEqual(BusinessProfile.objects.filter(business=business).count(), 1)

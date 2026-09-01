@@ -29,8 +29,8 @@ def create_business_configuration(
 ):
     """Create the configuration supplied during an explicit business setup.
 
-    The one-to-one constraints deliberately reject a second configuration for
-    the same business rather than silently returning existing records.
+    Model validation rejects a second configuration for the same business
+    rather than silently returning existing records.
     """
     profile = BusinessProfile.objects.create(
         business=business,
