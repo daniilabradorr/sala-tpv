@@ -5,50 +5,79 @@ from django.test import TestCase
 
 from apps.business_config.helpers import get_display_price, resolve_tax_rate
 from apps.business_config.models import BusinessProfile, POSSettings
-from apps.business_config.services import bootstrap_business_configuration
+from apps.business_config.services import create_business_configuration
 from apps.catalog.models import Tax
 from apps.catalog.services import BusinessDefaultTaxResolutionError
 from apps.core.models import Business
 
 
-class BusinessConfigBootstrapTests(TestCase):
-    def test_signal_creates_profile_and_pos_settings_for_new_business(self):
+def create_configuration(business, **overrides):
+    data = {
+        "legal_name": "Sala Centro SL",
+        "tax_identifier": "B12345678",
+        "phone": "+34 600 123 456",
+        "email": "administracion@sala.example",
+        "address_line_1": "Calle Mayor 1",
+        "postal_code": "28001",
+        "city": "Madrid",
+        "province": "Madrid",
+    }
+    data.update(overrides)
+    return create_business_configuration(business=business, **data)
+
+
+class BusinessConfigurationCreationTests(TestCase):
+    def test_creating_business_does_not_create_configuration(self):
         business = Business.objects.create(name="Sala Centro")
 
-        self.assertTrue(BusinessProfile.objects.filter(business=business).exists())
-        self.assertTrue(POSSettings.objects.filter(business=business).exists())
+        self.assertFalse(BusinessProfile.objects.filter(business=business).exists())
+        self.assertFalse(POSSettings.objects.filter(business=business).exists())
 
-    def test_bootstrap_service_is_idempotent(self):
+    def test_service_creates_profile_with_supplied_fiscal_data(self):
+        business = Business.objects.create(name="Sala Centro")
+
+        profile, _ = create_configuration(
+            business,
+            legal_name="Sala Centro Restauración SL",
+            tax_identifier="B87654321",
+            email="fiscal@sala-centro.example",
+        )
+
+        self.assertEqual(profile.legal_name, "Sala Centro Restauración SL")
+        self.assertEqual(profile.tax_identifier, "B87654321")
+        self.assertEqual(profile.email, "fiscal@sala-centro.example")
+        self.assertEqual(profile.address_line_1, "Calle Mayor 1")
+
+    def test_service_creates_pos_settings_with_netxodo_defaults(self):
+        business = Business.objects.create(name="Sala Centro")
+
+        _, settings = create_configuration(business)
+
+        self.assertTrue(settings.prices_include_tax)
+        self.assertTrue(settings.enable_stock_control)
+        self.assertFalse(settings.allow_sale_without_stock)
+        self.assertTrue(settings.allow_manual_price)
+        self.assertTrue(settings.allow_manual_discounts)
+        self.assertEqual(settings.max_manual_discount_percent, Decimal("20.00"))
+        self.assertTrue(settings.require_open_cash_register)
+        self.assertTrue(settings.allow_split_payments)
+        self.assertTrue(settings.require_pin_for_sensitive_actions)
+
+    def test_service_does_not_create_duplicate_configuration_silently(self):
         business = Business.objects.create(name="Sala Norte")
+        create_configuration(business)
 
-        bootstrap_business_configuration(business)
-        bootstrap_business_configuration(business)
+        with self.assertRaises(ValidationError):
+            create_configuration(business)
 
         self.assertEqual(BusinessProfile.objects.filter(business=business).count(), 1)
         self.assertEqual(POSSettings.objects.filter(business=business).count(), 1)
-
-    def test_bootstrap_creates_required_fiscal_profile_fields(self):
-        business = Business.objects.create(name="Sala Centro")
-        profile = business.profile
-
-        self.assertTrue(profile.tax_identifier)
-        self.assertTrue(profile.address_line_1)
-        self.assertTrue(profile.postal_code)
-        self.assertTrue(profile.city)
-        self.assertTrue(profile.province)
-
-    def test_bootstrap_creates_pos_settings_with_stock_control_and_pin_enabled(self):
-        business = Business.objects.create(name="Sala Centro")
-        settings = business.pos_settings
-
-        self.assertTrue(settings.enable_stock_control)
-        self.assertTrue(settings.require_pin_for_sensitive_actions)
 
 
 class BusinessProfileTaxTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name="Sala Centro")
-        self.profile = self.business.profile
+        self.profile, _ = create_configuration(self.business)
 
     def test_default_tax_rate_is_21_by_default(self):
         self.assertEqual(self.profile.default_tax_rate, Decimal("21.00"))
@@ -89,8 +118,7 @@ class BusinessProfileTaxTests(TestCase):
 class POSSettingsPriceRulesTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name="Sala Centro")
-        self.profile = self.business.profile
-        self.settings = self.business.pos_settings
+        self.profile, self.settings = create_configuration(self.business)
         self.profile.default_tax_rate = Decimal("21.00")
         self.profile.save()
         Tax.objects.create(
@@ -147,6 +175,7 @@ class POSSettingsPriceRulesTests(TestCase):
 class MissingCanonicalTaxTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name="Sin configuración fiscal")
+        create_configuration(self.business)
 
     def test_pos_settings_tax_resolution_fails_closed(self):
         with self.assertRaises(BusinessDefaultTaxResolutionError):
@@ -165,6 +194,7 @@ class MissingCanonicalTaxTests(TestCase):
 
     def test_other_business_default_tax_is_not_used(self):
         other_business = Business.objects.create(name="Con configuración fiscal")
+        create_configuration(other_business, email="other@sala.example")
         Tax.objects.create(
             business=other_business,
             name="IVA 10",
@@ -180,6 +210,7 @@ class MissingCanonicalTaxTests(TestCase):
 class POSSettingsValidationTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name="Sala Centro")
+        create_configuration(self.business)
 
     def test_manual_discount_must_be_zero_when_manual_discounts_are_disabled(self):
         settings = POSSettings(
@@ -224,7 +255,7 @@ class POSSettingsValidationTests(TestCase):
 class BusinessProfileValidationTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name="Sala Centro")
-        self.profile = self.business.profile
+        self.profile, _ = create_configuration(self.business)
 
     def test_tax_identifier_is_required(self):
         self.profile.tax_identifier = ""

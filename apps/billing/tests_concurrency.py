@@ -22,7 +22,7 @@ from apps.billing.services import (
     issue_sale_return_rectification,
     substitute_simplified_document,
 )
-from apps.business_config.models import BusinessProfile
+from apps.business_config.services import create_business_configuration
 from apps.sales.models import SaleReturnStatusChoices, SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
@@ -45,17 +45,17 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.business = create_sales_business()
         self.store = create_sales_store(business=self.business)
         self.user = create_sales_user(business=self.business)
-        profile = BusinessProfile.objects.get(business=self.business)
-        profile.legal_name = "Netxodo SL"
-        profile.tax_identifier = "B12345678"
-        profile.phone = "600000000"
-        profile.email = "billing@example.test"
-        profile.address_line_1 = "Calle Mayor 1"
-        profile.postal_code = "28001"
-        profile.city = "Madrid"
-        profile.province = "Madrid"
-        profile.country_code = "ES"
-        profile.save()
+        create_business_configuration(
+            business=self.business,
+            legal_name="Netxodo SL",
+            tax_identifier="B12345678",
+            phone="600000000",
+            email="billing@example.test",
+            address_line_1="Calle Mayor 1",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
         tax = create_sales_tax(business=self.business)
         self.product = create_sales_product(business=self.business, tax=tax)
         self.series = BillingSeries.objects.create(
