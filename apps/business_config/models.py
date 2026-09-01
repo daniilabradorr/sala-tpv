@@ -80,6 +80,12 @@ class BusinessProfile(TimeStampedModel):
     class Meta:
         verbose_name = "perfil de negocio"
         verbose_name_plural = "perfiles de negocio"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country_code", "tax_identifier"],
+                name="uniq_businessprofile_country_tax_id",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         self.full_clean()
