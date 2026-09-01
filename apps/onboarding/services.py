@@ -23,6 +23,10 @@ class OnboardingDuplicateBusinessError(OnboardingError):
     """Raised when a fiscal identity has already been provisioned."""
 
 
+class OnboardingInvalidOwnerPasswordError(OnboardingError):
+    """Raised when onboarding receives no usable Owner password."""
+
+
 @dataclass(frozen=True)
 class OnboardingResult:
     business: Business
@@ -82,6 +86,11 @@ class OnboardingService:
         store_phone=None,
         store_email=None,
     ):
+        if owner_password is None or not str(owner_password).strip():
+            raise OnboardingInvalidOwnerPasswordError(
+                "La contraseña del propietario es obligatoria."
+            )
+
         normalized_country_code = (country_code or "").strip().upper()
         normalized_tax_identifier = (tax_identifier or "").strip().upper()
 

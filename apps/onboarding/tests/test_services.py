@@ -11,6 +11,7 @@ from apps.catalog.models import Tax
 from apps.core.models import Business
 from apps.onboarding.services import (
     OnboardingDuplicateBusinessError,
+    OnboardingInvalidOwnerPasswordError,
     OnboardingService,
 )
 from apps.payments.models import PaymentMethod, PaymentMethodCodeChoices
@@ -154,6 +155,18 @@ class OnboardingServiceTests(TestCase):
             OnboardingService.create_business(**self.onboarding_data(email="invalid"))
 
         self.assert_no_onboarding_records()
+
+    def test_missing_owner_password_does_not_create_onboarding_fragments(self):
+        for invalid_password in (None, "", "   "):
+            with (
+                self.subTest(owner_password=invalid_password),
+                self.assertRaises(OnboardingInvalidOwnerPasswordError),
+            ):
+                OnboardingService.create_business(
+                    **self.onboarding_data(owner_password=invalid_password)
+                )
+
+            self.assert_no_onboarding_records()
 
     def assert_no_onboarding_records(self):
         for model in (
