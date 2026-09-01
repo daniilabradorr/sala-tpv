@@ -194,7 +194,11 @@ class MissingCanonicalTaxTests(TestCase):
 
     def test_other_business_default_tax_is_not_used(self):
         other_business = Business.objects.create(name="Con configuración fiscal")
-        create_configuration(other_business, email="other@sala.example")
+        create_configuration(
+            other_business,
+            tax_identifier="B87654321",
+            email="other@sala.example",
+        )
         Tax.objects.create(
             business=other_business,
             name="IVA 10",
