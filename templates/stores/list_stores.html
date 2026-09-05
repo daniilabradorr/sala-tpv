@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Tiendas | Sala TPV{% endblock %}
+{% block content %}
+<section class="card">
+    <div class="page-heading">
+        <div><h1>Tiendas</h1><p class="intro">Establecimientos de tu negocio.</p></div>
+        {% if can_manage_stores %}<a class="button" href="{% url 'stores:store_create' %}">Crear tienda</a>{% endif %}
+    </div>
+    <div class="table-scroll"><table>
+        <thead><tr><th>Nombre</th><th>Código</th><th>Ciudad</th><th>Provincia</th><th>Teléfono</th><th>Email</th><th>Estado</th><th>Predeterminada</th><th>Acciones</th></tr></thead>
+        <tbody>
+        {% for store in stores %}
+            <tr>
+                <td>{{ store.name }}</td><td>{{ store.code }}</td><td>{{ store.city|default:"—" }}</td><td>{{ store.province|default:"—" }}</td><td>{{ store.phone_store|default:"—" }}</td><td>{{ store.email_store|default:"—" }}</td>
+                <td><span class="badge {% if store.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if store.is_active %}Activa{% else %}Inactiva{% endif %}</span></td>
+                <td>{% if store.is_default %}<span class="badge badge-default">Predeterminada</span>{% else %}<span class="badge badge-neutral">No predeterminada</span>{% endif %}</td>
+                <td><div class="table-actions"><a href="{% url 'stores:store_detail' store.pk %}">Ver</a>{% if can_manage_stores %}<a href="{% url 'stores:store_update' store.pk %}">Editar</a>{% if store.is_active and not store.is_default %}<form method="post" action="{% url 'stores:store_set_default' store.pk %}">{% csrf_token %}<button class="link-button" type="submit">Hacer predeterminada</button></form>{% endif %}{% endif %}</div></td>
+            </tr>
+        {% empty %}<tr><td colspan="9">No hay tiendas disponibles.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+    {% if is_paginated %}<nav class="pagination" aria-label="Paginación">{% if page_obj.has_previous %}<a class="button button-secondary" href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="button button-secondary" href="?page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}

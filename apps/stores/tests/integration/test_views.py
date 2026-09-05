@@ -1,11 +1,11 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 
 from apps.stores.models import Store
-from apps.users.models import RoleChoices
+from apps.users.models import RoleChoices, UserStoreAccess
 from apps.users.tests.factories import (
     create_business,
     create_store,
@@ -13,37 +13,6 @@ from apps.users.tests.factories import (
 )
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "stores/list_stores.html": "{% for store in stores %}{{ store.name }} {% endfor %}",
-                        "stores/store_detail.html": "{% for message in messages %}{{ message }} {% endfor %}{{ store.name }}",
-                        "stores/store_create.html": "{{ form.errors }}",
-                        "stores/store_update.html": "{{ form.errors }}",
-                        "stores/store_confirm_delete.html": "{{ store.name }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
 class StoreViewsIntegrationTests(TestCase):
     password = "testpass123"
 
@@ -125,6 +94,62 @@ class StoreViewsIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Tienda Centro")
         self.assertNotContains(response, "Tienda Otro Negocio")
+
+    def test_manager_list_shows_all_business_stores_without_access_rows(self):
+        second_store = create_store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+        )
+        self.login_as(self.manager)
+
+        response = self.client.get(reverse("stores:store_list"))
+
+        self.assertContains(response, self.store.name)
+        self.assertContains(response, second_store.name)
+        self.assertNotContains(response, self.other_store.name)
+
+    def test_cashier_list_only_shows_stores_with_active_access(self):
+        inaccessible_store = create_store(
+            business=self.business,
+            name="Tienda Sin Acceso",
+            code="SIN-ACCESO",
+        )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            is_active=True,
+        )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=inaccessible_store,
+            is_active=False,
+        )
+        self.login_as(self.cashier)
+
+        response = self.client.get(reverse("stores:store_list"))
+
+        self.assertContains(response, self.store.name)
+        self.assertNotContains(response, inaccessible_store.name)
+        self.assertNotContains(response, self.other_store.name)
+        self.assertNotContains(response, "Crear tienda")
+
+    def test_store_list_paginates_ten_stores(self):
+        for number in range(11):
+            create_store(
+                business=self.business,
+                name=f"Sucursal {number:02d}",
+                code=f"SUC-{number:02d}",
+            )
+        self.login_as(self.owner)
+
+        response = self.client.get(reverse("stores:store_list"))
+
+        self.assertEqual(len(response.context["stores"]), 10)
+        self.assertContains(response, "Página 1 de 2")
+        self.assertContains(response, "Siguiente")
 
     def test_owner_can_create_store_in_own_business_and_manipulated_business_is_ignored(
         self,
@@ -387,6 +412,42 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_manager_can_create_store(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("stores:store_create"), data=self.valid_store_data()
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            Store.objects.filter(
+                business=self.business, name=self.valid_store_data()["name"]
+            ).exists()
+        )
+
+    def test_manager_can_update_store(self):
+        self.login_as(self.manager)
+        data = self.valid_store_data(name="Centro actualizado")
+        data["code"] = self.store.code
+
+        response = self.client.post(
+            reverse("stores:store_update", kwargs={"pk": self.store.pk}), data=data
+        )
+
+        self.store.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.store.name, "Centro actualizado")
+
+    def test_cashier_cannot_update_store(self):
+        self.login_as(self.cashier)
+
+        response = self.client.get(
+            reverse("stores:store_update", kwargs={"pk": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_store_detail_view_works_with_pk_kwarg(self):
         self.login_as(self.owner)
 
@@ -396,6 +457,48 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Tienda Centro")
+
+    def test_manager_can_view_business_store_without_access_row(self):
+        self.login_as(self.manager)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_cashier_detail_requires_active_store_access(self):
+        self.login_as(self.cashier)
+        url = reverse("stores:store_detail", kwargs={"pk": self.store.pk})
+
+        self.assertEqual(self.client.get(url).status_code, 403)
+        UserStoreAccess.objects.create(
+            business=self.business, user=self.cashier, store=self.store
+        )
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_detail_never_allows_a_store_from_another_business(self):
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.other_store.pk})
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_mutation_endpoints_do_not_accept_get(self):
+        self.login_as(self.owner)
+
+        for route in (
+            "store_activate",
+            "store_deactivate",
+            "store_set_default",
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(
+                    reverse(f"stores:{route}", kwargs={"pk": self.store.pk})
+                )
+                self.assertEqual(response.status_code, 405)
 
     def test_manager_cannot_modify_store_from_other_business(self):
         self.login_as(self.manager)
