@@ -19,7 +19,11 @@ from apps.users.forms import (
 from django.shortcuts import redirect, get_object_or_404, render
 from django.contrib.auth.mixins import LoginRequiredMixin
 
-from apps.users.mixins import BusinessUserQuerysetMixin, ManagerOrOwnerRequiredMixin
+from apps.users.mixins import (
+    BusinessUserQuerysetMixin,
+    ManagerOrOwnerRequiredMixin,
+    TargetUserManagementRequiredMixin,
+)
 from apps.users.models import CustomUser, UserStoreAccess
 from apps.stores.models import Store
 
@@ -123,6 +127,7 @@ class UserCreateView(ManagerOrOwnerRequiredMixin, CreateView):
 
         if not self.request.user.is_superuser:
             kwargs["business"] = self.request.user.business
+        kwargs["actor"] = self.request.user
 
         return kwargs
 
@@ -148,12 +153,20 @@ class UserCreateView(ManagerOrOwnerRequiredMixin, CreateView):
 
 
 class UserUpdateView(
-    ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, UpdateView
+    ManagerOrOwnerRequiredMixin,
+    TargetUserManagementRequiredMixin,
+    BusinessUserQuerysetMixin,
+    UpdateView,
 ):
     model = CustomUser
     form_class = UserUpdateForm
     template_name = "users/user_update.html"
     context_object_name = "target_user"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["actor"] = self.request.user
+        return kwargs
 
     def form_valid(self, form):
         messages.success(self.request, "Usuario actualizado correctamente.")
@@ -163,7 +176,12 @@ class UserUpdateView(
         return reverse("users:user_detail", kwargs={"pk": self.object.pk})
 
 
-class UserDeactivateView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, View):
+class UserDeactivateView(
+    ManagerOrOwnerRequiredMixin,
+    TargetUserManagementRequiredMixin,
+    BusinessUserQuerysetMixin,
+    View,
+):
     """
     Desactiva un usuario sin borrarlo.
     Debe hacerse por POST.
@@ -186,7 +204,12 @@ class UserDeactivateView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin,
         return redirect("users:user_list")
 
 
-class UserActivateView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, View):
+class UserActivateView(
+    ManagerOrOwnerRequiredMixin,
+    TargetUserManagementRequiredMixin,
+    BusinessUserQuerysetMixin,
+    View,
+):
     """
     Reactiva un usuario desactivado.
     Debe hacerse por POST.
@@ -208,6 +231,7 @@ class UserActivateView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, V
 # GESTIÓN DE ACCESOS A TIENDAS
 class UserStoreAccessManageView(
     ManagerOrOwnerRequiredMixin,
+    TargetUserManagementRequiredMixin,
     BusinessUserQuerysetMixin,
     View,
 ):

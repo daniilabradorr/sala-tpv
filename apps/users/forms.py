@@ -1,7 +1,8 @@
 from django import forms
 from django.forms import modelformset_factory
 
-from apps.users.models import CustomUser, UserStoreAccess
+from apps.users.helpers import is_manager
+from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
 
 class UserProfileUpdateForm(forms.ModelForm):
@@ -53,12 +54,26 @@ class UserCreateForm(forms.ModelForm):
             "role",
         ]
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.business = business
+        self.actor = actor
 
         if self.business:
             self.instance.business = self.business
+
+        if is_manager(self.actor):
+            self.fields["role"].choices = [
+                choice
+                for choice in RoleChoices.choices
+                if choice[0] != RoleChoices.OWNER
+            ]
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        if is_manager(self.actor) and role == RoleChoices.OWNER:
+            raise forms.ValidationError("Un manager no puede asignar el rol owner.")
+        return role
 
     def clean(self):
         cleaned_data = super().clean()
@@ -89,6 +104,23 @@ class UserUpdateForm(forms.ModelForm):
             "role",
             "is_active",
         ]
+
+    def __init__(self, *args, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.actor = actor
+
+        if is_manager(self.actor):
+            self.fields["role"].choices = [
+                choice
+                for choice in RoleChoices.choices
+                if choice[0] != RoleChoices.OWNER
+            ]
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        if is_manager(self.actor) and role == RoleChoices.OWNER:
+            raise forms.ValidationError("Un manager no puede asignar el rol owner.")
+        return role
 
 
 class UserPinChangeForm(forms.Form):

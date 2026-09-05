@@ -15,6 +15,7 @@ from apps.users.helpers import (
     can_sell_in_store,
     can_open_cash_register,
     can_close_cash_register,
+    can_manage_user,
 )
 
 
@@ -115,6 +116,17 @@ class ManagerOrOwnerRequiredMixin(BasePermissionMixin):
 
     permission_checker = staticmethod(is_owner_or_manager)
     permission_denied_message = "Solo owner o manager pueden acceder a esta página."
+
+
+class TargetUserManagementRequiredMixin:
+    """Impide que un manager mute owners, incluso con una petición manipulada."""
+
+    def dispatch(self, request, *args, **kwargs):
+        target_user = get_object_or_404(self.get_queryset(), pk=kwargs["pk"])
+        if not can_manage_user(request.user, target_user):
+            raise PermissionDenied("No tienes permiso para gestionar este usuario.")
+
+        return super().dispatch(request, *args, **kwargs)
 
 
 class CanManageUsersMixin(BasePermissionMixin):
