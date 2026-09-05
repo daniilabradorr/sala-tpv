@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 
 from apps.stores.models import Store
-from apps.users.models import RoleChoices, UserStoreAccess
+from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 from apps.users.tests.factories import (
     create_business,
     create_store,
@@ -467,18 +467,61 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_superuser_owner_without_business_can_view_store_detail(self):
+        superuser = CustomUser.objects.create_superuser(
+            email="admin-owner@stores.com",
+            password=self.password,
+            role=RoleChoices.OWNER,
+        )
+        self.login_as(superuser)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_superuser_manager_without_business_can_view_store_detail(self):
+        superuser = CustomUser.objects.create_superuser(
+            email="admin-manager@stores.com",
+            password=self.password,
+            role=RoleChoices.MANAGER,
+        )
+        self.login_as(superuser)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_cashier_detail_requires_active_store_access(self):
         self.login_as(self.cashier)
         url = reverse("stores:store_detail", kwargs={"pk": self.store.pk})
 
         self.assertEqual(self.client.get(url).status_code, 403)
-        UserStoreAccess.objects.create(
-            business=self.business, user=self.cashier, store=self.store
+        access = UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            is_active=False,
         )
+        self.assertEqual(self.client.get(url).status_code, 403)
+        access.is_active = True
+        access.save(update_fields=["is_active", "updated_at"])
         self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_detail_never_allows_a_store_from_another_business(self):
         self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.other_store.pk})
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_manager_cannot_view_store_from_another_business(self):
+        self.login_as(self.manager)
 
         response = self.client.get(
             reverse("stores:store_detail", kwargs={"pk": self.other_store.pk})

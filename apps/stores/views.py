@@ -75,6 +75,8 @@ class StoreDetailView(StoreAccessRequiredMixin, DetailView):
     @staticmethod
     def permission_checker(user, store):
         """Managers can inspect every store in their own business."""
+        if user.is_superuser:
+            return True
         if is_owner_or_manager(user):
             return user.business_id == store.business_id
         return can_access_store(user, store)
