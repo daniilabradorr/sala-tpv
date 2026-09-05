@@ -11,10 +11,12 @@ from apps.inventory.tests.factories import (
     create_business,
     create_inventory_cashier,
     create_inventory_item,
+    create_inventory_manager,
     create_inventory_owner,
     create_inventory_product,
     create_inventory_store,
 )
+from apps.users.tests.factories import create_store_access
 
 
 @override_settings(LOGIN_URL="/users/login/")
@@ -459,3 +461,284 @@ class InventoryViewsIntegrationTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+
+
+@override_settings(LOGIN_URL="/users/login/")
+class InventoryStoreScopingIntegrationTests(TestCase):
+    """Verifica autorización por tienda en todas las superficies de Inventory."""
+
+    password = "testpass123"
+
+    def setUp(self):  # noqa: N802
+        self.business = create_business("Business A", "inventory-scope-a")
+        self.other_business = create_business("Business B", "inventory-scope-b")
+        self.store_a1 = create_inventory_store(
+            business=self.business, name="Store A1", code="SCOPEA1"
+        )
+        self.store_a2 = create_inventory_store(
+            business=self.business, name="Store A2", code="SCOPEA2"
+        )
+        self.store_b = create_inventory_store(
+            business=self.other_business, name="Store B", code="SCOPEB"
+        )
+        self.owner = create_inventory_owner(
+            business=self.business, password=self.password
+        )
+        self.manager = create_inventory_manager(
+            business=self.business, password=self.password
+        )
+        self.cashier = create_inventory_cashier(
+            business=self.business, password=self.password
+        )
+        create_store_access(self.business, self.cashier, self.store_a1)
+        self.item_a1 = self._item(self.business, self.store_a1, "Producto A1", "10")
+        self.item_a2 = self._item(self.business, self.store_a2, "Producto A2", "2")
+        self.item_b = self._item(self.other_business, self.store_b, "Producto B", "8")
+
+    def _item(self, business, store, name, stock, minimum="0"):
+        product = create_inventory_product(business=business, name=name)
+        return create_inventory_item(
+            business=business,
+            store=store,
+            product=product,
+            current_stock=Decimal(stock),
+            minimum_stock=Decimal(minimum),
+        )
+
+    def _movement(self, item):
+        is_empty = item.current_stock == 0
+        return StockMovement.objects.create(
+            business=item.business,
+            inventory_item=item,
+            store=item.store,
+            product=item.product,
+            movement_type=(
+                StockMovement.TYPE_STOCKTAKE if is_empty else StockMovement.TYPE_INITIAL
+            ),
+            quantity=Decimal("1") if is_empty else item.current_stock,
+            stock_before=Decimal("1") if is_empty else Decimal("0"),
+            stock_after=item.current_stock,
+            reference_type=StockMovement.REF_MANUAL,
+            created_by=self.owner,
+        )
+
+    def _adjustment(self, store):
+        return create_stock_adjustment(
+            business=self.business,
+            store=store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+
+    def login_as(self, user):
+        self.assertTrue(self.client.login(email=user.email, password=self.password))
+
+    def test_item_lists_follow_role_store_scope(self):
+        for user, expected in (
+            (self.owner, {self.item_a1, self.item_a2}),
+            (self.manager, {self.item_a1, self.item_a2}),
+            (self.cashier, {self.item_a1}),
+        ):
+            self.login_as(user)
+            response = self.client.get(reverse("inventory:item_list"))
+            self.assertEqual(response.status_code, 200)
+            self.assertSetEqual(set(response.context["inventory_items"]), expected)
+            self.assertNotIn(self.item_b, response.context["inventory_items"])
+            self.client.logout()
+
+    def test_cashier_item_details_are_scoped(self):
+        self.login_as(self.cashier)
+        allowed = self.client.get(
+            reverse("inventory:item_detail", kwargs={"pk": self.item_a1.pk})
+        )
+        denied = self.client.get(
+            reverse("inventory:item_detail", kwargs={"pk": self.item_a2.pk})
+        )
+        cross_business = self.client.get(
+            reverse("inventory:item_detail", kwargs={"pk": self.item_b.pk})
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(cross_business.status_code, 404)
+
+    def test_movement_lists_and_details_follow_store_scope(self):
+        movement_a1 = self._movement(self.item_a1)
+        movement_a2 = self._movement(self.item_a2)
+        self.login_as(self.cashier)
+        response = self.client.get(reverse("inventory:stock_movement_list"))
+        self.assertSetEqual(set(response.context["stock_movements"]), {movement_a1})
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "inventory:stock_movement_detail", kwargs={"pk": movement_a1.pk}
+                )
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "inventory:stock_movement_detail", kwargs={"pk": movement_a2.pk}
+                )
+            ).status_code,
+            404,
+        )
+        self.client.logout()
+        self.login_as(self.manager)
+        response = self.client.get(reverse("inventory:stock_movement_list"))
+        self.assertSetEqual(
+            set(response.context["stock_movements"]), {movement_a1, movement_a2}
+        )
+
+    def test_adjustment_lists_and_details_follow_store_scope(self):
+        adjustment_a1 = self._adjustment(self.store_a1)
+        adjustment_a2 = self._adjustment(self.store_a2)
+        self.login_as(self.cashier)
+        response = self.client.get(reverse("inventory:stock_adjustment_list"))
+        self.assertSetEqual(set(response.context["stock_adjustments"]), {adjustment_a1})
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "inventory:stock_adjustment_detail",
+                    kwargs={"pk": adjustment_a1.pk},
+                )
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "inventory:stock_adjustment_detail",
+                    kwargs={"pk": adjustment_a2.pk},
+                )
+            ).status_code,
+            404,
+        )
+        self.client.logout()
+        self.login_as(self.manager)
+        response = self.client.get(reverse("inventory:stock_adjustment_list"))
+        self.assertSetEqual(
+            set(response.context["stock_adjustments"]),
+            {adjustment_a1, adjustment_a2},
+        )
+
+    def test_cashier_dashboard_aggregates_only_accessible_stores(self):
+        self.item_a1.minimum_stock = Decimal("5")
+        self.item_a1.save(update_fields=["minimum_stock", "updated_at"])
+        self.item_a2.minimum_stock = Decimal("3")
+        self.item_a2.save(update_fields=["minimum_stock", "updated_at"])
+        self._item(self.business, self.store_a2, "Producto A2 sin stock", "0")
+        movement_a1 = self._movement(self.item_a1)
+        movement_a2 = self._movement(self.item_a2)
+        adjustment_a1 = self._adjustment(self.store_a1)
+        adjustment_a2 = self._adjustment(self.store_a2)
+        self.login_as(self.cashier)
+
+        response = self.client.get(reverse("inventory:dashboard"))
+
+        self.assertEqual(response.context["total_products_with_stock"], 1)
+        self.assertEqual(response.context["low_stock_products"], 0)
+        self.assertEqual(response.context["out_of_stock_products"], 0)
+        self.assertSequenceEqual(
+            list(response.context["latest_movements"]), [movement_a1]
+        )
+        self.assertSequenceEqual(
+            list(response.context["latest_adjustments"]), [adjustment_a1]
+        )
+        self.assertNotIn(movement_a2, response.context["latest_movements"])
+        self.assertNotIn(adjustment_a2, response.context["latest_adjustments"])
+
+    def test_filter_store_querysets_follow_role_scope(self):
+        routes = (
+            ("inventory:item_list", "form"),
+            ("inventory:stock_movement_list", "form"),
+            ("inventory:stock_adjustment_list", "form"),
+        )
+        for user, expected in (
+            (self.owner, {self.store_a1, self.store_a2}),
+            (self.manager, {self.store_a1, self.store_a2}),
+            (self.cashier, {self.store_a1}),
+        ):
+            self.login_as(user)
+            for route, context_name in routes:
+                response = self.client.get(reverse(route))
+                stores = response.context[context_name].fields["store"].queryset
+                self.assertSetEqual(set(stores), expected)
+                self.assertNotIn(self.store_b, stores)
+            self.client.logout()
+
+    def test_cashier_cannot_use_any_inventory_mutation(self):
+        adjustment = self._adjustment(self.store_a1)
+        line = add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item_a1,
+            counted_stock=self.item_a1.current_stock,
+        )
+        self.login_as(self.cashier)
+        endpoints = (
+            reverse("inventory:item_create"),
+            reverse("inventory:item_update", kwargs={"pk": self.item_a1.pk}),
+            reverse("inventory:item_initial_stock", kwargs={"pk": self.item_a1.pk}),
+            reverse("inventory:stock_adjustment_create"),
+            reverse(
+                "inventory:stock_adjustment_line_create",
+                kwargs={"adjustment_pk": adjustment.pk},
+            ),
+            reverse(
+                "inventory:stock_adjustment_line_update",
+                kwargs={"adjustment_pk": adjustment.pk, "line_pk": line.pk},
+            ),
+            reverse(
+                "inventory:stock_adjustment_line_delete",
+                kwargs={"adjustment_pk": adjustment.pk, "line_pk": line.pk},
+            ),
+            reverse("inventory:stock_adjustment_confirm", kwargs={"pk": adjustment.pk}),
+            reverse("inventory:stock_adjustment_cancel", kwargs={"pk": adjustment.pk}),
+        )
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self.client.post(endpoint).status_code, 403)
+
+    def test_initial_stock_action_visibility(self):
+        empty_item = self._item(self.business, self.store_a1, "Producto inicial", "0")
+        for user in (self.owner, self.manager):
+            self.login_as(user)
+            response = self.client.get(
+                reverse("inventory:item_detail", kwargs={"pk": empty_item.pk})
+            )
+            self.assertIs(response.context["can_load_initial_stock"], True)
+            self.assertContains(response, "Cargar stock inicial")
+            self.client.logout()
+        self._movement(empty_item)
+        self.login_as(self.owner)
+        response = self.client.get(
+            reverse("inventory:item_detail", kwargs={"pk": empty_item.pk})
+        )
+        self.assertIs(response.context["can_load_initial_stock"], False)
+        self.client.logout()
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("inventory:item_detail", kwargs={"pk": empty_item.pk})
+        )
+        self.assertIs(response.context["can_load_initial_stock"], False)
+        self.assertNotContains(response, "Cargar stock inicial")
+
+    def test_post_only_action_endpoints_reject_get(self):
+        adjustment = self._adjustment(self.store_a1)
+        line = add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item_a1,
+            counted_stock=self.item_a1.current_stock,
+        )
+        self.login_as(self.owner)
+        endpoints = (
+            reverse(
+                "inventory:stock_adjustment_line_delete",
+                kwargs={"adjustment_pk": adjustment.pk, "line_pk": line.pk},
+            ),
+            reverse("inventory:stock_adjustment_confirm", kwargs={"pk": adjustment.pk}),
+            reverse("inventory:stock_adjustment_cancel", kwargs={"pk": adjustment.pk}),
+        )
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self.client.get(endpoint).status_code, 405)

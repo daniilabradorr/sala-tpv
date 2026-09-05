@@ -21,16 +21,20 @@ from apps.stores.selectors import (
     get_stores_available_for_user,
     get_stores_for_business,
 )
+from apps.stores.models import Store
 
 
 def get_inventory_visible_stores(user, *, only_active=None):
     """Stores visible in Inventory under its owner/manager/cashier contract."""
     if user is None or not user.is_authenticated or not user.is_active:
-        from apps.stores.models import Store
-
         return Store.objects.none()
     if user.is_superuser:
-        return get_stores_available_for_user(user=user, only_active=only_active is True)
+        stores = Store.objects.select_related("business")
+        if only_active is True:
+            stores = stores.filter(is_active=True)
+        elif only_active is False:
+            stores = stores.filter(is_active=False)
+        return stores.order_by("name", "pk")
     if not getattr(user, "business_id", None):
         return get_stores_for_business(business=None)
     if user.role in {"owner", "manager"}:
