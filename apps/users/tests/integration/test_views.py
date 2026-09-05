@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -10,42 +10,6 @@ from apps.users.tests.factories import (
 )
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "users/login.html": "{{ form.errors }}",
-                        "users/profile.html": "{{ object.email }}",
-                        "users/profile_update.html": "{{ form.errors }}",
-                        "users/password_change.html": "{{ form.errors }}",
-                        "users/pin_change.html": "{{ form.errors }}",
-                        "users/user_list.html": "{% for user in users %}{{ user.email }} {% endfor %}",
-                        "users/user_detail.html": "{{ target_user.email }}",
-                        "users/user_create.html": "{{ form.errors }}",
-                        "users/user_update.html": "{{ form.errors }}",
-                        "users/user_store_access_manage.html": "{{ formset.errors }} {{ formset.non_form_errors }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
 class UserViewsIntegrationTests(TestCase):
     password = "testpass123"
 
@@ -142,6 +106,7 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertEqual(bad_response.status_code, 200)
         self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertContains(bad_response, "errorlist")
 
         good_response = self.client.post(
             url,
@@ -288,6 +253,9 @@ class UserViewsIntegrationTests(TestCase):
         )
         self.assertNotEqual(self.owner.pin_hash, "1234")
         self.assertTrue(self.owner.check_pin("1234"))
+
+        profile_response = self.client.get(reverse("users:profile"))
+        self.assertNotContains(profile_response, "1234")
 
     # ============================================================
     # LISTADO Y DETALLE DE USUARIOS
@@ -861,3 +829,21 @@ class UserViewsIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_login_get_renders_real_template(self):
+        response = self.client.get(reverse("users:login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "users/login.html")
+        self.assertContains(response, "Iniciar sesión")
+
+    def test_login_without_next_redirects_to_profile(self):
+        response = self.client.post(
+            reverse("users:login"),
+            {"username": self.owner.email, "password": self.password},
+        )
+
+        self.assertRedirects(
+            response, reverse("users:profile"), fetch_redirect_response=False
+        )
+        self.assertIn("_auth_user_id", self.client.session)
