@@ -19,7 +19,7 @@ from apps.inventory.tests.factories import (
     create_inventory_product,
     create_inventory_store,
 )
-from apps.users.models import CustomUser
+from apps.users.models import CustomUser, RoleChoices
 from apps.users.tests.factories import create_store_access
 
 
@@ -111,7 +111,9 @@ class InventoryVisibleStoresTests(TestCase):
         create_store_access(self.business, self.cashier, self.active_store)
         create_store_access(self.business, self.cashier, self.inactive_store)
         self.superuser = CustomUser.objects.create_superuser(
-            email="admin-inventory@test.com", password="testpass123"
+            email="admin-inventory@test.com",
+            password="testpass123",
+            role=RoleChoices.OWNER,
         )
 
     def assert_scope(self, user, all_stores, active_stores, inactive_stores):
