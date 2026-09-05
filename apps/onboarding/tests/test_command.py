@@ -41,7 +41,7 @@ class CreateBusinessOwnerCommandTests(TestCase):
             "owner_first_name": "Ana",
             "owner_last_name": "García",
             "owner_email": "owner1@example.com",
-            "owner_phone": "+34600000000",
+            "owner_phone": "600000000",
             "owner_password": "A-secure-password-123",
             "owner_pin": "1234",
         }
@@ -129,6 +129,26 @@ class CreateBusinessOwnerCommandTests(TestCase):
         output = stdout.getvalue()
         self.assertNotIn(self.arguments["owner_password"], output)
         self.assertNotIn(self.arguments["owner_pin"], output)
+
+    def test_empty_pin_becomes_command_error_and_rolls_back(self):
+        arguments = {**self.arguments, "owner_pin": ""}
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "El PIN del propietario es obligatorio.",
+        ):
+            call_command("create_business_owner", stdout=StringIO(), **arguments)
+
+        self.assertEqual(Business.objects.count(), 0)
+        self.assertEqual(BusinessProfile.objects.count(), 0)
+        self.assertEqual(POSSettings.objects.count(), 0)
+        self.assertEqual(Tax.objects.count(), 0)
+        self.assertEqual(Store.objects.count(), 0)
+        self.assertEqual(CustomUser.objects.count(), 0)
+        self.assertEqual(CashRegister.objects.count(), 0)
+        self.assertEqual(CashSession.objects.count(), 0)
+        self.assertEqual(PaymentMethod.objects.count(), 0)
+        self.assertEqual(BillingSeries.objects.count(), 0)
 
     def test_same_trade_name_provisions_businesses_with_distinct_slugs(self):
         call_command("create_business_owner", stdout=StringIO(), **self.arguments)

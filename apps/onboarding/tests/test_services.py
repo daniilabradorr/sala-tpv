@@ -12,6 +12,7 @@ from apps.core.models import Business
 from apps.onboarding.services import (
     OnboardingDuplicateBusinessError,
     OnboardingInvalidOwnerPasswordError,
+    OnboardingInvalidOwnerPinError,
     OnboardingService,
 )
 from apps.payments.models import PaymentMethod, PaymentMethodCodeChoices
@@ -164,6 +165,18 @@ class OnboardingServiceTests(TestCase):
             ):
                 OnboardingService.create_business(
                     **self.onboarding_data(owner_password=invalid_password)
+                )
+
+            self.assert_no_onboarding_records()
+
+    def test_missing_owner_pin_does_not_create_onboarding_fragments(self):
+        for invalid_pin in (None, "", "   "):
+            with (
+                self.subTest(owner_pin=invalid_pin),
+                self.assertRaises(OnboardingInvalidOwnerPinError),
+            ):
+                OnboardingService.create_business(
+                    **self.onboarding_data(owner_pin=invalid_pin)
                 )
 
             self.assert_no_onboarding_records()
