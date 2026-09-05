@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ store.name }} | Sala TPV{% endblock %}
+{% block content %}
+<section class="card">
+    <div class="page-heading"><div><h1>{{ store.name }}</h1><p class="intro">Información de la tienda.</p></div><a class="button button-secondary" href="{% url 'stores:store_list' %}">Volver a tiendas</a></div>
+    <div class="status-line"><span class="badge {% if store.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if store.is_active %}Activa{% else %}Inactiva{% endif %}</span>{% if store.is_default %}<span class="badge badge-default">Predeterminada</span>{% else %}<span class="badge badge-neutral">No predeterminada</span>{% endif %}</div>
+    <dl class="details-grid">
+        <div><dt>Nombre</dt><dd>{{ store.name }}</dd></div><div><dt>Código</dt><dd>{{ store.code }}</dd></div>
+        <div><dt>Dirección principal</dt><dd>{{ store.address_line_1|default:"—" }}</dd></div><div><dt>Dirección secundaria</dt><dd>{{ store.address_line_2|default:"—" }}</dd></div>
+        <div><dt>Código postal</dt><dd>{{ store.postal_code|default:"—" }}</dd></div><div><dt>Ciudad</dt><dd>{{ store.city|default:"—" }}</dd></div>
+        <div><dt>Provincia</dt><dd>{{ store.province|default:"—" }}</dd></div><div><dt>País</dt><dd>{{ store.country_code }}</dd></div>
+        <div><dt>Teléfono</dt><dd>{{ store.phone_store|default:"—" }}</dd></div><div><dt>Email</dt><dd>{{ store.email_store|default:"—" }}</dd></div>
+    </dl>
+    {% if can_manage_stores %}<div class="actions">
+        <a class="button button-secondary" href="{% url 'stores:store_update' store.pk %}">Editar</a>
+        {% if store.is_active %}<form method="post" action="{% url 'stores:store_deactivate' store.pk %}">{% csrf_token %}<button class="button button-secondary" type="submit">Desactivar</button></form>{% else %}<form method="post" action="{% url 'stores:store_activate' store.pk %}">{% csrf_token %}<button class="button" type="submit">Reactivar</button></form>{% endif %}
+        {% if store.is_active and not store.is_default %}<form method="post" action="{% url 'stores:store_set_default' store.pk %}">{% csrf_token %}<button class="button button-secondary" type="submit">Hacer predeterminada</button></form>{% endif %}
+        <a class="button button-danger" href="{% url 'stores:store_delete' store.pk %}">Eliminar</a>
+    </div>{% endif %}
+</section>
+{% endblock %}

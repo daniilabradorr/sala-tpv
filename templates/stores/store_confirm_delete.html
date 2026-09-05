@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Eliminar {{ store.name }} | Sala TPV{% endblock %}
+{% block content %}<section class="card card-narrow"><h1>¿Eliminar “{{ store.name }}”?</h1><div class="delete-warning" role="alert"><strong>Esta operación elimina físicamente la tienda si el sistema lo permite.</strong><p>Eliminar es solo para una tienda creada por error. Si contiene histórico o datos relacionados, Netxodo impedirá el borrado y deberá desactivarse.</p></div><form method="post">{% csrf_token %}<div class="actions"><a class="button button-secondary" href="{% url 'stores:store_detail' store.pk %}">Cancelar</a><button class="button button-danger" type="submit">Eliminar tienda</button></div></form></section>{% endblock %}

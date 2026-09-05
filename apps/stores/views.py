@@ -13,6 +13,10 @@ from django.views.generic import (
 
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 from apps.stores.models import Store
+from apps.stores.selectors import (
+    get_stores_available_for_user,
+    get_stores_for_business,
+)
 from apps.stores.services import (
     activate_store,
     deactivate_store,
@@ -24,6 +28,7 @@ from apps.users.mixins import (
     ManagerOrOwnerRequiredMixin,
     StoreAccessRequiredMixin,
 )
+from apps.users.helpers import can_access_store, is_owner_or_manager
 
 
 class ListStoresView(BusinessRequiredMixin, ListView):
@@ -33,15 +38,22 @@ class ListStoresView(BusinessRequiredMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        """
-        Devuelve únicamente las tiendas pertenecientes al negocio
-        del usuario autenticado.
-        """
-        queryset = super().get_queryset()
+        """Limita las tiendas por empresa y, para cashiers, por acceso activo."""
+        user = self.request.user
+        if user.is_superuser:
+            return super().get_queryset().select_related("business")
 
-        return queryset.filter(
-            business=self.request.user.business,
+        if is_owner_or_manager(user):
+            return get_stores_for_business(business=user.business)
+
+        return get_stores_available_for_user(user=user, only_active=False)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["can_manage_stores"] = self.request.user.is_superuser or (
+            is_owner_or_manager(self.request.user)
         )
+        return context
 
 
 class StoreDetailView(StoreAccessRequiredMixin, DetailView):
@@ -59,6 +71,22 @@ class StoreDetailView(StoreAccessRequiredMixin, DetailView):
     # El mixin busca por defecto un parámetro llamado store_id,
     # pero nuestras URLs utilizan <int:pk>.
     store_kwarg = "pk"
+
+    @staticmethod
+    def permission_checker(user, store):
+        """Managers can inspect every store in their own business."""
+        if user.is_superuser:
+            return True
+        if is_owner_or_manager(user):
+            return user.business_id == store.business_id
+        return can_access_store(user, store)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["can_manage_stores"] = self.request.user.is_superuser or (
+            is_owner_or_manager(self.request.user)
+        )
+        return context
 
     def get_queryset(self):
         """
