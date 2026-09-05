@@ -17,49 +17,7 @@ from apps.inventory.tests.factories import (
 )
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "inventory/dashboard.html": "dashboard",
-                        "inventory/item_list.html": (
-                            "{% for i in inventory_items %}{{ i.id }} {% endfor %}"
-                        ),
-                        "inventory/item_detail.html": "{{ inventory_item.id }}",
-                        "inventory/item_form.html": "{{ form.errors }}",
-                        "inventory/initial_stock_form.html": "{{ form.errors }}",
-                        "inventory/stock_movement_list.html": (
-                            "{% for m in stock_movements %}{{ m.id }} {% endfor %}"
-                        ),
-                        "inventory/stock_movement_detail.html": "{{ stock_movement.id }}",
-                        "inventory/stock_adjustment_list.html": (
-                            "{% for a in stock_adjustments %}{{ a.id }} {% endfor %}"
-                        ),
-                        "inventory/stock_adjustment_detail.html": "{{ stock_adjustment.id }}",
-                        "inventory/stock_adjustment_form.html": "{{ form.errors }}",
-                        "inventory/stock_adjustment_line_form.html": "{{ form.errors }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
+@override_settings(LOGIN_URL="/users/login/")
 class InventoryViewsIntegrationTests(TestCase):
     """Valida flujos principales HTTP del modulo inventory."""
 
@@ -308,6 +266,7 @@ class InventoryViewsIntegrationTests(TestCase):
         response = self.client.get(reverse("inventory:item_list"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "inventory/item_list.html")
         self.assertEqual(len(response.context["inventory_items"]), 1)
 
     def test_owner_can_update_inventory_item_settings(self):

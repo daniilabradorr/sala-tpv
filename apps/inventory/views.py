@@ -31,6 +31,7 @@ from apps.inventory.selectors import (
     get_inventory_item_detail,
     get_inventory_item_latest_movements,
     get_inventory_items_for_business,
+    get_inventory_visible_stores,
     get_stock_adjustment_detail,
     get_stock_adjustment_lines,
     get_stock_adjustments_for_business,
@@ -111,6 +112,7 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
 
         dashboard_data = get_inventory_dashboard_data(
             request.user.business,
+            stores=get_inventory_visible_stores(request.user),
             latest_movements_limit=self.latest_movements_limit,
             latest_adjustments_limit=self.latest_adjustments_limit,
         )
@@ -134,6 +136,7 @@ class InventoryItemListView(BusinessRequiredMixin, View):
         form = InventoryItemFilterForm(
             request.GET or None,
             business=request.user.business,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         filters = {}
@@ -150,6 +153,7 @@ class InventoryItemListView(BusinessRequiredMixin, View):
         inventory_items = get_inventory_items_for_business(
             business=request.user.business,
             filters=filters,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         context = {
@@ -171,6 +175,7 @@ class InventoryItemDetailView(BusinessRequiredMixin, View):
         inventory_item = get_inventory_item_detail(
             business=request.user.business,
             pk=pk,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         latest_movements = get_inventory_item_latest_movements(
@@ -187,6 +192,17 @@ class InventoryItemDetailView(BusinessRequiredMixin, View):
             "inventory_item": inventory_item,
             "latest_movements": latest_movements,
             "adjustment_lines": adjustment_lines,
+            "can_manage_inventory": request.user.is_superuser
+            or request.user.role in {"owner", "manager"},
+            "can_load_initial_stock": (
+                inventory_item.is_active
+                and inventory_item.current_stock == 0
+                and not latest_movements
+                and (
+                    request.user.is_superuser
+                    or request.user.role in {"owner", "manager"}
+                )
+            ),
         }
 
         return render(request, self.template_name, context)
@@ -429,6 +445,7 @@ class StockMovementListView(BusinessRequiredMixin, View):
         form = StockMovementFilterForm(
             request.GET or None,
             business=request.user.business,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         filters = {}
@@ -445,6 +462,7 @@ class StockMovementListView(BusinessRequiredMixin, View):
         stock_movements = get_stock_movements_for_business(
             business=request.user.business,
             filters=filters,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         context = {
@@ -469,6 +487,7 @@ class StockMovementDetailView(BusinessRequiredMixin, View):
         stock_movement = get_stock_movement_detail(
             business=request.user.business,
             pk=pk,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         context = {
@@ -494,6 +513,7 @@ class StockAdjustmentListView(BusinessRequiredMixin, View):
         form = StockAdjustmentFilterForm(
             request.GET or None,
             business=request.user.business,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         filters = {}
@@ -510,6 +530,7 @@ class StockAdjustmentListView(BusinessRequiredMixin, View):
         stock_adjustments = get_stock_adjustments_for_business(
             business=request.user.business,
             filters=filters,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         context = {
@@ -531,6 +552,7 @@ class StockAdjustmentDetailView(BusinessRequiredMixin, View):
         stock_adjustment = get_stock_adjustment_detail(
             business=request.user.business,
             pk=pk,
+            stores=get_inventory_visible_stores(request.user),
         )
 
         lines = get_stock_adjustment_lines(
@@ -548,6 +570,8 @@ class StockAdjustmentDetailView(BusinessRequiredMixin, View):
             "stock_adjustment": stock_adjustment,
             "lines": lines,
             "confirm_form": confirm_form,
+            "can_manage_inventory": request.user.is_superuser
+            or request.user.role in {"owner", "manager"},
         }
 
         return render(request, self.template_name, context)

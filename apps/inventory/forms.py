@@ -82,7 +82,7 @@ class InventoryItemFilterForm(forms.Form):
         widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -91,9 +91,11 @@ class InventoryItemFilterForm(forms.Form):
             return
 
         # En filtros permitimos ver tiendas históricas aunque estén inactivas.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
         # En filtros permitimos ver productos físicos con control de stock,
         # aunque estén inactivos, porque pueden tener histórico.
@@ -169,7 +171,7 @@ class InventoryItemCreateForm(forms.ModelForm):
             "location": "Ubicación interna del producto. Opcional.",
         }
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -573,7 +575,7 @@ class StockMovementFilterForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -592,9 +594,11 @@ class StockMovementFilterForm(forms.Form):
             return
 
         # En filtros dejamos ver histórico aunque la tienda esté inactiva.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
         # En filtros dejamos ver histórico aunque el producto esté inactivo.
         self.fields["product"].queryset = Product.objects.filter(
@@ -669,7 +673,7 @@ class StockAdjustmentFilterForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -688,9 +692,11 @@ class StockAdjustmentFilterForm(forms.Form):
             return
 
         # En filtros dejamos ver histórico aunque la tienda esté inactiva.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
     def clean(self):
         cleaned_data = super().clean()
@@ -749,7 +755,7 @@ class StockAdjustmentCreateForm(forms.ModelForm):
             "notes": "Notas internas opcionales.",
         }
 
-    def __init__(self, *args, business=None, user=None, **kwargs):
+    def __init__(self, *args, business=None, user=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -767,10 +773,13 @@ class StockAdjustmentCreateForm(forms.ModelForm):
             self.instance.created_by = self.user
 
         # En creación sí exigimos tienda activa.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-            is_active=True,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores.filter(is_active=True)
+            if stores is not None
+            else Store.objects.filter(business=self.business, is_active=True).order_by(
+                "name"
+            )
+        )
 
     def clean_store(self):
         store = self.cleaned_data.get("store")
