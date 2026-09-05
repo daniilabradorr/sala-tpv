@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Catálogo | Sala TPV{% endblock %}{% block content %}
+<section class="card"><h1>Catálogo</h1><p>Gestiona lo que vende tu negocio.</p>
+<div class="catalog-grid">
+<article class="card"><h2>Categorías</h2><p>Organiza los productos del catálogo.</p><a class="button button-secondary" href="{% url 'catalog:category_list' %}">Ver categorías</a></article>
+<article class="card"><h2>Impuestos</h2><p>Configura los tratamientos fiscales actuales.</p><a class="button button-secondary" href="{% url 'catalog:tax_list' %}">Ver impuestos</a></article>
+<article class="card"><h2>Productos</h2><p>Productos y servicios que puedes vender.</p><a class="button button-secondary" href="{% url 'catalog:product_list' %}">Ver productos</a></article>
+</div></section>{% endblock %}

@@ -293,7 +293,6 @@ class TaxUpdateForm(TaxBaseForm):
             "operacion_exenta",
             "has_equivalence_surcharge",
             "equivalence_surcharge_rate",
-            "is_active",
         ]
 
 

@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 from decimal import Decimal
 from apps.catalog.models import Category, Tax, Product
@@ -7,42 +7,6 @@ from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_business, create_user
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "catalog/dashboard.html": "{{ page_title }}",
-                        "catalog/categories/category_list.html": "{% for category in categories %}{{ category.name }} {% endfor %}",
-                        "catalog/categories/category_detail.html": "{{ category.name }}",
-                        "catalog/categories/category_form.html": "{{ form.errors }}",
-                        "catalog/taxes/tax_list.html": "{% for tax in taxes %}{{ tax.name }} {% endfor %}",
-                        "catalog/taxes/tax_detail.html": "{{ tax.name }}",
-                        "catalog/taxes/tax_form.html": "{{ form.errors }}",
-                        "catalog/products/product_list.html": "{% for product in products %}{{ product.name }} {% endfor %}",
-                        "catalog/products/product_detail.html": "{{ product.name }}",
-                        "catalog/products/product_form.html": "{{ form.errors }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
 class CatalogViewsIntegrationTests(TestCase):
     password = "testpass123"
 
@@ -174,7 +138,10 @@ class CatalogViewsIntegrationTests(TestCase):
         response = self.client.get(reverse("catalog:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Dashboard del catálogo")
+        self.assertTemplateUsed(response, "catalog/dashboard.html")
+        self.assertContains(response, "Ver categorías")
+        self.assertContains(response, "Ver impuestos")
+        self.assertContains(response, "Ver productos")
 
     def test_category_list_only_shows_categories_from_current_business(self):
         self.login_as(self.cashier)
@@ -367,6 +334,38 @@ class CatalogViewsIntegrationTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertTrue(self.tax.is_active)
+
+    def test_default_tax_cannot_be_deactivated_through_update(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("catalog:tax_update", kwargs={"pk": self.tax.pk}),
+            data={**self.valid_tax_data(name=self.tax.name, code=self.tax.code)},
+        )
+
+        self.tax.refresh_from_db()
+        self.assertRedirects(
+            response,
+            reverse("catalog:tax_detail", kwargs={"pk": self.tax.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(self.tax.is_active)
+
+    def test_mutation_endpoints_reject_get(self):
+        self.login_as(self.owner)
+        urls = [
+            reverse("catalog:category_activate", kwargs={"pk": self.category.pk}),
+            reverse("catalog:category_deactivate", kwargs={"pk": self.category.pk}),
+            reverse("catalog:tax_activate", kwargs={"pk": self.tax.pk}),
+            reverse("catalog:tax_deactivate", kwargs={"pk": self.tax.pk}),
+            reverse("catalog:tax_set_default", kwargs={"pk": self.tax.pk}),
+            reverse("catalog:product_activate", kwargs={"pk": self.product.pk}),
+            reverse("catalog:product_deactivate", kwargs={"pk": self.product.pk}),
+        ]
+
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 405)
 
     def test_non_default_tax_can_be_deactivated_and_activated(self):
         self.login_as(self.owner)
