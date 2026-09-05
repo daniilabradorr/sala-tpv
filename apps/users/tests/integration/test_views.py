@@ -928,6 +928,42 @@ class UserViewsIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.manager.role, RoleChoices.MANAGER)
 
+    def test_owner_cannot_deactivate_self_through_update(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.owner.pk}),
+            data={
+                "first_name": self.owner.first_name,
+                "last_name": self.owner.last_name,
+                "phone": self.owner.phone,
+                "role": self.owner.role,
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.owner.is_active)
+        self.assertIn("is_active", response.context["form"].errors)
+
+    def test_manager_cannot_deactivate_self_through_update(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.manager.pk}),
+            data={
+                "first_name": self.manager.first_name,
+                "last_name": self.manager.last_name,
+                "phone": self.manager.phone,
+                "role": self.manager.role,
+            },
+        )
+
+        self.manager.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.manager.is_active)
+        self.assertIn("is_active", response.context["form"].errors)
+
     def test_manager_cannot_update_owner(self):
         self.login_as(self.manager)
         original_name = self.owner.first_name

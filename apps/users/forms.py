@@ -122,6 +122,16 @@ class UserUpdateForm(forms.ModelForm):
             raise forms.ValidationError("Un manager no puede asignar el rol owner.")
         return role
 
+    def clean_is_active(self):
+        is_active = self.cleaned_data["is_active"]
+        if (
+            self.actor is not None
+            and self.actor.pk == self.instance.pk
+            and not is_active
+        ):
+            raise forms.ValidationError("No puedes desactivar tu propio usuario.")
+        return is_active
+
 
 class UserPinChangeForm(forms.Form):
     """
