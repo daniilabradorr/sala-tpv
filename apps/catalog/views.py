@@ -25,6 +25,7 @@ from apps.users.mixins import (
     BusinessRequiredMixin,
     BusinessScopedQuerysetMixin,
 )
+from apps.users.helpers import is_owner_or_manager
 
 
 class PageTitleMixin:
@@ -40,6 +41,7 @@ class PageTitleMixin:
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["page_title"] = self.page_title
+        context["can_manage_catalog"] = is_owner_or_manager(self.request.user)
         return context
 
 

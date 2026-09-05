@@ -163,4 +163,9 @@ th { color: var(--muted); font-size: .8rem; text-transform: uppercase; }
 .access-row legend { padding: 0 .4rem; font-weight: 700; }
 .form-field-inline { align-content: start; }
 .form-field-inline input[type="checkbox"] { width: 1.15rem; height: 1.15rem; }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.catalog-grid .card { display: flex; flex-direction: column; box-shadow: none; }
+.catalog-grid .card h2 { margin: 0 0 .5rem; }
+.catalog-grid .card .button { align-self: flex-start; margin-top: 1.25rem; }
+.catalog-note { margin-top: 1rem; padding: .8rem 1rem; border-left: 4px solid var(--primary); background: #eff6ff; color: #1e3a8a; }
 @media (max-width: 760px) { .site-header .container, .page-heading { align-items: flex-start; flex-direction: column; } .access-row { grid-template-columns: 1fr; } .site-nav { gap: .75rem; } th, td { padding: .65rem; } .actions .button, .actions form { width: 100%; } .actions form .button { width: 100%; } }
