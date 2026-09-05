@@ -27,6 +27,10 @@ class OnboardingInvalidOwnerPasswordError(OnboardingError):
     """Raised when onboarding receives no usable Owner password."""
 
 
+class OnboardingInvalidOwnerPinError(OnboardingError):
+    """Raised when onboarding receives no usable Owner PIN."""
+
+
 @dataclass(frozen=True)
 class OnboardingResult:
     business: Business
@@ -89,6 +93,10 @@ class OnboardingService:
         if owner_password is None or not str(owner_password).strip():
             raise OnboardingInvalidOwnerPasswordError(
                 "La contraseña del propietario es obligatoria."
+            )
+        if owner_pin is None or not str(owner_pin).strip():
+            raise OnboardingInvalidOwnerPinError(
+                "El PIN del propietario es obligatorio."
             )
 
         normalized_country_code = (country_code or "").strip().upper()
