@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.core.isolation import validate_same_business
@@ -13,12 +14,48 @@ class BusinessModelTests(TestCase):
 
         self.assertEqual(business.slug, "sala-centro")
 
+    def test_generated_slug_uses_incremental_suffix_for_duplicate_names(self):
+        business_1 = Business.objects.create(name="Sala Centro")
+        business_2 = Business.objects.create(name="Sala Centro")
+        business_3 = Business.objects.create(name="Sala Centro")
+
+        self.assertEqual(business_1.slug, "sala-centro")
+        self.assertEqual(business_2.slug, "sala-centro-2")
+        self.assertEqual(business_3.slug, "sala-centro-3")
+
+    def test_generated_slug_respects_max_length(self):
+        long_name = "a" * 255
+
+        first = Business.objects.create(name=long_name)
+        second = Business.objects.create(name=long_name)
+
+        self.assertEqual(first.slug, long_name)
+        self.assertEqual(second.slug, f"{'a' * 253}-2")
+
+    def test_generated_slug_uses_fallback_when_name_cannot_be_slugified(self):
+        business = Business.objects.create(name="你好")
+
+        self.assertEqual(business.slug, "business")
+
+    def test_slug_remains_stable_when_name_changes(self):
+        business = Business.objects.create(name="Café Central")
+
+        business.name = "Café Central Salamanca"
+        business.save()
+
+        self.assertEqual(business.slug, "cafe-central")
+
     def test_slug_must_be_unique(self):
         Business.objects.create(name="Sala Centro", slug="sala-centro")
         duplicate = Business(name="Otra Sala", slug="sala-centro")
 
         with self.assertRaises(ValidationError):
             duplicate.full_clean()
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Business.objects.bulk_create(
+                [Business(name="Otra Sala", slug="sala-centro")]
+            )
 
     def test_active_and_inactive_scopes(self):
         active = Business.objects.create(name="Sala Centro", slug="sala-centro")
