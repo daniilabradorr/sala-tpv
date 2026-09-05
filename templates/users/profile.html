@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Mi perfil | Sala TPV{% endblock %}
+{% block content %}
+<section class="card">
+    <div class="page-heading"><div><h1>Mi perfil</h1><p class="intro">Datos de tu cuenta.</p></div><span class="badge {% if user.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if user.is_active %}Activo{% else %}Inactivo{% endif %}</span></div>
+    <dl class="details-grid">
+        <div><dt>Nombre</dt><dd>{{ user.first_name|default:"—" }}</dd></div>
+        <div><dt>Apellidos</dt><dd>{{ user.last_name|default:"—" }}</dd></div>
+        <div><dt>Correo electrónico</dt><dd>{{ user.email }}</dd></div>
+        <div><dt>Teléfono</dt><dd>{{ user.phone|default:"—" }}</dd></div>
+        <div><dt>Rol</dt><dd>{{ user.get_role_display }}</dd></div>
+        <div><dt>Negocio</dt><dd>{{ user.business|default:"—" }}</dd></div>
+    </dl>
+    <div class="actions">
+        <a class="button" href="{% url 'users:profile_update' %}">Editar perfil</a>
+        <a class="button button-secondary" href="{% url 'users:password_change' %}">Cambiar contraseña</a>
+        <a class="button button-secondary" href="{% url 'users:pin_change' %}">Cambiar PIN</a>
+        {% if user.is_superuser or user.role == 'owner' or user.role == 'manager' %}<a class="button button-secondary" href="{% url 'users:user_list' %}">Gestión de usuarios</a>{% endif %}
+    </div>
+</section>
+{% endblock %}

@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -10,42 +10,6 @@ from apps.users.tests.factories import (
 )
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "users/login.html": "{{ form.errors }}",
-                        "users/profile.html": "{{ object.email }}",
-                        "users/profile_update.html": "{{ form.errors }}",
-                        "users/password_change.html": "{{ form.errors }}",
-                        "users/pin_change.html": "{{ form.errors }}",
-                        "users/user_list.html": "{% for user in users %}{{ user.email }} {% endfor %}",
-                        "users/user_detail.html": "{{ target_user.email }}",
-                        "users/user_create.html": "{{ form.errors }}",
-                        "users/user_update.html": "{{ form.errors }}",
-                        "users/user_store_access_manage.html": "{{ formset.errors }} {{ formset.non_form_errors }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
 class UserViewsIntegrationTests(TestCase):
     password = "testpass123"
 
@@ -142,6 +106,7 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertEqual(bad_response.status_code, 200)
         self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertContains(bad_response, "errorlist")
 
         good_response = self.client.post(
             url,
@@ -288,6 +253,9 @@ class UserViewsIntegrationTests(TestCase):
         )
         self.assertNotEqual(self.owner.pin_hash, "1234")
         self.assertTrue(self.owner.check_pin("1234"))
+
+        profile_response = self.client.get(reverse("users:profile"))
+        self.assertNotContains(profile_response, "1234")
 
     # ============================================================
     # LISTADO Y DETALLE DE USUARIOS
@@ -861,3 +829,188 @@ class UserViewsIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_login_get_renders_real_template(self):
+        response = self.client.get(reverse("users:login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "users/login.html")
+        self.assertContains(response, "Iniciar sesión")
+
+    def test_login_without_next_redirects_to_profile(self):
+        response = self.client.post(
+            reverse("users:login"),
+            {"username": self.owner.email, "password": self.password},
+        )
+
+        self.assertRedirects(
+            response, reverse("users:profile"), fetch_redirect_response=False
+        )
+        self.assertIn("_auth_user_id", self.client.session)
+
+    # ============================================================
+    # JERARQUÍA DE ROLES EN MUTACIONES
+    # ============================================================
+
+    def test_manager_cannot_create_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_create"),
+            data={
+                "email": "forbidden-owner@test.com",
+                "first_name": "Forbidden",
+                "last_name": "Owner",
+                "phone": "600123123",
+                "role": RoleChoices.OWNER,
+                "password": self.password,
+                "password_confirm": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            CustomUser.objects.filter(email="forbidden-owner@test.com").exists()
+        )
+        self.assertIn("role", response.context["form"].errors)
+
+    def test_manager_role_choices_do_not_include_owner(self):
+        self.login_as(self.manager)
+
+        create_response = self.client.get(reverse("users:user_create"))
+        update_response = self.client.get(
+            reverse("users:user_update", kwargs={"pk": self.target_user.pk})
+        )
+
+        self.assertNotIn(
+            RoleChoices.OWNER,
+            dict(create_response.context["form"].fields["role"].choices),
+        )
+        self.assertNotIn(
+            RoleChoices.OWNER,
+            dict(update_response.context["form"].fields["role"].choices),
+        )
+
+    def test_manager_cannot_promote_cashier_to_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.target_user.pk}),
+            data={
+                "first_name": self.target_user.first_name,
+                "last_name": self.target_user.last_name,
+                "phone": self.target_user.phone,
+                "role": RoleChoices.OWNER,
+                "is_active": "on",
+            },
+        )
+
+        self.target_user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.target_user.role, RoleChoices.CASHIER)
+        self.assertIn("role", response.context["form"].errors)
+
+    def test_manager_cannot_promote_self_to_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.manager.pk}),
+            data={
+                "first_name": self.manager.first_name,
+                "last_name": self.manager.last_name,
+                "phone": self.manager.phone,
+                "role": RoleChoices.OWNER,
+                "is_active": "on",
+            },
+        )
+
+        self.manager.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.manager.role, RoleChoices.MANAGER)
+
+    def test_owner_cannot_deactivate_self_through_update(self):
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.owner.pk}),
+            data={
+                "first_name": self.owner.first_name,
+                "last_name": self.owner.last_name,
+                "phone": self.owner.phone,
+                "role": self.owner.role,
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.owner.is_active)
+        self.assertIn("is_active", response.context["form"].errors)
+
+    def test_manager_cannot_deactivate_self_through_update(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.manager.pk}),
+            data={
+                "first_name": self.manager.first_name,
+                "last_name": self.manager.last_name,
+                "phone": self.manager.phone,
+                "role": self.manager.role,
+            },
+        )
+
+        self.manager.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.manager.is_active)
+        self.assertIn("is_active", response.context["form"].errors)
+
+    def test_manager_cannot_update_owner(self):
+        self.login_as(self.manager)
+        original_name = self.owner.first_name
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.owner.pk}),
+            data={
+                "first_name": "Changed",
+                "last_name": self.owner.last_name,
+                "phone": self.owner.phone,
+                "role": RoleChoices.CASHIER,
+                "is_active": "on",
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.owner.first_name, original_name)
+        self.assertEqual(self.owner.role, RoleChoices.OWNER)
+
+    def test_manager_cannot_deactivate_or_activate_owner(self):
+        self.login_as(self.manager)
+
+        deactivate_response = self.client.post(
+            reverse("users:user_deactivate", kwargs={"pk": self.owner.pk})
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(deactivate_response.status_code, 403)
+        self.assertTrue(self.owner.is_active)
+
+        self.owner.is_active = False
+        self.owner.save(update_fields=["is_active", "updated_at"])
+        activate_response = self.client.post(
+            reverse("users:user_activate", kwargs={"pk": self.owner.pk})
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(activate_response.status_code, 403)
+        self.assertFalse(self.owner.is_active)
+
+    def test_manager_cannot_manage_owner_store_access(self):
+        self.login_as(self.manager)
+
+        response = self.client.get(
+            reverse(
+                "users:user_store_access_manage",
+                kwargs={"pk": self.owner.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 403)

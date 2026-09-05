@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Usuarios | Sala TPV{% endblock %}
+{% block content %}
+<section class="card">
+    <div class="page-heading"><div><h1>Usuarios</h1><p class="intro">Personas de tu negocio.</p></div><a class="button" href="{% url 'users:user_create' %}">Crear usuario</a></div>
+    <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+    {% for listed_user in users %}<tr><td>{{ listed_user.first_name }} {{ listed_user.last_name }}</td><td>{{ listed_user.email }}</td><td>{{ listed_user.get_role_display }}</td><td>{{ listed_user.phone|default:"—" }}</td><td><span class="badge {% if listed_user.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if listed_user.is_active %}Activo{% else %}Inactivo{% endif %}</span></td><td><div class="table-actions"><a href="{% url 'users:user_detail' listed_user.pk %}">Ver</a><a href="{% url 'users:user_update' listed_user.pk %}">Editar</a>{% if listed_user.is_active %}<form method="post" action="{% url 'users:user_deactivate' listed_user.pk %}">{% csrf_token %}<button class="link-button danger" type="submit">Desactivar</button></form>{% else %}<form method="post" action="{% url 'users:user_activate' listed_user.pk %}">{% csrf_token %}<button class="link-button" type="submit">Activar</button></form>{% endif %}</div></td></tr>
+    {% empty %}<tr><td colspan="6">No hay usuarios.</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if is_paginated %}<nav class="pagination" aria-label="Paginación">{% if page_obj.has_previous %}<a class="button button-secondary" href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="button button-secondary" href="?page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}

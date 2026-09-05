@@ -164,6 +164,28 @@ def can_manage_users(user):
     return is_owner(user) or is_manager(user)
 
 
+def can_manage_user(actor, target_user):
+    """Indica si ``actor`` puede mutar al usuario objetivo.
+
+    Los managers pueden administrar managers y cashiers de su negocio, pero
+    nunca owners. El bypass de superusuario se conserva para administración.
+    """
+
+    if not is_authenticated_user(actor) or target_user is None:
+        return False
+
+    if actor.is_superuser:
+        return True
+
+    if actor.business_id != target_user.business_id:
+        return False
+
+    if is_owner(actor):
+        return True
+
+    return is_manager(actor) and target_user.role != RoleChoices.OWNER
+
+
 def can_manage_business_settings(user):
     """Solo owner puede modificar la configuración del negocio."""
 
