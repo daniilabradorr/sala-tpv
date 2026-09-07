@@ -201,3 +201,20 @@ th { color: var(--muted); font-size: .8rem; text-transform: uppercase; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .fiscal-warning { margin: 0 0 1rem !important; padding: .75rem 1rem; border-left: 4px solid #d97706; background: #fffbeb; color: #78350f !important; font-size: .9rem; }
 @media(max-width:760px){.form-grid{grid-template-columns:1fr}.form-section{padding:1rem}}
+/* Application home and configuration navigation. */
+.home-summary { margin-bottom: 2rem; }
+.home-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1.5rem 0 0; }
+.home-context div { padding: 1rem; border: 1px solid var(--border); border-radius: 8px; }
+.home-context dt { color: var(--muted); font-size: .875rem; font-weight: 700; }
+.home-context dd { margin: .35rem 0 0; font-weight: 700; }
+.home-section { margin-top: 2rem; }
+.home-section > h2 { margin: 0 0 1rem; }
+.module-grid, .store-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1rem; }
+.module-card { min-height: 5rem; display: flex; align-items: center; color: var(--primary); font-weight: 700; }
+.module-card:hover { border-color: var(--primary); }
+.store-card { box-shadow: none; }
+.store-card h3 { margin: 0; }
+.store-card .actions { align-items: stretch; }
+.empty-state { padding: 1rem; border: 1px dashed #cbd5e1; border-radius: 8px; background: var(--surface); color: var(--muted); }
+.config-nav { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+@media(max-width:760px){.module-grid,.store-grid{grid-template-columns:1fr}.store-card .actions .button,.config-nav .button{width:100%}}

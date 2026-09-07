@@ -11,6 +11,11 @@
         </div>
     </div>
 
+    <nav class="config-nav" aria-label="Configuración de empresa">
+        <a class="button button-secondary" href="{% url 'business_config:profile' %}">Datos de empresa</a>
+        <a class="button" href="{% url 'business_config:pos' %}" aria-current="page">Configuración TPV</a>
+    </nav>
+
     <form method="post" class="stacked-form business-profile-form" novalidate>
         {% csrf_token %}
         {% if form.non_field_errors %}

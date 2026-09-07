@@ -8,6 +8,7 @@ admin.site.site_title = "Sala TPV"
 admin.site.index_title = "Panel de administración"
 
 urlpatterns = [
+    path("", include("apps.core.urls")),
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health"),
     path("users/", include("apps.users.urls")),

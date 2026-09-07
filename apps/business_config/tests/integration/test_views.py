@@ -74,6 +74,7 @@ class BusinessProfileViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "business_config/profile_form.html")
         self.assertEqual(response.context["form"].instance, self.profile)
+        self.assertContains(response, reverse("business_config:pos"))
 
     def test_manager_and_cashier_cannot_get_or_post(self):
         for role in (RoleChoices.MANAGER, RoleChoices.CASHIER):
