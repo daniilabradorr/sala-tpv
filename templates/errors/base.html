@@ -1,0 +1,21 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Error | Sala TPV{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+</head>
+<body>
+    <main class="error-page">
+        <section class="card error-card">
+            {% block content %}{% endblock %}
+            <div class="actions">
+                <a class="button" href="{% url 'users:profile' %}">Volver a mi perfil</a>
+                <a class="button button-secondary" href="{% url 'users:login' %}">Iniciar sesión</a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
