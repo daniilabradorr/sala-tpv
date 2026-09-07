@@ -24,6 +24,7 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+CSRF_FAILURE_VIEW = "apps.core.views.csrf_failure"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
