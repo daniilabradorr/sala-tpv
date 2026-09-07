@@ -1,3 +1,4 @@
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
@@ -7,10 +8,71 @@ from apps.users.mixins import (
     CanCloseCashRegisterMixin,
     CanOpenCashRegisterMixin,
     CanSellInStoreMixin,
+    ManagerOrOwnerRequiredMixin,
     StoreAccessRequiredMixin,
 )
 from apps.users.models import CustomUser, RoleChoices
-from apps.users.tests.factories import create_business, create_store
+from apps.users.tests.factories import create_business, create_store, create_user
+
+
+class _ManagerOrOwnerView(ManagerOrOwnerRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return HttpResponse("ok")
+
+
+class GlobalPermissionMixinTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.business = create_business(
+            name="Negocio permisos globales",
+            slug="negocio-permisos-globales",
+        )
+
+    def request_for(self, user):
+        request = self.factory.get("/protected/")
+        request.user = user
+        return request
+
+    def test_anonymous_user_is_redirected_to_login_with_next(self):
+        response = _ManagerOrOwnerView.as_view()(self.request_for(AnonymousUser()))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/users/login/?next=/protected/")
+
+    def test_authenticated_cashier_gets_permission_denied(self):
+        cashier = create_user(
+            self.business,
+            email="cashier-mixin@example.com",
+            role=RoleChoices.CASHIER,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            _ManagerOrOwnerView.as_view()(self.request_for(cashier))
+
+    def test_authenticated_owner_is_allowed(self):
+        owner = create_user(
+            self.business,
+            email="owner-mixin@example.com",
+            role=RoleChoices.OWNER,
+        )
+
+        response = _ManagerOrOwnerView.as_view()(self.request_for(owner))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_superuser_is_allowed(self):
+        superuser = CustomUser.objects.create_superuser(
+            email="global-mixin-admin@example.com",
+            password="adminpass123",
+            role=RoleChoices.CASHIER,
+            first_name="Admin",
+            last_name="Global",
+            phone="600123123",
+        )
+
+        response = _ManagerOrOwnerView.as_view()(self.request_for(superuser))
+
+        self.assertEqual(response.status_code, 200)
 
 
 class _AccessView(StoreAccessRequiredMixin, View):

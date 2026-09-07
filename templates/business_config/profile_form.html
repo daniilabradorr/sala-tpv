@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Datos de empresa | Sala TPV{% endblock %}
+
+{% block content %}
+<section class="card business-profile-card">
+    <div class="page-heading">
+        <div>
+            <h1>Datos de empresa</h1>
+            <p>{{ request.user.business.name }}</p>
+        </div>
+    </div>
+
+    <form method="post" class="stacked-form business-profile-form" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <fieldset class="form-section">
+            <legend>Datos fiscales</legend>
+            <p class="fiscal-warning">Los cambios en estos datos se aplicarán a nuevos documentos. Los documentos ya emitidos conservan sus datos históricos.</p>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.legal_name %}
+                {% include "business_config/_field.html" with field=form.tax_identifier %}
+                {% include "business_config/_field.html" with field=form.country_code %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Datos comerciales</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.trade_name %}
+                {% include "business_config/_field.html" with field=form.brand_name %}
+                {% include "business_config/_field.html" with field=form.website %}
+                {% include "business_config/_field.html" with field=form.logo_url %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Contacto</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.phone %}
+                {% include "business_config/_field.html" with field=form.email %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Dirección</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.address_line_1 %}
+                {% include "business_config/_field.html" with field=form.address_line_2 %}
+                {% include "business_config/_field.html" with field=form.postal_code %}
+                {% include "business_config/_field.html" with field=form.city %}
+                {% include "business_config/_field.html" with field=form.province %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Configuración general</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.currency_code %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Documentos / tickets</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.receipt_footer %}
+                {% include "business_config/_field.html" with field=form.return_policy %}
+            </div>
+        </fieldset>
+
+        <div class="actions"><button type="submit" class="button">Guardar cambios</button></div>
+    </form>
+</section>
+{% endblock %}
