@@ -4,6 +4,12 @@ from apps.business_config.models import BusinessProfile, POSSettings
 
 
 class BusinessProfileForm(forms.ModelForm):
+    def clean_country_code(self):
+        return self.cleaned_data["country_code"].strip().upper()
+
+    def clean_tax_identifier(self):
+        return self.cleaned_data["tax_identifier"].strip().upper()
+
     class Meta:
         model = BusinessProfile
         fields = [

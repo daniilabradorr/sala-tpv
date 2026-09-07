@@ -109,7 +109,11 @@ class BusinessProfileViewTests(TestCase):
             ),
         )
 
-        self.assertRedirects(response, self.url)
+        self.assertRedirects(
+            response,
+            self.url,
+            fetch_redirect_response=False,
+        )
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.legal_name, "Sala Actualizada SL")
         self.assertEqual(self.profile.trade_name, "Sala Nueva")
@@ -117,8 +121,9 @@ class BusinessProfileViewTests(TestCase):
         self.assertEqual(self.profile.email, "nueva@example.com")
         self.assertEqual(self.profile.address_line_1, "Gran Vía 2")
         self.assertEqual(self.profile.receipt_footer, "Hasta pronto")
+        follow_response = self.client.get(self.url)
         self.assertContains(
-            self.client.get(self.url),
+            follow_response,
             "Datos de empresa actualizados correctamente.",
         )
 
@@ -203,6 +208,62 @@ class BusinessProfileViewTests(TestCase):
         self.assertTrue(response.context["form"].non_field_errors())
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.tax_identifier, "B12345678")
+
+    def test_owner_update_normalizes_fiscal_identity(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            self.url,
+            self.valid_data(
+                country_code=" es ",
+                tax_identifier=" b99999999 ",
+            ),
+        )
+
+        self.assertRedirects(response, self.url)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.country_code, "ES")
+        self.assertEqual(self.profile.tax_identifier, "B99999999")
+
+    def test_normalized_duplicate_fiscal_identity_is_a_form_error(self):
+        other = Business.objects.create(
+            name="Otra normalizada", slug="otra-normalizada"
+        )
+        other_profile, _ = create_business_configuration(
+            business=other,
+            legal_name="Otra Normalizada SL",
+            tax_identifier="B99999999",
+            phone="611111111",
+            email="normalizada@example.com",
+            address_line_1="Otra calle",
+            postal_code="08001",
+            city="Barcelona",
+            province="Barcelona",
+        )
+        other_owner = self.create_user(
+            "normalizada-owner@example.com",
+            RoleChoices.OWNER,
+            business=other,
+        )
+        self.client.force_login(other_owner)
+
+        response = self.client.post(
+            self.url,
+            {
+                field: getattr(other_profile, field)
+                for field in BusinessProfileForm.Meta.fields
+            }
+            | {
+                "country_code": " es ",
+                "tax_identifier": " b12345678 ",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["form"].non_field_errors())
+        other_profile.refresh_from_db()
+        self.assertEqual(other_profile.country_code, "ES")
+        self.assertEqual(other_profile.tax_identifier, "B99999999")
 
     def test_missing_profile_returns_404_without_creating_one(self):
         business = Business.objects.create(name="Sin perfil", slug="sin-perfil")

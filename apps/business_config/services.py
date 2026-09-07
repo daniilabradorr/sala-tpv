@@ -92,6 +92,10 @@ def create_business_configuration(
 @transaction.atomic
 def update_business_profile(*, business, **profile_data):
     """Update the editable profile fields for one explicitly supplied business."""
+    for field_name in ("country_code", "tax_identifier"):
+        if field_name in profile_data:
+            profile_data[field_name] = profile_data[field_name].strip().upper()
+
     profile = (
         BusinessProfile.objects.select_for_update().filter(business=business).get()
     )

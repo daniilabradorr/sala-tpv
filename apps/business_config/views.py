@@ -1,4 +1,3 @@
-# Create your views here.
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,11 +11,6 @@ from apps.users.mixins import CanManageBusinessSettingsMixin
 
 class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
     template_name = "business_config/profile_form.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_authenticated:
-            return self.handle_no_permission()
-        return super().dispatch(request, *args, **kwargs)
 
     def get_business(self):
         business = getattr(self.request.user, "business", None)
@@ -37,8 +31,6 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
         form = BusinessProfileForm(data=request.POST, instance=profile)
         if form.is_valid():
             update_business_profile(business=business, **form.cleaned_data)
-            messages.success(
-                request, "Datos de empresa actualizados correctamente."
-            )
+            messages.success(request, "Datos de empresa actualizados correctamente.")
             return redirect("business_config:profile")
         return render(request, self.template_name, {"form": form})

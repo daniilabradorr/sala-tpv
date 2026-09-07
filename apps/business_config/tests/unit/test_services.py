@@ -76,3 +76,14 @@ class UpdateBusinessProfileTests(TestCase):
 
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.email, "sala@example.com")
+
+    def test_normalizes_fiscal_identity(self):
+        update_business_profile(
+            business=self.business,
+            country_code=" es ",
+            tax_identifier=" b99999999 ",
+        )
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.country_code, "ES")
+        self.assertEqual(self.profile.tax_identifier, "B99999999")
