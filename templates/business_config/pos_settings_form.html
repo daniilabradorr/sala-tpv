@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración del TPV | Sala TPV{% endblock %}
+
+{% block content %}
+<section class="card business-profile-card">
+    <div class="page-heading">
+        <div>
+            <h1>Configuración del TPV</h1>
+            <p>{{ request.user.business.name }}</p>
+        </div>
+    </div>
+
+    <form method="post" class="stacked-form business-profile-form" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <p class="fiscal-warning">Los cambios afectan a futuras operaciones del TPV. No modifican ventas, pagos, movimientos de stock ni documentos históricos ya registrados.</p>
+
+        <fieldset class="form-section">
+            <legend>Precios</legend>
+            {% include "business_config/_field.html" with field=form.prices_include_tax %}
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Stock</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.enable_stock_control %}
+                {% include "business_config/_field.html" with field=form.allow_sale_without_stock %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Ventas</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.allow_manual_price %}
+                {% include "business_config/_field.html" with field=form.allow_manual_discounts %}
+                {% include "business_config/_field.html" with field=form.max_manual_discount_percent %}
+            </div>
+            <p class="help-text">Si desactivas los descuentos manuales, el porcentaje máximo debe ser 0.</p>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Caja</legend>
+            {% include "business_config/_field.html" with field=form.require_open_cash_register %}
+            <p class="help-text">Cuando está activo, las operaciones que lo requieran necesitarán una caja/sesión abierta.</p>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Pagos</legend>
+            {% include "business_config/_field.html" with field=form.allow_split_payments %}
+            <p class="help-text">Permite utilizar distintos métodos de pago en una misma venta cuando el flujo de pagos lo admita.</p>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Seguridad</legend>
+            {% include "business_config/_field.html" with field=form.require_pin_for_sensitive_actions %}
+            <p class="help-text">Las acciones sensibles compatibles con esta configuración requerirán PIN.</p>
+        </fieldset>
+
+        <div class="actions"><button type="submit" class="button">Guardar cambios</button></div>
+    </form>
+</section>
+{% endblock %}

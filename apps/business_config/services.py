@@ -25,6 +25,18 @@ BUSINESS_PROFILE_EDITABLE_FIELDS = (
     "return_policy",
 )
 
+POS_SETTINGS_EDITABLE_FIELDS = (
+    "prices_include_tax",
+    "enable_stock_control",
+    "allow_sale_without_stock",
+    "allow_manual_price",
+    "allow_manual_discounts",
+    "max_manual_discount_percent",
+    "require_open_cash_register",
+    "allow_split_payments",
+    "require_pin_for_sensitive_actions",
+)
+
 
 @transaction.atomic
 def create_business_configuration(
@@ -106,3 +118,16 @@ def update_business_profile(*, business, **profile_data):
 
     profile.save(update_fields=(*BUSINESS_PROFILE_EDITABLE_FIELDS, "updated_at"))
     return profile
+
+
+@transaction.atomic
+def update_pos_settings(*, business, **settings_data):
+    """Update only editable POS settings for the explicitly supplied business."""
+    settings = POSSettings.objects.select_for_update().get(business=business)
+
+    for field_name in POS_SETTINGS_EDITABLE_FIELDS:
+        if field_name in settings_data:
+            setattr(settings, field_name, settings_data[field_name])
+
+    settings.save(update_fields=(*POS_SETTINGS_EDITABLE_FIELDS, "updated_at"))
+    return settings
