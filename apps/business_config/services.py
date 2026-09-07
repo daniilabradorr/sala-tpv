@@ -5,6 +5,27 @@ from django.db import transaction
 from apps.business_config.models import BusinessProfile, POSSettings
 
 
+BUSINESS_PROFILE_EDITABLE_FIELDS = (
+    "legal_name",
+    "tax_identifier",
+    "trade_name",
+    "phone",
+    "email",
+    "website",
+    "address_line_1",
+    "address_line_2",
+    "postal_code",
+    "city",
+    "province",
+    "country_code",
+    "currency_code",
+    "brand_name",
+    "logo_url",
+    "receipt_footer",
+    "return_policy",
+)
+
+
 @transaction.atomic
 def create_business_configuration(
     *,
@@ -66,3 +87,18 @@ def create_business_configuration(
         require_pin_for_sensitive_actions=True,
     )
     return profile, settings
+
+
+@transaction.atomic
+def update_business_profile(*, business, **profile_data):
+    """Update the editable profile fields for one explicitly supplied business."""
+    profile = (
+        BusinessProfile.objects.select_for_update().filter(business=business).get()
+    )
+
+    for field_name in BUSINESS_PROFILE_EDITABLE_FIELDS:
+        if field_name in profile_data:
+            setattr(profile, field_name, profile_data[field_name])
+
+    profile.save(update_fields=(*BUSINESS_PROFILE_EDITABLE_FIELDS, "updated_at"))
+    return profile

@@ -193,3 +193,11 @@ th { color: var(--muted); font-size: .8rem; text-transform: uppercase; }
 .stock-normal,.adjustment-confirmed { background:#dcfce7;color:#166534 }.stock-low,.adjustment-draft { background:#fef3c7;color:#92400e }.stock-out,.adjustment-cancelled { background:#fee2e2;color:#991b1b }
 .inventory-warning { margin:1rem 0; padding:1rem; border-left:4px solid #d97706; background:#fffbeb; color:#78350f; }.difference-positive { color:#166534;font-weight:700 }.difference-negative { color:#b91c1c;font-weight:700 }.adjustment-actions { display:flex; align-items:end; gap:1rem; margin-top:1.5rem; }
 @media(max-width:760px){.inventory-metrics{grid-template-columns:1fr}.adjustment-actions{align-items:stretch;flex-direction:column}}
+/* Business profile configuration. */
+.business-profile-card { max-width: 900px; margin-inline: auto; }
+.business-profile-form { margin-top: 1.5rem; gap: 1.5rem; }
+.form-section { margin: 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: 10px; }
+.form-section legend { padding: 0 .4rem; font-size: .9rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.fiscal-warning { margin: 0 0 1rem !important; padding: .75rem 1rem; border-left: 4px solid #d97706; background: #fffbeb; color: #78350f !important; font-size: .9rem; }
+@media(max-width:760px){.form-grid{grid-template-columns:1fr}.form-section{padding:1rem}}
