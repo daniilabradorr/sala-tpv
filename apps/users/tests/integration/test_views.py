@@ -837,14 +837,14 @@ class UserViewsIntegrationTests(TestCase):
         self.assertTemplateUsed(response, "users/login.html")
         self.assertContains(response, "Iniciar sesión")
 
-    def test_login_without_next_redirects_to_profile(self):
+    def test_login_without_next_redirects_to_home(self):
         response = self.client.post(
             reverse("users:login"),
             {"username": self.owner.email, "password": self.password},
         )
 
         self.assertRedirects(
-            response, reverse("users:profile"), fetch_redirect_response=False
+            response, reverse("core:home"), fetch_redirect_response=False
         )
         self.assertIn("_auth_user_id", self.client.session)
 
