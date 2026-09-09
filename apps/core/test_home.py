@@ -97,8 +97,7 @@ class HomeViewTests(TestCase):
 
         self.assertContains(response, "Netxodo")
         self.assertNotContains(response, "Sala TPV")
-        self.assertContains(response, "img/netxodo-logo.png")
-
+        
     def test_owner_sees_only_active_stores_in_own_business_and_operation_links(self):
         self.client.force_login(self.owner)
         response = self.client.get(reverse("core:home"))

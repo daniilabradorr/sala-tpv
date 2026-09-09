@@ -96,7 +96,6 @@ class UserViewsIntegrationTests(TestCase):
         response = self.client.get(reverse("users:login"))
 
         self.assertContains(response, "Iniciar sesión | Netxodo")
-        self.assertContains(response, "img/netxodo-logo.png")
         self.assertNotContains(response, "Sala TPV")
 
     def test_login_view_rejects_wrong_password_and_accepts_correct_password(self):

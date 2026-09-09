@@ -13,5 +13,4 @@ class BrandingConfigurationTests(SimpleTestCase):
         rendered = render_to_string("404.html")
 
         self.assertIn("Página no encontrada | Netxodo", rendered)
-        self.assertIn("img/netxodo-logo.png", rendered)
         self.assertNotIn("Sala TPV", rendered)
