@@ -44,6 +44,14 @@ jobs:
           ALLOWED_HOSTS: 127.0.0.1,localhost
         run: uv run python manage.py makemigrations --check --dry-run
 
+      - name: Collect static files
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py collectstatic --noinput
+
       - name: Run tests
         env:
           DJANGO_SETTINGS_MODULE: config.settings.test
@@ -54,6 +62,7 @@ jobs:
 
   billing-postgres-concurrency:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
