@@ -92,6 +92,13 @@ class UserViewsIntegrationTests(TestCase):
     # AUTENTICACIÓN
     # ============================================================
 
+    def test_login_uses_netxodo_branding(self):
+        response = self.client.get(reverse("users:login"))
+
+        self.assertContains(response, "Iniciar sesión | Netxodo")
+        self.assertContains(response, "img/netxodo-logo.png")
+        self.assertNotContains(response, "Sala TPV")
+
     def test_login_view_rejects_wrong_password_and_accepts_correct_password(self):
         """Verifica que el login rechace contraseñas incorrectas y acepte las correctas."""
         url = reverse("users:login") + f"?next={reverse('users:profile')}"

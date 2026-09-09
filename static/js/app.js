@@ -1,5 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("Sala TPV base cargada");
+  console.log("Netxodo base cargado");
 });
 
 document.body.addEventListener("htmx:responseError", (event) => {

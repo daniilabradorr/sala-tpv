@@ -13,7 +13,7 @@ README.md
 Y pega esto:
 
 ````md
-# Sala TPV
+# Netxodo
 
 TPV para negocio local desarrollado con **Django 5.2**, siguiendo una arquitectura de monolito modular.
 

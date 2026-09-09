@@ -4,17 +4,18 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Error | Sala TPV{% endblock %}</title>
+    <title>{% block title %}Error | Netxodo{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
 </head>
 <body>
     <main class="error-page">
         <section class="card error-card">
+            <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="error-logo">
             {% block content %}{% endblock %}
-            <div class="actions">
-                <a class="button" href="{% url 'core:home' %}">Volver al inicio</a>
-                <a class="button button-secondary" href="{% url 'users:login' %}">Iniciar sesión</a>
-            </div>
+            <div class="actions"><a class="button" href="{% url 'core:home' %}">Volver al inicio</a><a class="button button-secondary" href="{% url 'users:login' %}">Iniciar sesión</a></div>
         </section>
     </main>
 </body>

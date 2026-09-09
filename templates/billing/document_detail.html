@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Documento fiscal {{ document }}{% endblock %}
+{% block title %}Documento fiscal {{ document }} | Netxodo{% endblock %}
 {% block content %}
 <main><h1>{{ document }}</h1>
   <dl><dt>Tipo</dt><dd>{{ document.get_document_type_display }}</dd><dt>Estado</dt><dd>{{ document.get_status_display }}</dd><dt>Fecha de operación</dt><dd>{{ document.operation_date }}</dd><dt>Emitido</dt><dd>{{ document.issued_at }}</dd><dt>Venta</dt><dd>{{ document.sale|default:"—" }}</dd><dt>Devolución</dt><dd>{{ document.sale_return|default:"—" }}</dd><dt>Cliente</dt><dd>{{ document.customer|default:"—" }}</dd></dl>

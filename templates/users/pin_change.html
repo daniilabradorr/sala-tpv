@@ -1,3 +1,3 @@
 {% extends "base.html" %}
-{% block title %}Cambiar PIN | Sala TPV{% endblock %}
+{% block title %}Cambiar PIN | Netxodo{% endblock %}
 {% block content %}<section class="card card-form"><h1>Cambiar PIN</h1><p class="intro">Elige un PIN de entre 4 y 6 dígitos.</p><form method="post" class="stacked-form">{% csrf_token %}{% include "users/_form_fields.html" %}<div class="actions"><button class="button" type="submit">Guardar PIN</button><a class="button button-secondary" href="{% url 'users:profile' %}">Cancelar</a></div></form></section>{% endblock %}

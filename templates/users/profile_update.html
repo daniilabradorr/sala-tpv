@@ -1,3 +1,3 @@
 {% extends "base.html" %}
-{% block title %}Editar perfil | Sala TPV{% endblock %}
+{% block title %}Editar perfil | Netxodo{% endblock %}
 {% block content %}<section class="card card-form"><h1>Editar perfil</h1><form method="post" class="stacked-form">{% csrf_token %}{% include "users/_form_fields.html" %}<div class="actions"><button class="button" type="submit">Guardar</button><a class="button button-secondary" href="{% url 'users:profile' %}">Cancelar</a></div></form></section>{% endblock %}

@@ -1,7 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Iniciar sesión | Sala TPV{% endblock %}
+{% load static %}
+{% block title %}Iniciar sesión | Netxodo{% endblock %}
 {% block content %}
-<section class="card card-narrow">
+<section class="card card-narrow login-card">
+    <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="login-logo">
+    <div class="section-accent" aria-hidden="true"></div>
     <h1>Iniciar sesión</h1>
     <p class="intro">Accede con tu correo electrónico y contraseña.</p>
     <form method="post" class="stacked-form">
