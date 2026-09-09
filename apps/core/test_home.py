@@ -165,9 +165,8 @@ class HomeViewTests(TestCase):
             password=self.password,
             role=RoleChoices.CASHIER,
         )
-        CustomUser.objects.filter(pk=user.pk).update(business=None)
-        user.refresh_from_db()
         self.client.force_login(user)
+        CustomUser.objects.filter(pk=user.pk).update(business=None)
         self.assertEqual(self.client.get(reverse("core:home")).status_code, 403)
 
     def test_superuser_without_business_gets_admin_home_without_tenant_data(self):

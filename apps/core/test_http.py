@@ -72,17 +72,17 @@ class HttpContractTests(TestCase):
         )
 
         self.assertRedirects(
-            response, reverse("users:profile"), fetch_redirect_response=False
+            response, reverse("core:home"), fetch_redirect_response=False
         )
 
-    def test_direct_login_redirects_to_profile(self):
+    def test_direct_login_redirects_to_home(self):
         response = self.client.post(
             reverse("users:login"),
             {"username": self.owner.email, "password": self.password},
         )
 
         self.assertRedirects(
-            response, reverse("users:profile"), fetch_redirect_response=False
+            response, reverse("core:home"), fetch_redirect_response=False
         )
 
     def test_authenticated_user_is_redirected_away_from_login(self):
@@ -91,7 +91,7 @@ class HttpContractTests(TestCase):
         response = self.client.get(reverse("users:login"))
 
         self.assertRedirects(
-            response, reverse("users:profile"), fetch_redirect_response=False
+            response, reverse("core:home"), fetch_redirect_response=False
         )
 
     def test_authenticated_user_without_permission_gets_generic_403(self):
