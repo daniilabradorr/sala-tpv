@@ -138,18 +138,22 @@ class DemoBusinessSeederTests(TestCase):
             1,
         )
 
-    def test_missing_default_store_or_tax_is_rejected_without_repair(self):
-        self.onboarding.store.is_default = False
-        self.onboarding.store.save()
+    def test_missing_default_store_is_rejected_without_repair(self):
+        # Deliberately bypass Store.save() to simulate inconsistent legacy data.
+        Store.objects.filter(pk=self.onboarding.store.pk).update(is_default=False)
+
         with self.assertRaises(DemoSeedPrerequisiteError):
             DemoBusinessSeeder.seed(business=self.business)
+
         self.assertEqual(Category.objects.filter(business=self.business).count(), 0)
 
-        self.onboarding.store.is_default = True
-        self.onboarding.store.save()
+    def test_missing_default_tax_is_rejected_without_repair(self):
         Tax.objects.filter(business=self.business).update(is_active=False)
+
         with self.assertRaises(DemoSeedPrerequisiteError):
             DemoBusinessSeeder.seed(business=self.business)
+
+        self.assertEqual(Category.objects.filter(business=self.business).count(), 0)
 
     def test_late_product_conflict_rolls_back_new_demo_records(self):
         Product.objects.create(
