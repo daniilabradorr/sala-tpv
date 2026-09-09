@@ -3,8 +3,8 @@ from django.urls import path, include
 
 from apps.core.views import health_check
 
-admin.site.site_header = "Sala TPV Admin"
-admin.site.site_title = "Sala TPV"
+admin.site.site_header = "Netxodo Admin"
+admin.site.site_title = "Netxodo"
 admin.site.index_title = "Panel de administración"
 
 urlpatterns = [

@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Inicio | Sala TPV{% endblock %}
+{% block title %}Inicio | Netxodo{% endblock %}
 
 {% block content %}
 <section class="card home-summary">
-    <h1>{% if administrative_mode %}Administración{% else %}Sala TPV{% endif %}</h1>
+    <span class="eyebrow">Netxodo</span>
+    <div class="section-accent" aria-hidden="true"></div>
+    <h1>{% if administrative_mode %}Administración{% elif business %}{{ business.name }}{% else %}Netxodo{% endif %}</h1>
     {% if business %}
         <dl class="home-context">
             <div><dt>Empresa</dt><dd>{{ business.name }}</dd></div>

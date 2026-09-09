@@ -4,22 +4,22 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Sala TPV{% endblock %}</title>
-
+    <title>{% block title %}Netxodo{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-
     {% block extra_head %}{% endblock %}
 </head>
 <body>
     <div class="app-shell">
         <header class="site-header">
             <div class="container">
-                <div class="brand">
-                    <a href="{% url 'core:home' %}">Sala TPV</a>
-                </div>
-
-                <nav class="site-nav">
+                <a href="{% url 'core:home' %}" class="brand-link" aria-label="Netxodo, inicio">
+                    <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="brand-logo">
+                </a>
+                <nav class="site-nav" aria-label="Navegación principal">
                     {% if request.user.is_authenticated %}
                         <a href="{% url 'core:home' %}">Inicio</a>
                         {% if request.user.business_id %}
@@ -30,54 +30,27 @@
                         {% endif %}
                         <a href="{% url 'users:profile' %}">Mi perfil</a>
                         {% if request.user.business_id %}
-                            {% if request.user.is_superuser or request.user.role == 'owner' or request.user.role == 'manager' %}
-                                <a href="{% url 'users:user_list' %}">Usuarios</a>
-                            {% endif %}
-                            {% if request.user.is_superuser or request.user.role == 'owner' %}
-                                <a href="{% url 'business_config:profile' %}">Configuración</a>
-                            {% endif %}
+                            {% if request.user.is_superuser or request.user.role == 'owner' or request.user.role == 'manager' %}<a href="{% url 'users:user_list' %}">Usuarios</a>{% endif %}
+                            {% if request.user.is_superuser or request.user.role == 'owner' %}<a href="{% url 'business_config:profile' %}">Configuración</a>{% endif %}
                         {% endif %}
-                        {% if request.user.is_superuser %}
-                            <a href="{% url 'admin:index' %}">Admin</a>
-                        {% endif %}
+                        {% if request.user.is_superuser %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
                         <form method="post" action="{% url 'users:logout' %}" class="nav-form">
-                            {% csrf_token %}
-                            <button type="submit" class="nav-button">Cerrar sesión</button>
+                            {% csrf_token %}<button type="submit" class="nav-button">Cerrar sesión</button>
                         </form>
-                    {% else %}
-                        <a href="{% url 'users:login' %}">Iniciar sesión</a>
-                    {% endif %}
+                    {% else %}<a href="{% url 'users:login' %}">Iniciar sesión</a>{% endif %}
                 </nav>
             </div>
         </header>
-
         <main class="site-main">
             <div class="container">
-                {% if messages %}
-                    <div class="messages" aria-live="polite">
-                        {% for message in messages %}
-                            <div class="message{% if message.tags %} message-{{ message.tags }}{% endif %}" role="status">
-                                {{ message }}
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-                {% block content %}
-                <section class="card">
-                    <h1>Base del proyecto lista</h1>
-                    <p>Django ya puede renderizar plantillas, cargar estáticos y usar HTMX.</p>
-                </section>
-                {% endblock %}
+                {% if messages %}<div class="messages" aria-live="polite">
+                    {% for message in messages %}<div class="message{% if message.tags %} message-{{ message.tags }}{% endif %}" role="status">{{ message }}</div>{% endfor %}
+                </div>{% endif %}
+                {% block content %}<section class="card"><h1>Base del proyecto lista</h1><p>Django ya puede renderizar plantillas, cargar estáticos y usar HTMX.</p></section>{% endblock %}
             </div>
         </main>
-
-        <footer class="site-footer">
-            <div class="container">
-                <small>Base técnica del TPV</small>
-            </div>
-        </footer>
+        <footer class="site-footer"><div class="container"><small>Netxodo · TPV para pequeños negocios</small></div></footer>
     </div>
-
     <script src="{% static 'js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>

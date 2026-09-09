@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% block title %}{{ category.name }} | Sala TPV{% endblock %}{% block content %}<section class="card">
+{% extends "base.html" %}{% block title %}{{ category.name }} | Netxodo{% endblock %}{% block content %}<section class="card">
 <div class="page-heading"><div><h1>{{ category.name }}</h1><p class="intro">Detalle de la categoría.</p></div><a class="button button-secondary" href="{% url 'catalog:category_list' %}">Volver a categorías</a></div>
 <div class="status-line"><span class="badge {% if category.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if category.is_active %}Activa{% else %}Inactiva{% endif %}</span></div>
 <dl class="details-grid"><div><dt>Nombre</dt><dd>{{ category.name }}</dd></div><div><dt>Slug</dt><dd>{{ category.slug }}</dd></div><div><dt>Categoría padre</dt><dd>{{ category.parent|default:"—" }}</dd></div><div><dt>Orden</dt><dd>{{ category.sort_order }}</dd></div></dl>
