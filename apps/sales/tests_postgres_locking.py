@@ -5,13 +5,20 @@ from threading import Barrier, Event
 from django.db import connections, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
-from apps.sales.models import Sale, SaleStatusChoices
+from apps.sales.models import Sale, SaleReturnStatusChoices, SaleStatusChoices
 from apps.inventory.models import StockMovement
-from apps.sales.services import _lock_sale, complete_sale, recalculate_sale
+from apps.sales.services import (
+    _lock_sale,
+    complete_sale,
+    complete_sale_return,
+    recalculate_sale,
+)
 from apps.sales.tests.factories import (
     create_pos_settings,
     create_sale,
     create_sale_line,
+    create_sale_return,
+    create_sale_return_line,
     create_sales_business,
     create_sales_inventory_item,
     create_sales_product,
@@ -153,6 +160,63 @@ class SalePostgreSQLLockingTests(TransactionTestCase):
             StockMovement.objects.filter(
                 sale=self.sale,
                 movement_type=StockMovement.TYPE_SALE,
+            ).count(),
+            1,
+        )
+
+    def test_complete_sale_return_with_nullable_original_line_product_join(self):
+        create_pos_settings(
+            business=self.business,
+            require_open_cash_register=False,
+            require_pin_for_sensitive_actions=False,
+            enable_stock_control=True,
+        )
+        tax = create_sales_tax(business=self.business)
+        product = create_sales_product(business=self.business, tax=tax)
+        inventory_item = create_sales_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=product,
+            current_stock=Decimal("20.000"),
+        )
+        original_line = create_sale_line(
+            business=self.business,
+            sale=self.sale,
+            product=product,
+            quantity=Decimal("2.000"),
+        )
+        complete_sale(
+            business=self.business,
+            sale=self.sale,
+            closed_by=self.user,
+        )
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+        )
+        create_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=original_line,
+            quantity=Decimal("1.000"),
+            restock=True,
+        )
+
+        completed_return = complete_sale_return(
+            business=self.business,
+            return_doc=return_doc,
+            completed_by=self.user,
+        )
+
+        self.assertEqual(completed_return.status, SaleReturnStatusChoices.COMPLETED)
+        inventory_item.refresh_from_db()
+        self.assertEqual(inventory_item.current_stock, Decimal("19.000"))
+        self.assertEqual(
+            StockMovement.objects.filter(
+                sale_return=return_doc,
+                movement_type=StockMovement.TYPE_SALE_RETURN,
             ).count(),
             1,
         )
