@@ -379,7 +379,10 @@ def _lock_sale(*, business, sale):
 
     try:
         return (
-            Sale.objects.select_for_update()
+            # Nullable select_related() paths use LEFT OUTER JOINs. PostgreSQL
+            # cannot apply an unrestricted FOR UPDATE to their nullable side;
+            # only the Sale row is needed to serialize sale mutations.
+            Sale.objects.select_for_update(of=("self",))
             .select_related(
                 "business",
                 "store",
@@ -808,7 +811,7 @@ def update_sale_line(
 
     try:
         locked_line = (
-            SaleLine.objects.select_for_update()
+            SaleLine.objects.select_for_update(of=("self",))
             .select_related("product")
             .get(
                 pk=line.pk,
@@ -953,7 +956,7 @@ def complete_sale(*, business, sale, closed_by):
     )
 
     lines = list(
-        SaleLine.objects.select_for_update()
+        SaleLine.objects.select_for_update(of=("self",))
         .select_related("product")
         .filter(business=business, sale=locked_sale)
         .order_by("product_id", "pk")
@@ -1259,7 +1262,7 @@ def add_sale_return_line(
 
     try:
         locked_original_line = (
-            SaleLine.objects.select_for_update()
+            SaleLine.objects.select_for_update(of=("self",))
             .select_related("sale", "product")
             .get(
                 pk=original_line.pk,
@@ -1321,7 +1324,7 @@ def update_sale_return_line(
 
     try:
         locked_line = (
-            SaleReturnLine.objects.select_for_update()
+            SaleReturnLine.objects.select_for_update(of=("self",))
             .select_related(
                 "original_line",
                 "original_line__sale",
@@ -1451,7 +1454,7 @@ def complete_sale_return(
         raise ValidationError("La venta original no admite devoluciones.")
 
     return_lines = list(
-        SaleReturnLine.objects.select_for_update()
+        SaleReturnLine.objects.select_for_update(of=("self",))
         .select_related("original_line", "original_line__product")
         .filter(business=business, return_doc=locked_return)
         .order_by("original_line_id", "pk")
@@ -1464,7 +1467,7 @@ def complete_sale_return(
 
     for return_line in return_lines:
         original_line = (
-            SaleLine.objects.select_for_update()
+            SaleLine.objects.select_for_update(of=("self",))
             .select_related("product")
             .get(
                 pk=return_line.original_line_id,
