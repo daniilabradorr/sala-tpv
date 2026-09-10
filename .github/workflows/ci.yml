@@ -156,6 +156,21 @@ jobs:
   browser-e2e:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -183,6 +198,7 @@ jobs:
           SECRET_KEY: test-secret-key
           DEBUG: "0"
           ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
         run: >-
           uv run python manage.py test
           e2e.browser_full_flow

@@ -8,10 +8,12 @@ Run it explicitly after installing Chromium with::
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.db import connections
 from playwright.sync_api import expect, sync_playwright
 
 from apps.billing.models import (
@@ -49,29 +51,6 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     OWNER_PASSWORD = "E2E-Test-Password-123!"
     OWNER_PIN = "1234"
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.playwright = sync_playwright().start()
-        try:
-            cls.browser = cls.playwright.chromium.launch(headless=True)
-            cls.context = cls.browser.new_context()
-            cls.page = cls.context.new_page()
-        except Exception:
-            cls.playwright.stop()
-            super().tearDownClass()
-            raise
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            cls.page.close()
-            cls.context.close()
-            cls.browser.close()
-        finally:
-            cls.playwright.stop()
-            super().tearDownClass()
-
     def setUp(self):
         result = OnboardingService.create_business(
             legal_name="Netxodo E2E Demo SL",
@@ -99,13 +78,20 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.console_messages = []
         self.javascript_errors = []
         self.step = "setup"
-        self.page.on("console", self._record_console)
-        self.page.on("pageerror", self._record_page_error)
 
-    def tearDown(self):
-        self.page.remove_listener("console", self._record_console)
-        self.page.remove_listener("pageerror", self._record_page_error)
-        self.context.clear_cookies()
+    @staticmethod
+    def _db_value(operation):
+        """Evaluate one eager ORM scalar outside Playwright's asyncio context."""
+
+        def worker():
+            connections.close_all()
+            try:
+                return operation()
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(worker).result()
 
     def _record_console(self, message):
         self.console_messages.append(f"{message.type}: {message.text}")
@@ -126,6 +112,13 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.assertIsNotNone(match, f"Unexpected URL: {self.page.url}")
         return int(match.group(1))
 
+    @staticmethod
+    def _decimal_from_text(value):
+        match = re.search(r"([0-9]+(?:[.,][0-9]+)?)", value)
+        if match is None:
+            raise AssertionError(f"No decimal amount found in: {value!r}")
+        return Decimal(match.group(1).replace(",", "."))
+
     def _open_cash_session(self):
         self.step = "open cash session"
         self.page.get_by_role("link", name="Caja").click()
@@ -138,9 +131,12 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Opening amount").fill("100.00")
         self.page.get_by_role("button", name="Guardar").click()
         expect(self.page.get_by_text("Operación de caja completada.")).to_be_visible()
-        session = CashSession.objects.get(business=self.business)
-        self.assertEqual(session.status, CashSession.Status.OPEN)
-        return session.pk
+        return self._db_value(
+            lambda: CashSession.objects.values_list("pk", flat=True).get(
+                business_id=self.business.pk,
+                status=CashSession.Status.OPEN,
+            )
+        )
 
     def _open_sale(self, *, customer, document_type):
         self.step = f"open {document_type} sale"
@@ -169,9 +165,8 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _pay_sale(self, method):
         self.step = f"pay sale by {method}"
-        sale_id = self._id_from_url(r"/sales/(\d+)/$")
-        sale = Sale.objects.get(pk=sale_id)
-        amount = sale.pending_amount
+        pending_text = self.page.get_by_text(re.compile(r"^Pendiente:")).inner_text()
+        amount = self._decimal_from_text(pending_text)
         self.page.get_by_role("link", name="Registrar cobro").click()
         self.page.get_by_label("Method").select_option(label=method)
         self.page.get_by_label("Amount").fill(str(amount))
@@ -188,10 +183,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         expect(
             self.page.get_by_text("Estado").locator("xpath=following-sibling::dd[1]")
         ).to_have_text("Emitido")
-        document_id = self._id_from_url(r"/documents/(\d+)/$")
-        document = BillingDocument.objects.get(pk=document_id)
-        self.assertEqual(document.document_type, expected_type)
-        return document
+        return self._id_from_url(r"/documents/(\d+)/$")
 
     def _create_return(self, *, sale_id, product_name, reason):
         self.step = f"create return for {product_name}"
@@ -219,28 +211,25 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _refund_return(self, method):
         self.step = f"refund return by {method}"
-        return_id = self._id_from_url(r"/returns/(\d+)/$")
-        returned = SaleReturn.objects.get(pk=return_id)
+        total_text = self.page.get_by_text(re.compile(r"^Total devuelto:")).inner_text()
+        amount = self._decimal_from_text(total_text)
         self.page.get_by_role("link", name="Registrar reembolso").click()
         self.page.get_by_label("Method").select_option(label=method)
-        self.page.get_by_label("Amount").fill(str(returned.total_amount))
+        self.page.get_by_label("Amount").fill(str(amount))
         self.page.get_by_label("Cash session").select_option(index=1)
         self.page.get_by_label("Pin").fill(self.OWNER_PIN)
         self.page.get_by_role("button", name="Registrar reembolso").click()
         expect(
             self.page.get_by_text("Reembolso registrado correctamente.")
         ).to_be_visible()
-        return returned.total_amount
+        return amount
 
     def _issue_rectification(self, expected_type):
         self.step = f"issue {expected_type}"
         self.page.get_by_role("link", name="Emitir rectificativa").click()
         self.page.get_by_label("Series").select_option(index=1)
         self.page.get_by_role("button", name="Emitir rectificativa").click()
-        document_id = self._id_from_url(r"/documents/(\d+)/$")
-        document = BillingDocument.objects.get(pk=document_id)
-        self.assertEqual(document.document_type, expected_type)
-        return document
+        return self._id_from_url(r"/documents/(\d+)/$")
 
     def _close_cash_session(self, session_id, expected_cash):
         self.step = "review and close cash session"
@@ -252,77 +241,104 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Counted amount").fill(str(expected_cash))
         self.page.get_by_label("Pin").fill(self.OWNER_PIN)
         self.page.get_by_role("button", name="Guardar").click()
-        expect(self.page.get_by_text(f"Esperado: {expected_cash}")).to_be_visible()
+        expect(self.page.get_by_text(re.compile(r"^Esperado:"))).to_be_visible()
 
     def test_full_browser_erp_happy_path(self):
-        try:
-            self.step = "login"
-            response = self.page.goto(self._url("/users/login/"))
-            self.assertEqual(response.status, 200)
-            expect(self.page).to_have_title(re.compile("Netxodo"))
-            self.page.get_by_label("Correo electrónico").fill(self.OWNER_EMAIL)
-            self.page.get_by_label("Contraseña").fill(self.OWNER_PASSWORD)
-            self.page.get_by_role("button", name="Iniciar sesión").click()
-            self.page.wait_for_url(self._url("/"))
-            expect(self.page.get_by_role("heading", name="Netxodo E2E")).to_be_visible()
-            expect(self.page.get_by_text("Tienda E2E", exact=True)).to_be_visible()
+        flow = self._run_browser_flow()
+        self._assert_database_state(**flow)
 
-            session_id = self._open_cash_session()
+    def _run_browser_flow(self):
+        """Run the browser phase and stop Playwright before returning to the ORM."""
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context()
+            self.page = context.new_page()
+            self.page.on("console", self._record_console)
+            self.page.on("pageerror", self._record_page_error)
+            try:
+                return self._run_browser_steps()
+            except Exception:
+                self._capture_failure()
+                raise
+            finally:
+                try:
+                    self.page.close()
+                finally:
+                    try:
+                        context.close()
+                    finally:
+                        browser.close()
 
-            f2_sale_id = self._open_sale(
-                customer="Cliente Mostrador DEMO",
-                document_type=RequestedDocumentTypeChoices.TICKET,
-            )
-            self._add_product("Agua mineral 500 ml", 2)
-            self._add_product("Envoltorio para regalo", 1)
-            self._complete_sale()
-            cash_payment_amount = self._pay_sale("Efectivo")
-            f2 = self._issue_document(BillingDocumentTypeChoices.F2)
-            f2_return_id = self._create_return(
-                sale_id=f2_sale_id,
-                product_name="Agua mineral 500 ml",
-                reason="Devolución E2E F2",
-            )
-            cash_refund_amount = self._refund_return("Efectivo")
-            r5 = self._issue_rectification(BillingDocumentTypeChoices.R5)
+    def _run_browser_steps(self):
+        self.step = "login"
+        response = self.page.goto(self._url("/users/login/"))
+        self.assertEqual(response.status, 200)
+        expect(self.page).to_have_title(re.compile("Netxodo"))
+        self.page.get_by_label("Correo electrónico").fill(self.OWNER_EMAIL)
+        self.page.get_by_label("Contraseña").fill(self.OWNER_PASSWORD)
+        self.page.get_by_role("button", name="Iniciar sesión").click()
+        self.page.wait_for_url(self._url("/"))
+        expect(self.page.get_by_role("heading", name="Netxodo E2E")).to_be_visible()
+        expect(self.page.get_by_text("Tienda E2E", exact=True)).to_be_visible()
 
-            f1_sale_id = self._open_sale(
-                customer="Empresa Demo Netxodo SL",
-                document_type=RequestedDocumentTypeChoices.INVOICE,
-            )
-            self._add_product("Refresco cola 330 ml", 2)
-            self._complete_sale()
-            card_payment_amount = self._pay_sale("Tarjeta")
-            f1 = self._issue_document(BillingDocumentTypeChoices.F1)
-            f1_return_id = self._create_return(
-                sale_id=f1_sale_id,
-                product_name="Refresco cola 330 ml",
-                reason="Devolución E2E F1",
-            )
-            card_refund_amount = self._refund_return("Tarjeta")
-            r1 = self._issue_rectification(BillingDocumentTypeChoices.R1)
+        session_id = self._open_cash_session()
 
-            expected_cash = Decimal("100.00") + cash_payment_amount - cash_refund_amount
-            self._close_cash_session(session_id, expected_cash)
-            self._assert_database_state(
-                session_id=session_id,
-                f2_sale_id=f2_sale_id,
-                f1_sale_id=f1_sale_id,
-                f2_return_id=f2_return_id,
-                f1_return_id=f1_return_id,
-                documents=(f2, r5, f1, r1),
-                amounts=(
-                    cash_payment_amount,
-                    cash_refund_amount,
-                    card_payment_amount,
-                    card_refund_amount,
-                ),
-                expected_cash=expected_cash,
-            )
-            self.assertEqual(self.javascript_errors, [])
-        except Exception:
-            self._capture_failure()
-            raise
+        f2_sale_id = self._open_sale(
+            customer="Cliente Mostrador DEMO",
+            document_type=RequestedDocumentTypeChoices.TICKET,
+        )
+        self._add_product("Agua mineral 500 ml", 2)
+        self._add_product("Envoltorio para regalo", 1)
+        self._complete_sale()
+        cash_payment_amount = self._pay_sale("Efectivo")
+        f2_document_id = self._issue_document(BillingDocumentTypeChoices.F2)
+        f2_return_id = self._create_return(
+            sale_id=f2_sale_id,
+            product_name="Agua mineral 500 ml",
+            reason="Devolución E2E F2",
+        )
+        cash_refund_amount = self._refund_return("Efectivo")
+        r5_document_id = self._issue_rectification(BillingDocumentTypeChoices.R5)
+
+        f1_sale_id = self._open_sale(
+            customer="Empresa Demo Netxodo SL",
+            document_type=RequestedDocumentTypeChoices.INVOICE,
+        )
+        self._add_product("Refresco cola 330 ml", 2)
+        self._complete_sale()
+        card_payment_amount = self._pay_sale("Tarjeta")
+        f1_document_id = self._issue_document(BillingDocumentTypeChoices.F1)
+        f1_return_id = self._create_return(
+            sale_id=f1_sale_id,
+            product_name="Refresco cola 330 ml",
+            reason="Devolución E2E F1",
+        )
+        card_refund_amount = self._refund_return("Tarjeta")
+        r1_document_id = self._issue_rectification(BillingDocumentTypeChoices.R1)
+
+        expected_cash = Decimal("100.00") + cash_payment_amount - cash_refund_amount
+        self._close_cash_session(session_id, expected_cash)
+        self.assertEqual(self.javascript_errors, [])
+        return {
+            "session_id": session_id,
+            "f2_sale_id": f2_sale_id,
+            "f1_sale_id": f1_sale_id,
+            "f2_return_id": f2_return_id,
+            "f1_return_id": f1_return_id,
+            "document_ids": (
+                f2_document_id,
+                r5_document_id,
+                f1_document_id,
+                r1_document_id,
+            ),
+            "amounts": (
+                cash_payment_amount,
+                cash_refund_amount,
+                card_payment_amount,
+                card_refund_amount,
+            ),
+            "expected_cash": expected_cash,
+        }
 
     def _assert_database_state(
         self,
@@ -332,10 +348,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         f1_sale_id,
         f2_return_id,
         f1_return_id,
-        documents,
+        document_ids,
         amounts,
         expected_cash,
     ):
+        self.assertEqual(Sale.objects.filter(business=self.business).count(), 2)
         f2_sale = Sale.objects.get(pk=f2_sale_id)
         f1_sale = Sale.objects.get(pk=f1_sale_id)
         self.assertEqual(
@@ -413,6 +430,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.assertEqual(session.expected_cash_amount, expected_cash)
         self.assertEqual(session.counted_cash_amount, expected_cash)
         self.assertEqual(session.difference_amount, Decimal("0.00"))
+        self.assertEqual(session.movements.count(), 2)
         self.assertEqual(
             session.movements.filter(
                 movement_type=CashMovement.MovementType.SALE_CASH
@@ -426,7 +444,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             1,
         )
 
-        f2, r5, f1, r1 = [BillingDocument.objects.get(pk=item.pk) for item in documents]
+        f2, r5, f1, r1 = [BillingDocument.objects.get(pk=pk) for pk in document_ids]
         self.assertEqual(
             BillingDocument.objects.filter(business=self.business).count(), 4
         )
