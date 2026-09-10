@@ -126,7 +126,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         # The cash-register endpoints predate navigation actions in their minimal UI.
         self._goto(f"/cash-register/stores/{self.store.pk}/open/")
         self.page.get_by_label("Cash register").select_option(
-            label="Caja principal (CAJA-01)"
+            value=str(self.cash_register.pk)
         )
         self.page.get_by_label("Opening amount").fill("100.00")
         self.page.get_by_role("button", name="Guardar").click()
@@ -144,7 +144,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_role("link", name="Abrir nueva venta").click()
         if customer:
             self.page.get_by_label("Cliente").select_option(label=customer)
-        self.page.get_by_label("Caja").select_option(label="Caja principal (CAJA-01)")
+        self.page.get_by_label("Caja").select_option(value=str(self.cash_register.pk))
         self.page.get_by_label("Sesión de caja").select_option(index=1)
         self.page.get_by_label("Documento solicitado").select_option(document_type)
         self.page.get_by_role("button", name="Guardar").click()
