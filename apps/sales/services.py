@@ -379,7 +379,10 @@ def _lock_sale(*, business, sale):
 
     try:
         return (
-            Sale.objects.select_for_update()
+            # Nullable select_related() paths use LEFT OUTER JOINs. PostgreSQL
+            # cannot apply an unrestricted FOR UPDATE to their nullable side;
+            # only the Sale row is needed to serialize sale mutations.
+            Sale.objects.select_for_update(of=("self",))
             .select_related(
                 "business",
                 "store",
