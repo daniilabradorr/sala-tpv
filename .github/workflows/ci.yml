@@ -152,3 +152,46 @@ jobs:
           uv run python manage.py test
           apps.sales.tests_postgres_locking
           --verbosity 2
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run full browser workflow
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: >-
+          uv run python manage.py test
+          e2e.browser_full_flow
+          --verbosity 2
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-failure
+          path: artifacts/e2e/
+          if-no-files-found: ignore
