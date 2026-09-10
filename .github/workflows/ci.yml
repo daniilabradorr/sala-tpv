@@ -189,6 +189,14 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev
 
+      - name: Collect static files
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py collectstatic --noinput
+
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
 
