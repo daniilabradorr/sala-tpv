@@ -4,7 +4,9 @@ from decimal import Decimal
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
+from apps.cash_register.models import CashRegister, CashSession
 from apps.inventory.models import StockMovement
 from apps.sales.models import Sale, SaleReturn, SaleStatusChoices
 from apps.sales.services import add_sale_line, complete_sale, open_sale
@@ -160,6 +162,32 @@ class SaleViewsIntegrationTests(TestCase):
         )
         self.assertTrue(logged_in)
 
+    def create_cash_register(self, *, business=None, store=None, name="Caja HTTP"):
+        business = business or self.business
+        store = store or self.store
+        return CashRegister.objects.create(
+            business=business,
+            store=store,
+            name=name,
+            code=f"HTTP-{CashRegister.objects.count() + 1}",
+        )
+
+    def create_cash_session(self, *, register, user=None, closed=False):
+        user = user or self.owner
+        session = CashSession.objects.create(
+            business=register.business,
+            store=register.store,
+            cash_register=register,
+            opened_by=user,
+        )
+        if closed:
+            session.status = CashSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.closed_by = user
+            session.counted_cash_amount = session.expected_cash_amount
+            session.save()
+        return session
+
     def create_open_sale_with_line(self, quantity=Decimal("1.000")):
         sale = open_sale(
             business=self.business,
@@ -208,6 +236,84 @@ class SaleViewsIntegrationTests(TestCase):
         )
         self.assertEqual(sale.status, SaleStatusChoices.OPEN)
         self.assertEqual(sale.opened_by, self.owner)
+
+    def test_open_get_initializes_single_register_and_only_exposes_safe_session(self):
+        settings = self.business.pos_settings
+        settings.require_open_cash_register = True
+        settings.save(update_fields=["require_open_cash_register", "updated_at"])
+        register = self.create_cash_register()
+        self.create_cash_session(register=register, closed=True)
+        open_session = self.create_cash_session(register=register)
+
+        other_store = create_sales_store(business=self.business, name="Otra tienda")
+        other_store_register = self.create_cash_register(store=other_store)
+        self.create_cash_session(register=other_store_register)
+
+        other_owner = create_sales_user(business=self.other_business)
+        other_register = self.create_cash_register(
+            business=self.other_business,
+            store=self.other_store,
+            name="Caja ajena",
+        )
+        self.create_cash_session(register=other_register, user=other_owner)
+
+        inactive_register = self.create_cash_register(name="Caja inactiva")
+        inactive_session = self.create_cash_session(register=inactive_register)
+        inactive_register.is_active = False
+        inactive_register.save(update_fields=["is_active", "updated_at"])
+
+        self.login_as(self.owner)
+        response = self.client.get(
+            reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertEqual(form.initial["cash_register"], register)
+        self.assertEqual(form.initial["cash_session"], open_session)
+        self.assertEqual(
+            set(form.fields["cash_session"].queryset.values_list("pk", flat=True)),
+            {open_session.pk},
+        )
+        self.assertNotIn(
+            inactive_session.pk,
+            form.fields["cash_session"].queryset.values_list("pk", flat=True),
+        )
+
+    def test_open_get_with_multiple_registers_does_not_choose_one_arbitrarily(self):
+        settings = self.business.pos_settings
+        settings.require_open_cash_register = True
+        settings.save(update_fields=["require_open_cash_register", "updated_at"])
+        first_register = self.create_cash_register(name="Caja primera")
+        second_register = self.create_cash_register(name="Caja segunda")
+        first_session = self.create_cash_session(register=first_register)
+        second_session = self.create_cash_session(register=second_register)
+
+        self.login_as(self.owner)
+        response = self.client.get(
+            reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertNotIn("cash_register", form.initial)
+        self.assertNotIn("cash_session", form.initial)
+        self.assertEqual(
+            set(form.fields["cash_session"].queryset.values_list("pk", flat=True)),
+            {first_session.pk, second_session.pk},
+        )
+
+        mismatch_response = self.client.post(
+            reverse("sales:sale_open", kwargs={"store_id": self.store.pk}),
+            data={
+                "document_type_requested": "ticket",
+                "cash_register": first_register.pk,
+                "cash_session": second_session.pk,
+            },
+        )
+        self.assertEqual(mismatch_response.status_code, 200)
+        self.assertIn("cash_session", mismatch_response.context["form"].errors)
+        self.assertFalse(Sale.objects.exists())
 
     def test_cashier_without_store_access_cannot_open_sale(self):
         self.login_as(self.cashier_without_access)

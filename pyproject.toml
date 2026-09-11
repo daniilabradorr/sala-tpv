@@ -15,6 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.55.0",
     "poethepoet>=0.35.0",
     "pytest>=8.0",
     "pytest-django>=4.8",

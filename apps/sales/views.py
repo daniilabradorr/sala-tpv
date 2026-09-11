@@ -26,7 +26,6 @@ from apps.billing.selectors import (
     billing_documents_for_sale,
     billing_documents_for_sale_return,
 )
-
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
@@ -42,6 +41,7 @@ from apps.sales.forms import (
     SaleReturnCompleteForm,
 )
 from apps.sales.selectors import (
+    get_sale_open_cash_initial,
     get_returnable_sale_lines,
     get_sale_detail,
     get_sale_line_detail,
@@ -392,10 +392,13 @@ class SaleOpenView(
     def get(self, request, store_id):
         business, store = self.get_business_and_store()
 
+        initial = get_sale_open_cash_initial(business=business, store=store)
+
         form = SaleOpenForm(
             business=business,
             store=store,
             user=request.user,
+            initial=initial,
         )
 
         return render(
