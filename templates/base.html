@@ -12,45 +12,32 @@
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     {% block extra_head %}{% endblock %}
 </head>
-<body>
-    <div class="app-shell">
-        <header class="site-header">
-            <div class="container">
-                <a href="{% url 'core:home' %}" class="brand-link" aria-label="Netxodo, inicio">
-                    <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="brand-logo">
-                </a>
-                <nav class="site-nav" aria-label="Navegación principal">
-                    {% if request.user.is_authenticated %}
-                        <a href="{% url 'core:home' %}">Inicio</a>
-                        {% if request.user.business_id %}
-                            <a href="{% url 'stores:store_list' %}">Tiendas</a>
-                            <a href="{% url 'catalog:dashboard' %}">Catálogo</a>
-                            <a href="{% url 'inventory:dashboard' %}">Inventario</a>
-                            <a href="{% url 'customers:customer_list' %}">Clientes</a>
-                        {% endif %}
-                        <a href="{% url 'users:profile' %}">Mi perfil</a>
-                        {% if request.user.business_id %}
-                            {% if request.user.is_superuser or request.user.role == 'owner' or request.user.role == 'manager' %}<a href="{% url 'users:user_list' %}">Usuarios</a>{% endif %}
-                            {% if request.user.is_superuser or request.user.role == 'owner' %}<a href="{% url 'business_config:profile' %}">Configuración</a>{% endif %}
-                        {% endif %}
-                        {% if request.user.is_superuser %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
-                        <form method="post" action="{% url 'users:logout' %}" class="nav-form">
-                            {% csrf_token %}<button type="submit" class="nav-button">Cerrar sesión</button>
-                        </form>
-                    {% else %}<a href="{% url 'users:login' %}">Iniciar sesión</a>{% endif %}
-                </nav>
+<body{% if request.user.is_authenticated %} class="has-app-shell"{% endif %}>
+    {% if request.user.is_authenticated %}
+        <div class="erp-shell" data-app-shell>
+            {% include "includes/sidebar.html" %}
+            <div class="sidebar-overlay" data-sidebar-overlay hidden></div>
+            <div class="erp-workspace">
+                {% include "includes/topbar.html" %}
+                <main id="main-content" class="site-main" tabindex="-1">
+                    <div class="content-container">
+                        {% include "includes/messages.html" %}
+                        {% block content %}{% endblock %}
+                    </div>
+                </main>
             </div>
-        </header>
-        <main class="site-main">
-            <div class="container">
-                {% if messages %}<div class="messages" aria-live="polite">
-                    {% for message in messages %}<div class="message{% if message.tags %} message-{{ message.tags }}{% endif %}" role="status">{{ message }}</div>{% endfor %}
-                </div>{% endif %}
-                {% block content %}<section class="card"><h1>Base del proyecto lista</h1><p>Django ya puede renderizar plantillas, cargar estáticos y usar HTMX.</p></section>{% endblock %}
-            </div>
-        </main>
-        <footer class="site-footer"><div class="container"><small>Netxodo · TPV para pequeños negocios</small></div></footer>
-    </div>
+        </div>
+    {% else %}
+        <div class="public-shell">
+            <main id="main-content" class="public-main">
+                <div class="public-container">
+                    {% include "includes/messages.html" %}
+                    {% block public_content %}{% block content_anonymous %}{% endblock %}{% endblock %}
+                </div>
+            </main>
+            <footer class="site-footer"><div class="public-container"><small>Netxodo · TPV para pequeños negocios</small></div></footer>
+        </div>
+    {% endif %}
     <script src="{% static 'js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>
