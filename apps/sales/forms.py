@@ -251,7 +251,11 @@ class SaleOpenForm(forms.Form):
             self.fields["cash_register"].widget = forms.HiddenInput()
             self.fields["cash_session"].widget = forms.HiddenInput()
 
-        if self.pos_settings and self.pos_settings.require_open_cash_register:
+        if (
+            locked_cash_session is None
+            and self.pos_settings
+            and self.pos_settings.require_open_cash_register
+        ):
             self.fields["cash_register"].required = True
 
             self.fields["cash_session"].required = True

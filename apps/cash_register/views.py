@@ -113,12 +113,12 @@ def open_session(request, store_id, cash_register_id=None):
         cash_register=register,
     )
     if request.method == "POST" and form.is_valid():
-        register = form.cleaned_data["cash_register"]
+        selected_register = register or form.cleaned_data["cash_register"]
         try:
             session = CashRegisterService().open_cash_session(
                 business=request.user.business,
                 store_id=store.pk,
-                cash_register_id=register.pk,
+                cash_register_id=selected_register.pk,
                 user=request.user,
                 opening_amount=form.cleaned_data["opening_amount"],
             )

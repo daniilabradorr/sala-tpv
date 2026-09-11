@@ -407,7 +407,7 @@ class SaleOpenView(
             )
         return session
 
-    def get(self, request, store_id):
+    def get(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
         locked_session = self.get_locked_cash_session(business, store)
         initial = (
@@ -437,7 +437,7 @@ class SaleOpenView(
             },
         )
 
-    def post(self, request, store_id):
+    def post(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
         locked_session = self.get_locked_cash_session(business, store)
 
@@ -477,8 +477,16 @@ class SaleOpenView(
                 opened_by=request.user,
                 customer=form.cleaned_data.get("customer"),
                 document_type_requested=(form.cleaned_data["document_type_requested"]),
-                cash_register=form.cleaned_data.get("cash_register"),
-                cash_session=form.cleaned_data.get("cash_session"),
+                cash_register=(
+                    locked_session.cash_register
+                    if locked_session
+                    else form.cleaned_data.get("cash_register")
+                ),
+                cash_session=(
+                    locked_session
+                    if locked_session
+                    else form.cleaned_data.get("cash_session")
+                ),
             )
         except ValidationError as error:
             _add_service_errors_to_form(form, error)

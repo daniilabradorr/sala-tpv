@@ -19,6 +19,9 @@ class CashSessionOpenForm(forms.Form):
             business=business, store=store, is_active=True
         )
         if cash_register is not None:
+            self.fields["cash_register"].queryset = self.fields[
+                "cash_register"
+            ].queryset.filter(pk=cash_register.pk)
             self.fields["cash_register"].initial = cash_register
             self.fields["cash_register"].widget = forms.HiddenInput()
 
