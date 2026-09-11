@@ -9,6 +9,7 @@ from apps.catalog.views import (
     CategoryUpdateView,
     CategoryActivateView,
     CategoryDeactivateView,
+    CategoryDeleteView,
     TaxListView,
     TaxDetailView,
     TaxCreateView,
@@ -16,12 +17,14 @@ from apps.catalog.views import (
     TaxActivateView,
     TaxDeactivateView,
     TaxSetDefaultView,
+    TaxDeleteView,
     ProductListView,
     ProductDetailView,
     ProductCreateView,
     ProductUpdateView,
     ProductActivateView,
     ProductDeactivateView,
+    ProductDeleteView,
 )
 
 
@@ -61,6 +64,11 @@ class CatalogUrlsTests(SimpleTestCase):
 
         self.assertEqual(resolve(url).func.view_class, CategoryDeactivateView)
 
+    def test_category_delete_url_resolves(self):
+        url = reverse("catalog:category_delete", kwargs={"pk": 1})
+
+        self.assertEqual(resolve(url).func.view_class, CategoryDeleteView)
+
     def test_tax_list_url_resolves(self):
         url = reverse("catalog:tax_list")
 
@@ -96,6 +104,11 @@ class CatalogUrlsTests(SimpleTestCase):
 
         self.assertEqual(resolve(url).func.view_class, TaxSetDefaultView)
 
+    def test_tax_delete_url_resolves(self):
+        url = reverse("catalog:tax_delete", kwargs={"pk": 1})
+
+        self.assertEqual(resolve(url).func.view_class, TaxDeleteView)
+
     def test_product_list_url_resolves(self):
         url = reverse("catalog:product_list")
 
@@ -125,3 +138,8 @@ class CatalogUrlsTests(SimpleTestCase):
         url = reverse("catalog:product_deactivate", kwargs={"pk": 1})
 
         self.assertEqual(resolve(url).func.view_class, ProductDeactivateView)
+
+    def test_product_delete_url_resolves(self):
+        url = reverse("catalog:product_delete", kwargs={"pk": 1})
+
+        self.assertEqual(resolve(url).func.view_class, ProductDeleteView)

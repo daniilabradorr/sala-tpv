@@ -1,6 +1,7 @@
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views import View
 from django.views.generic import (
@@ -20,6 +21,7 @@ from apps.catalog.forms import (
     ProductCreateForm,
     ProductUpdateForm,
 )
+from apps.catalog.services import delete_category, delete_product, delete_tax
 from apps.users.mixins import (
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -272,6 +274,28 @@ class CategoryDeactivateView(
             "catalog:category_detail",
             pk=category.pk,
         )
+
+
+class CategoryDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/categories/category_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Category, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"category": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        category = self.get_object()
+        try:
+            delete_category(business=request.user.business, category=category)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:category_detail", pk=category.pk)
+        messages.success(request, "Categoría eliminada correctamente.")
+        return redirect("catalog:category_list")
 
 
 # ==========================
@@ -536,6 +560,28 @@ class TaxSetDefaultView(
         )
 
 
+class TaxDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/taxes/tax_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Tax, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"tax": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        tax = self.get_object()
+        try:
+            delete_tax(business=request.user.business, tax=tax)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:tax_detail", pk=tax.pk)
+        messages.success(request, "Impuesto eliminado correctamente.")
+        return redirect("catalog:tax_list")
+
+
 # ==========================
 # Productos
 # ==========================
@@ -741,3 +787,25 @@ class ProductDeactivateView(
             "catalog:product_detail",
             pk=product.pk,
         )
+
+
+class ProductDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/products/product_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Product, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"product": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        product = self.get_object()
+        try:
+            delete_product(business=request.user.business, product=product)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:product_detail", pk=product.pk)
+        messages.success(request, "Producto eliminado correctamente.")
+        return redirect("catalog:product_list")

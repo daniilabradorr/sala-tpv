@@ -82,6 +82,32 @@ class StoreViewsIntegrationTests(TestCase):
         data.update(overrides)
         return data
 
+    def test_owner_sees_edit_store_action_using_existing_update_route(self):
+        self.login_as(self.owner)
+        response = self.client.get(reverse("stores:store_list"))
+
+        self.assertContains(response, "Editar tienda")
+        self.assertContains(
+            response, reverse("stores:store_update", kwargs={"pk": self.store.pk})
+        )
+
+    def test_store_update_rejects_cross_business_and_cashier(self):
+        self.login_as(self.owner)
+        self.assertEqual(
+            self.client.get(
+                reverse("stores:store_update", kwargs={"pk": self.other_store.pk})
+            ).status_code,
+            404,
+        )
+        self.client.logout()
+        self.login_as(self.cashier)
+        self.assertEqual(
+            self.client.get(
+                reverse("stores:store_update", kwargs={"pk": self.store.pk})
+            ).status_code,
+            403,
+        )
+
     def test_store_list_only_shows_stores_from_current_business(self):
         """
         Test de integración:
