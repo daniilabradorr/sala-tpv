@@ -144,7 +144,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_role("link", name="Abrir nueva venta").click()
         if customer:
             self.page.get_by_label("Cliente").select_option(label=customer)
-        self.page.get_by_label("Caja", exact=True).select_option(
+        self.page.locator("#id_cash_register").select_option(
             value=str(self.cash_register.pk)
         )
         self.page.get_by_label("Sesión de caja", exact=True).select_option(index=1)

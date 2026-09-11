@@ -225,10 +225,11 @@ class SaleOpenForm(forms.Form):
             store=store,
             status=CashSession.Status.OPEN,
             closed_at__isnull=True,
+            cash_register__is_active=True,
         )
         if register_id:
             session_queryset = session_queryset.filter(cash_register_id=register_id)
-        else:
+        elif self.is_bound:
             session_queryset = session_queryset.none()
         session_queryset = session_queryset.order_by("pk")
 

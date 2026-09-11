@@ -26,6 +26,7 @@ from apps.billing.selectors import (
     billing_documents_for_sale,
     billing_documents_for_sale_return,
 )
+from apps.cash_register.models import CashRegister, CashSession
 
 from apps.sales.forms import (
     SaleCancelForm,
@@ -392,10 +393,35 @@ class SaleOpenView(
     def get(self, request, store_id):
         business, store = self.get_business_and_store()
 
+        active_registers = list(
+            CashRegister.objects.filter(
+                business=business,
+                store=store,
+                is_active=True,
+            ).order_by("pk")[:2]
+        )
+        initial = {}
+        if len(active_registers) == 1:
+            register = active_registers[0]
+            initial["cash_register"] = register
+            open_sessions = list(
+                CashSession.objects.filter(
+                    business=business,
+                    store=store,
+                    cash_register=register,
+                    cash_register__is_active=True,
+                    status=CashSession.Status.OPEN,
+                    closed_at__isnull=True,
+                ).order_by("pk")[:2]
+            )
+            if len(open_sessions) == 1:
+                initial["cash_session"] = open_sessions[0]
+
         form = SaleOpenForm(
             business=business,
             store=store,
             user=request.user,
+            initial=initial,
         )
 
         return render(
