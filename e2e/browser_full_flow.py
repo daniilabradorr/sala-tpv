@@ -193,7 +193,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _issue_document(self, expected_type):
         self.step = f"issue {expected_type}"
         self.page.get_by_role("link", name="Emitir documento fiscal").click()
-        self.page.get_by_label("Series").select_option(index=1)
+        self.page.locator("#id_series").select_option(index=1)
         self.page.get_by_role("button", name="Emitir", exact=True).click()
         expect(
             self.page.get_by_text("Estado").locator("xpath=following-sibling::dd[1]")
@@ -242,7 +242,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _issue_rectification(self, expected_type):
         self.step = f"issue {expected_type}"
         self.page.get_by_role("link", name="Emitir rectificativa").click()
-        self.page.get_by_label("Series").select_option(index=1)
+        self.page.locator("#id_series").select_option(index=1)
         self.page.get_by_role("button", name="Emitir rectificativa").click()
         return self._id_from_url(r"/documents/(\d+)/$")
 
