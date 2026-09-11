@@ -135,15 +135,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _open_cash_session(self):
         self.step = "open cash session"
         self.page.get_by_role("link", name="Caja").click()
-        expect(self.page.get_by_text("Caja principal (CAJA-01)")).to_be_visible()
-        # The cash-register endpoints predate navigation actions in their minimal UI.
-        self._goto(f"/cash-register/stores/{self.store.pk}/open/")
-        self.page.get_by_label("Cash register").select_option(
-            value=str(self.cash_register.pk)
-        )
-        self.page.get_by_label("Opening amount").fill("100.00")
+        expect(self.page.get_by_text("Caja principal", exact=True)).to_be_visible()
+        self.page.get_by_role("link", name="Abrir caja").click()
+        self.page.get_by_label("Efectivo inicial").fill("100.00")
         self.page.get_by_role("button", name="Guardar").click()
-        expect(self.page.get_by_text("Operación de caja completada.")).to_be_visible()
+        expect(self.page.get_by_text("Caja abierta correctamente.")).to_be_visible()
         return self._db_value(
             lambda: CashSession.objects.values_list("pk", flat=True).get(
                 business_id=self.business.pk,
@@ -153,14 +149,10 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _open_sale(self, *, customer, document_type, session_id):
         self.step = f"open {document_type} sale"
-        self._goto(f"/sales/stores/{self.store.pk}/sales/")
-        self.page.get_by_role("link", name="Abrir nueva venta").click()
+        self._goto(f"/cash-register/stores/{self.store.pk}/sessions/{session_id}/")
+        self.page.get_by_role("link", name="Nueva venta").click()
         if customer:
             self.page.get_by_label("Cliente").select_option(label=customer)
-        self.page.locator("#id_cash_register").select_option(
-            value=str(self.cash_register.pk)
-        )
-        self.page.locator("#id_cash_session").select_option(value=str(session_id))
         self.page.get_by_label("Documento solicitado").select_option(document_type)
         self.page.get_by_role("button", name="Guardar").click()
         return self._id_from_url(r"/sales/(\d+)/$")
@@ -249,14 +241,16 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _close_cash_session(self, session_id, expected_cash):
         self.step = "review and close cash session"
         base = f"/cash-register/stores/{self.store.pk}/sessions/{session_id}"
-        self._goto(f"{base}/review/")
+        self._goto(f"{base}/")
+        self.page.get_by_role("link", name="Arqueo / Revisión").click()
         self.page.get_by_label("Counted amount").fill(str(expected_cash))
         self.page.get_by_role("button", name="Guardar").click()
-        self._goto(f"{base}/close/")
+        self._goto(f"{base}/")
+        self.page.get_by_role("link", name="Cerrar caja").click()
         self.page.get_by_label("Counted amount").fill(str(expected_cash))
         self.page.get_by_label("Pin").fill(self.OWNER_PIN)
         self.page.get_by_role("button", name="Guardar").click()
-        expect(self.page.get_by_text(re.compile(r"^Esperado:"))).to_be_visible()
+        expect(self.page.get_by_text("Efectivo esperado", exact=True)).to_be_visible()
 
     def test_full_browser_erp_happy_path(self):
         flow = self._run_browser_flow()

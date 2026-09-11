@@ -10,6 +10,8 @@ from apps.cash_register.selectors import (
     get_cash_session_counts,
     get_cash_session_movements,
     get_cash_session_payment_summary,
+    get_cash_registers_for_store,
+    get_sales_for_cash_session,
     get_open_cash_session,
 )
 from apps.cash_register.test_factories import (
@@ -56,6 +58,47 @@ class CashRegisterSelectorsTests(TestCase):
             get_cash_session_movements(
                 business=self.business, store=self.store, cash_session=self.session
             ).exists()
+        )
+
+    def test_register_list_prefetches_only_open_sessions(self):
+        registers = list(
+            get_cash_registers_for_store(business=self.business, store=self.store)
+        )
+        self.assertEqual(registers[0].open_sessions, [self.session])
+
+    def test_sales_for_session_are_explicitly_tenant_and_store_scoped(self):
+        included = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=self.session.cash_register,
+            cash_session=self.session,
+        )
+        other_register = create_cash_register(
+            business=self.business, store=self.store, code="OTHER-SESSION"
+        )
+        other_session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=other_register,
+            opened_by=self.user,
+        )
+        create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=other_register,
+            cash_session=other_session,
+        )
+        self.assertEqual(
+            list(
+                get_sales_for_cash_session(
+                    business=self.business,
+                    store=self.store,
+                    cash_session=self.session,
+                )
+            ),
+            [included],
         )
         self.assertFalse(
             get_cash_session_counts(

@@ -26,6 +26,8 @@ from apps.billing.selectors import (
     billing_documents_for_sale,
     billing_documents_for_sale_return,
 )
+from apps.cash_register.models import CashSession
+from apps.cash_register.selectors import get_cash_session_detail
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
@@ -389,16 +391,40 @@ class SaleOpenView(
 
     template_name = "sales/sale_open.html"
 
+    def get_locked_cash_session(self, business, store):
+        session_id = self.kwargs.get("session_id")
+        if session_id is None:
+            return None
+        try:
+            session = get_cash_session_detail(
+                business=business, store=store, cash_session_id=session_id
+            )
+        except CashSession.DoesNotExist as exc:
+            raise Http404("La sesión de caja no existe.") from exc
+        if not session.is_open or not session.cash_register.is_active:
+            raise PermissionDenied(
+                "No se puede abrir una venta en esta sesión de caja."
+            )
+        return session
+
     def get(self, request, store_id):
         business, store = self.get_business_and_store()
-
-        initial = get_sale_open_cash_initial(business=business, store=store)
+        locked_session = self.get_locked_cash_session(business, store)
+        initial = (
+            {
+                "cash_register": locked_session.cash_register,
+                "cash_session": locked_session,
+            }
+            if locked_session
+            else get_sale_open_cash_initial(business=business, store=store)
+        )
 
         form = SaleOpenForm(
             business=business,
             store=store,
             user=request.user,
             initial=initial,
+            locked_cash_session=locked_session,
         )
 
         return render(
@@ -407,17 +433,28 @@ class SaleOpenView(
             {
                 "store": store,
                 "form": form,
+                "locked_cash_session": locked_session,
             },
         )
 
     def post(self, request, store_id):
         business, store = self.get_business_and_store()
+        locked_session = self.get_locked_cash_session(business, store)
 
         form = SaleOpenForm(
             request.POST,
             business=business,
             store=store,
             user=request.user,
+            initial=(
+                {
+                    "cash_register": locked_session.cash_register,
+                    "cash_session": locked_session,
+                }
+                if locked_session
+                else None
+            ),
+            locked_cash_session=locked_session,
         )
 
         if not form.is_valid():
@@ -429,6 +466,7 @@ class SaleOpenView(
                 {
                     "store": store,
                     "form": form,
+                    "locked_cash_session": locked_session,
                 },
             )
 
@@ -451,6 +489,7 @@ class SaleOpenView(
                 {
                     "store": store,
                     "form": form,
+                    "locked_cash_session": locked_session,
                 },
             )
 

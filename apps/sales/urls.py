@@ -15,6 +15,11 @@ urlpatterns = [
         name="sale_open",
     ),
     path(
+        "stores/<int:store_id>/cash-sessions/<int:session_id>/sales/open/",
+        views.SaleOpenView.as_view(),
+        name="sale_open_for_session",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/",
         views.SaleDetailView.as_view(),
         name="sale_detail",

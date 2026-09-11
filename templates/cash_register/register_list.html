@@ -1,1 +1,21 @@
-{% extends "base.html" %}{% block content %}<h1>Cajas · {{ store.name }}</h1>{% for register in cash_registers %}<p>{{ register.name }} ({{ register.code }})</p>{% empty %}<p>No hay cajas.</p>{% endfor %}{% endblock %}
+{% extends "base.html" %}
+{% block title %}Cajas · {{ store.name }} | Netxodo{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="page-heading">
+    <div><span class="eyebrow">Operativa TPV</span><h1>Cajas · {{ store.name }}</h1><p class="intro">Abre una caja o entra en su sesión operativa.</p></div>
+    <div class="actions"><a class="button button-secondary" href="{% url 'cash_register:history' store.pk %}">Historial de sesiones</a><a class="button button-secondary" href="{% url 'stores:store_detail' store.pk %}">Volver a la tienda</a></div>
+  </div>
+  <div class="register-grid">
+  {% for register in cash_registers %}
+    <article class="register-card">
+      <div class="page-heading"><div><h2>{{ register.name }}</h2><p>{{ register.code }}</p></div><div class="status-line"><span class="badge {% if register.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if register.is_active %}Activa{% else %}Inactiva{% endif %}</span><span class="badge {% if register.open_sessions %}badge-active{% else %}badge-neutral{% endif %}">{% if register.open_sessions %}ABIERTA{% else %}CERRADA{% endif %}</span></div></div>
+      {% if register.open_sessions %}{% with session=register.open_sessions.0 %}
+      <dl class="details-grid compact"><div><dt>Abierta por</dt><dd>{{ session.opened_by.get_full_name|default:session.opened_by.email }}</dd></div><div><dt>Desde</dt><dd>{{ session.opened_at|date:"d/m/Y H:i" }}</dd></div><div><dt>Inicial</dt><dd>{{ session.opening_amount|floatformat:2 }} €</dd></div><div><dt>Esperado</dt><dd>{{ session.expected_cash_amount|floatformat:2 }} €</dd></div></dl>
+      <div class="actions"><a class="button" href="{% url 'cash_register:session_detail' store.pk session.pk %}">Entrar en caja</a></div>
+      {% endwith %}{% elif register.is_active %}<div class="actions"><a class="button" href="{% url 'cash_register:register_open' store.pk register.pk %}">Abrir caja</a></div>{% else %}<p class="empty-state">Activa la caja para poder abrir una sesión.</p>{% endif %}
+    </article>
+  {% empty %}<p class="empty-state">No hay cajas configuradas para esta tienda.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}
