@@ -179,15 +179,15 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             {"cash_register": register_b.pk, "opening_amount": "25.00"},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertFormError(
-            response.context["form"],
-            "cash_register",
-            "Seleccione una opción válida. La opción seleccionada no es una de las disponibles.",
+        self.assertEqual(
+            response.context["form"].errors.as_data()["cash_register"][0].code,
+            "invalid_choice",
         )
         self.assertFalse(CashSession.objects.filter(cash_register=register_a).exists())
         self.assertFalse(CashSession.objects.filter(cash_register=register_b).exists())
 
     def test_new_sale_from_session_uses_server_validated_cash_context(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
         register = create_cash_register(business=self.business, store=self.store)
         session = CashSession.objects.create(
             business=self.business,
@@ -215,6 +215,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertEqual(sale.opened_by, self.user)
 
     def test_contextual_sale_does_not_require_cash_fields_in_post(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
         register = create_cash_register(business=self.business, store=self.store)
         session = CashSession.objects.create(
             business=self.business,
@@ -236,6 +237,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertEqual(sale.opened_by, self.user)
 
     def test_contextual_sale_rejects_manipulated_cash_context(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
         register_a = create_cash_register(business=self.business, store=self.store)
         session_a = CashSession.objects.create(
             business=self.business,
