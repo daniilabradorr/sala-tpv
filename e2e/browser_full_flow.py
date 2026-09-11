@@ -14,6 +14,7 @@ from pathlib import Path
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.db import connections
+from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
 from apps.billing.models import (
@@ -44,6 +45,13 @@ from apps.sales.models import (
 )
 
 
+@override_settings(
+    STORAGES={
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+)
 class BrowserFullFlowTests(StaticLiveServerTestCase):
     """Drive every commercial command through real pages and CSRF-protected forms."""
 
@@ -77,6 +85,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.cash_register = result.cash_register
         self.console_messages = []
         self.javascript_errors = []
+        self.local_static_responses = []
         self.step = "setup"
 
     @staticmethod
@@ -98,6 +107,10 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _record_page_error(self, error):
         self.javascript_errors.append(str(error))
+
+    def _record_response(self, response):
+        if response.url.startswith(f"{self.live_server_url}/static/"):
+            self.local_static_responses.append((response.url, response.status))
 
     def _url(self, path):
         return f"{self.live_server_url}{path}"
@@ -138,7 +151,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             )
         )
 
-    def _open_sale(self, *, customer, document_type):
+    def _open_sale(self, *, customer, document_type, session_id):
         self.step = f"open {document_type} sale"
         self._goto(f"/sales/stores/{self.store.pk}/sales/")
         self.page.get_by_role("link", name="Abrir nueva venta").click()
@@ -147,7 +160,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.locator("#id_cash_register").select_option(
             value=str(self.cash_register.pk)
         )
-        self.page.get_by_label("Sesión de caja", exact=True).select_option(index=1)
+        self.page.locator("#id_cash_session").select_option(value=str(session_id))
         self.page.get_by_label("Documento solicitado").select_option(document_type)
         self.page.get_by_role("button", name="Guardar").click()
         return self._id_from_url(r"/sales/(\d+)/$")
@@ -257,6 +270,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             self.page = context.new_page()
             self.page.on("console", self._record_console)
             self.page.on("pageerror", self._record_page_error)
+            self.page.on("response", self._record_response)
             try:
                 return self._run_browser_steps()
             except Exception:
@@ -276,6 +290,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         response = self.page.goto(self._url("/users/login/"))
         self.assertEqual(response.status, 200)
         expect(self.page).to_have_title(re.compile("Netxodo"))
+        self._assert_local_static_assets()
         self.page.get_by_label("Correo electrónico").fill(self.OWNER_EMAIL)
         self.page.get_by_label("Contraseña").fill(self.OWNER_PASSWORD)
         self.page.get_by_role("button", name="Iniciar sesión").click()
@@ -288,6 +303,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         f2_sale_id = self._open_sale(
             customer="Cliente Mostrador DEMO",
             document_type=RequestedDocumentTypeChoices.TICKET,
+            session_id=session_id,
         )
         self._add_product("Agua mineral 500 ml", 2)
         self._add_product("Envoltorio para regalo", 1)
@@ -305,6 +321,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         f1_sale_id = self._open_sale(
             customer="Empresa Demo Netxodo SL",
             document_type=RequestedDocumentTypeChoices.INVOICE,
+            session_id=session_id,
         )
         self._add_product("Refresco cola 330 ml", 2)
         self._complete_sale()
@@ -341,6 +358,24 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             ),
             "expected_cash": expected_cash,
         }
+
+    def _assert_local_static_assets(self):
+        logo = self.page.locator("img.brand-logo")
+        expect(logo).to_be_visible()
+        self.assertTrue(
+            logo.evaluate("(img) => img.complete && img.naturalWidth > 0"),
+            "The Netxodo logo did not load successfully.",
+        )
+
+        responses = dict(self.local_static_responses)
+        expected_paths = ("/static/css/base.css", "/static/js/app.js")
+        for path in expected_paths:
+            url = self._url(path)
+            self.assertIn(url, responses, f"The browser did not request {path}.")
+            self.assertLess(responses[url], 400, f"Static asset failed: {url}")
+
+        failures = [(url, status) for url, status in responses.items() if status >= 400]
+        self.assertEqual(failures, [], f"Local static asset failures: {failures}")
 
     def _assert_database_state(
         self,
