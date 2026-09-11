@@ -262,7 +262,7 @@ def register_sale_payment(
     _validate_business(business)
     try:
         sale = (
-            Sale.objects.select_for_update()
+            Sale.objects.select_for_update(of=("self",))
             .select_related("store", "cash_session")
             .get(pk=sale_id, business=business)
         )
@@ -376,7 +376,7 @@ def register_refund(
             {"sale_return": "La devolución no pertenece al negocio."}
         ) from exc
     sale = (
-        Sale.objects.select_for_update()
+        Sale.objects.select_for_update(of=("self",))
         .select_related("cash_session")
         .get(pk=returned.original_sale_id, business=business)
     )
@@ -493,7 +493,7 @@ def register_sale_on_account(*, business, sale_id, user):
     _validate_business(business)
     try:
         sale = (
-            Sale.objects.select_for_update()
+            Sale.objects.select_for_update(of=("self",))
             .select_related("store", "customer")
             .get(pk=sale_id, business=business)
         )

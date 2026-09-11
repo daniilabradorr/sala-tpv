@@ -25,6 +25,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
+from apps.cash_register.models import CashRegister, CashSession
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -35,6 +36,35 @@ from apps.sales.models import (
     SaleReturnStatusChoices,
     SaleStatusChoices,
 )
+
+
+def get_sale_open_cash_initial(*, business, store):
+    """Return deterministic cash defaults without choosing among alternatives."""
+    active_registers = list(
+        CashRegister.objects.filter(
+            business=business,
+            store=store,
+            is_active=True,
+        ).order_by("pk")[:2]
+    )
+    if len(active_registers) != 1:
+        return {}
+
+    register = active_registers[0]
+    initial = {"cash_register": register}
+    open_sessions = list(
+        CashSession.objects.filter(
+            business=business,
+            store=store,
+            cash_register=register,
+            cash_register__is_active=True,
+            status=CashSession.Status.OPEN,
+            closed_at__isnull=True,
+        ).order_by("pk")[:2]
+    )
+    if len(open_sessions) == 1:
+        initial["cash_session"] = open_sessions[0]
+    return initial
 
 
 # ==========================================================
