@@ -3,7 +3,7 @@
 {% block title %}Abrir venta | Netxodo{% endblock %}
 
 {% block content %}
-<main>
+<section class="card">
     <h1>{{ title|default:"Ventas" }}</h1>
 
     {% if locked_cash_session %}<p class="catalog-note">La venta se asociará a <strong>{{ locked_cash_session.cash_register.name }}</strong>, sesión #{{ locked_cash_session.pk }}.</p>{% endif %}
@@ -16,5 +16,5 @@
             Guardar
         </button>
     </form>
-</main>
+</section>
 {% endblock %}

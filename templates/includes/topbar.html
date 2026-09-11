@@ -1,0 +1,14 @@
+<header class="topbar">
+    <button class="sidebar-toggle" type="button" aria-label="Abrir menú" aria-controls="app-sidebar" aria-expanded="false" data-sidebar-toggle>
+        <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+    </button>
+    <div class="topbar-context">
+        {% if store %}<span class="context-label">Tienda</span><strong>{{ store.name }}</strong>
+        {% elif request.user.business_id %}<span class="context-label">Negocio</span><strong>{{ request.user.business.name }}</strong>
+        {% else %}<span class="context-label">Netxodo</span><strong>Administración</strong>{% endif %}
+    </div>
+    <div class="topbar-user">
+        <span class="user-name">{{ request.user.get_full_name|default:request.user.email }}</span>
+        <span class="user-meta">{{ request.user.email }}{% if request.user.role %} · {{ request.user.get_role_display }}{% endif %}</span>
+    </div>
+</header>
