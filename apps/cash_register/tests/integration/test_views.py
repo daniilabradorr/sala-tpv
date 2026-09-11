@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.cash_register.models import CashSession
 from apps.cash_register.test_factories import (
@@ -9,6 +10,8 @@ from apps.cash_register.test_factories import (
 )
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_user
+from apps.sales.models import RequestedDocumentTypeChoices, Sale
+from apps.sales.tests.factories import create_pos_settings, create_sale
 
 
 class CashRegisterSessionViewIsolationTests(TestCase):
@@ -77,3 +80,266 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             self.detail_url(store_id=self.store.pk, session_id=session.pk)
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_register_list_shows_open_and_closed_actions(self):
+        closed_register = create_cash_register(
+            business=self.business, store=self.store, name="Caja cerrada", code="CLOSED"
+        )
+        open_register = create_cash_register(
+            business=self.business, store=self.store, name="Caja abierta", code="OPEN"
+        )
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=open_register,
+            opened_by=self.user,
+        )
+        response = self.client.get(
+            reverse("cash_register:register_list", kwargs={"store_id": self.store.pk})
+        )
+        self.assertContains(response, "Caja cerrada")
+        self.assertContains(response, "Abrir caja")
+        self.assertContains(response, "Caja abierta")
+        self.assertContains(response, "Entrar en caja")
+        self.assertContains(response, "Esperado")
+        self.assertIn(closed_register, list(response.context["cash_registers"]))
+        rendered_open_register = next(
+            item
+            for item in response.context["cash_registers"]
+            if item.pk == open_register.pk
+        )
+        self.assertEqual(
+            rendered_open_register.open_sessions[0].expected_cash_amount,
+            session.expected_cash_amount,
+        )
+
+    def test_session_detail_lists_only_its_sales_and_opened_by(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        included = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=register,
+            cash_session=session,
+        )
+        other_register = create_cash_register(
+            business=self.business, store=self.store, code="OTHER-SALES"
+        )
+        other_session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=other_register,
+            opened_by=self.user,
+        )
+        excluded = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=other_register,
+            cash_session=other_session,
+        )
+        response = self.client.get(
+            self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        )
+        self.assertContains(response, f"#{included.pk}")
+        self.assertContains(response, self.user.email)
+        self.assertNotContains(response, f"#{excluded.pk}")
+
+    def test_open_from_register_records_authenticated_user(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        response = self.client.post(
+            reverse(
+                "cash_register:register_open",
+                kwargs={"store_id": self.store.pk, "cash_register_id": register.pk},
+            ),
+            {"cash_register": register.pk, "opening_amount": "25.00"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            CashSession.objects.get(cash_register=register).opened_by, self.user
+        )
+
+    def test_contextual_register_open_rejects_manipulated_register(self):
+        register_a = create_cash_register(business=self.business, store=self.store)
+        register_b = create_cash_register(business=self.business, store=self.store)
+        response = self.client.post(
+            reverse(
+                "cash_register:register_open",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "cash_register_id": register_a.pk,
+                },
+            ),
+            {"cash_register": register_b.pk, "opening_amount": "25.00"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["form"].errors.as_data()["cash_register"][0].code,
+            "invalid_choice",
+        )
+        self.assertFalse(CashSession.objects.filter(cash_register=register_a).exists())
+        self.assertFalse(CashSession.objects.filter(cash_register=register_b).exists())
+
+    def test_new_sale_from_session_uses_server_validated_cash_context(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            ),
+            {
+                "cash_register": register.pk,
+                "cash_session": session.pk,
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.get()
+        self.assertEqual(sale.business, self.business)
+        self.assertEqual(sale.store, self.store)
+        self.assertEqual(sale.cash_register, register)
+        self.assertEqual(sale.cash_session, session)
+        self.assertEqual(sale.opened_by, self.user)
+
+    def test_contextual_sale_does_not_require_cash_fields_in_post(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            ),
+            {"document_type_requested": RequestedDocumentTypeChoices.TICKET},
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.get()
+        self.assertEqual(sale.cash_register, register)
+        self.assertEqual(sale.cash_session, session)
+        self.assertEqual(sale.opened_by, self.user)
+
+    def test_contextual_sale_rejects_manipulated_cash_context(self):
+        create_pos_settings(business=self.business, require_open_cash_register=True)
+        register_a = create_cash_register(business=self.business, store=self.store)
+        session_a = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register_a,
+            opened_by=self.user,
+        )
+        register_b = create_cash_register(business=self.business, store=self.store)
+        session_b = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register_b,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session_a.pk},
+            ),
+            {
+                "cash_register": register_b.pk,
+                "cash_session": session_b.pk,
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Sale.objects.exists())
+
+    def test_contextual_sale_keeps_session_when_cash_register_not_required(self):
+        create_pos_settings(business=self.business, require_open_cash_register=False)
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            ),
+            {"document_type_requested": RequestedDocumentTypeChoices.TICKET},
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.get()
+        self.assertEqual(sale.cash_register, register)
+        self.assertEqual(sale.cash_session, session)
+
+    def test_contextual_sale_from_other_store_returns_404(self):
+        other_store = create_cash_store(business=self.business)
+        register = create_cash_register(business=self.business, store=other_store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=other_store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.get(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            )
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_contextual_sale_from_other_business_returns_404(self):
+        other_business = create_cash_business()
+        other_store = create_cash_store(business=other_business)
+        other_user = create_user(business=other_business, email="other-sale@test.com")
+        register = create_cash_register(business=other_business, store=other_store)
+        session = CashSession.objects.create(
+            business=other_business,
+            store=other_store,
+            cash_register=register,
+            opened_by=other_user,
+        )
+        response = self.client.get(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            )
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_new_sale_from_closed_session_is_rejected(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        session.status = CashSession.Status.CLOSED
+        session.closed_at = timezone.now()
+        session.closed_by = self.user
+        session.counted_cash_amount = session.expected_cash_amount
+        session.save()
+        response = self.client.get(
+            reverse(
+                "sales:sale_open_for_session",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            )
+        )
+        self.assertEqual(response.status_code, 403)

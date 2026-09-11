@@ -184,6 +184,15 @@ tbody tr:hover { background: rgba(0, 97, 193, .08); }
 .store-card h3 { margin: 0; }
 .store-card .actions { align-items: stretch; }
 .empty-state { padding: 1rem; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); }
+.register-grid, .payment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.register-card, .payment-grid article { padding: 1.2rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(2, 12, 24, .35); }
+.register-card h2, .payment-grid h3 { margin: 0 0 .35rem; }
+.details-grid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.operational-section { margin-top: 1rem; }
+.operational-section > h2 { margin-top: 0; }
+.payment-grid dl { margin-bottom: 0; }
+.payment-grid dl div { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.payment-grid dd { margin: 0; font-weight: 700; }
 .config-nav { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
 
 @media (max-width: 760px) {

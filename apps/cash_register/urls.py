@@ -7,6 +7,11 @@ app_name = "cash_register"
 urlpatterns = [
     path("stores/<int:store_id>/", views.register_list, name="register_list"),
     path("stores/<int:store_id>/open/", views.open_session, name="open"),
+    path(
+        "stores/<int:store_id>/registers/<int:cash_register_id>/open/",
+        views.open_session,
+        name="register_open",
+    ),
     path("stores/<int:store_id>/history/", views.history, name="history"),
     path(
         "stores/<int:store_id>/sessions/<int:session_id>/",

@@ -1,1 +1,9 @@
-{% extends "base.html" %}{% block content %}<h1>{{ title|default:"Caja" }}</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Guardar</button></form>{% endblock %}
+{% extends "base.html" %}
+{% block title %}{{ title|default:"Operación de caja" }} | Netxodo{% endblock %}
+{% block content %}
+<section class="card card-form">
+  <span class="eyebrow">Caja</span><h1>{{ title|default:"Operación de caja" }}</h1>
+  {% if cash_register %}<p class="catalog-note">{{ cash_register.name }} · {{ cash_register.code }}</p>{% endif %}
+  <form class="stacked-form" method="post">{% csrf_token %}{{ form.as_p }}<div class="actions"><button class="button" type="submit">Guardar</button><a class="button button-secondary" href="javascript:history.back()">Cancelar</a></div></form>
+</section>
+{% endblock %}

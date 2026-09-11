@@ -1,10 +1,11 @@
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, F, Sum, Value, When
+from django.db.models import Case, DecimalField, F, Prefetch, Sum, Value, When
 from django.db.models.functions import Coalesce
 
 from apps.cash_register.models import CashCount, CashMovement, CashRegister, CashSession
 from apps.payments.models import Payment, PaymentStatusChoices, PaymentTypeChoices
+from apps.sales.models import Sale
 
 
 def get_cash_register(*, business, store, cash_register_id):
@@ -12,7 +13,15 @@ def get_cash_register(*, business, store, cash_register_id):
 
 
 def get_cash_registers_for_store(*, business, store):
-    return CashRegister.objects.filter(business=business, store=store)
+    open_sessions = CashSession.objects.filter(
+        business=business,
+        store=store,
+        status=CashSession.Status.OPEN,
+        closed_at__isnull=True,
+    ).select_related("opened_by")
+    return CashRegister.objects.filter(business=business, store=store).prefetch_related(
+        Prefetch("sessions", queryset=open_sessions, to_attr="open_sessions")
+    )
 
 
 def get_open_cash_session(*, business, store, cash_register):
@@ -33,7 +42,16 @@ def get_cash_session_detail(*, business, store, cash_session_id):
 def get_cash_session_movements(*, business, store, cash_session):
     return CashMovement.objects.filter(
         business=business, store=store, cash_session=cash_session
-    )
+    ).select_related("created_by", "sale", "payment")
+
+
+def get_sales_for_cash_session(*, business, store, cash_session):
+    """Return every sale explicitly isolated to the session's tenant and store."""
+    return Sale.objects.filter(
+        business=business,
+        store=store,
+        cash_session=cash_session,
+    ).select_related("opened_by", "customer")
 
 
 def get_cash_session_counts(*, business, store, cash_session):
@@ -51,7 +69,7 @@ def get_cash_session_expected_cash(*, business, store, cash_session_id):
 def get_closed_cash_sessions(*, business, store):
     return CashSession.objects.filter(
         business=business, store=store, status=CashSession.Status.CLOSED
-    ).select_related("cash_register", "closed_by")
+    ).select_related("cash_register", "opened_by", "closed_by")
 
 
 def get_cash_session_payment_summary(*, business, store, cash_session):

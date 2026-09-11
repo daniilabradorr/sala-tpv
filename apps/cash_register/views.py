@@ -12,14 +12,16 @@ from apps.cash_register.forms import (
     CashSessionCloseForm,
     CashSessionOpenForm,
 )
-from apps.cash_register.models import CashSession
+from apps.cash_register.models import CashRegister, CashSession
 from apps.cash_register.selectors import (
+    get_cash_register,
     get_cash_registers_for_store,
     get_cash_session_counts,
     get_cash_session_detail,
     get_cash_session_movements,
     get_cash_session_payment_summary,
     get_closed_cash_sessions,
+    get_sales_for_cash_session,
 )
 from apps.cash_register.services import CashRegisterService
 from apps.stores.models import Store
@@ -84,31 +86,56 @@ def session_detail(request, store_id, session_id):
             "payment_summary": get_cash_session_payment_summary(
                 business=request.user.business, store=store, cash_session=session
             ),
+            "sales": get_sales_for_cash_session(
+                business=request.user.business, store=store, cash_session=session
+            ),
         },
     )
 
 
 @login_required
-def open_session(request, store_id):
+def open_session(request, store_id, cash_register_id=None):
     store = _store(request, store_id)
+    register = None
+    if cash_register_id is not None:
+        try:
+            register = get_cash_register(
+                business=request.user.business,
+                store=store,
+                cash_register_id=cash_register_id,
+            )
+        except CashRegister.DoesNotExist as exc:
+            raise Http404("La caja no existe.") from exc
     form = CashSessionOpenForm(
-        request.POST or None, business=request.user.business, store=store
+        request.POST or None,
+        business=request.user.business,
+        store=store,
+        cash_register=register,
     )
     if request.method == "POST" and form.is_valid():
-        register = form.cleaned_data["cash_register"]
-        return _run(
-            request,
-            lambda: CashRegisterService().open_cash_session(
+        selected_register = register or form.cleaned_data["cash_register"]
+        try:
+            session = CashRegisterService().open_cash_session(
                 business=request.user.business,
                 store_id=store.pk,
-                cash_register_id=register.pk,
+                cash_register_id=selected_register.pk,
                 user=request.user,
                 opening_amount=form.cleaned_data["opening_amount"],
-            ),
-            f"/cash-register/stores/{store.pk}/",
-        )
+            )
+        except ValidationError as exc:
+            for message in exc.messages:
+                form.add_error(None, message)
+        else:
+            messages.success(request, "Caja abierta correctamente.")
+            return redirect(
+                "cash_register:session_detail",
+                store_id=store.pk,
+                session_id=session.pk,
+            )
     return render(
-        request, "cash_register/form.html", {"form": form, "title": "Abrir caja"}
+        request,
+        "cash_register/form.html",
+        {"form": form, "title": "Abrir caja", "cash_register": register},
     )
 
 

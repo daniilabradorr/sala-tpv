@@ -185,6 +185,7 @@ class SaleOpenForm(forms.Form):
         business,
         store,
         user,
+        locked_cash_session=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -192,6 +193,7 @@ class SaleOpenForm(forms.Form):
         self.business = business
         self.store = store
         self.user = user
+        self.locked_cash_session = locked_cash_session
         self.pos_settings = _get_pos_settings(
             business,
         )
@@ -237,7 +239,23 @@ class SaleOpenForm(forms.Form):
 
         self.fields["cash_session"].queryset = session_queryset
 
-        if self.pos_settings and self.pos_settings.require_open_cash_register:
+        if locked_cash_session is not None:
+            self.fields["cash_register"].queryset = register_queryset.filter(
+                pk=locked_cash_session.cash_register_id
+            )
+            self.fields["cash_session"].queryset = session_queryset.filter(
+                pk=locked_cash_session.pk
+            )
+            self.fields["cash_register"].initial = locked_cash_session.cash_register
+            self.fields["cash_session"].initial = locked_cash_session
+            self.fields["cash_register"].widget = forms.HiddenInput()
+            self.fields["cash_session"].widget = forms.HiddenInput()
+
+        if (
+            locked_cash_session is None
+            and self.pos_settings
+            and self.pos_settings.require_open_cash_register
+        ):
             self.fields["cash_register"].required = True
 
             self.fields["cash_session"].required = True
