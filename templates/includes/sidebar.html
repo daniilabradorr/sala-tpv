@@ -2,7 +2,7 @@
 {% with app=request.resolver_match.app_name url_name=request.resolver_match.url_name %}
 <aside id="app-sidebar" class="app-sidebar" aria-label="Navegación de la aplicación" data-sidebar>
     <div class="sidebar-brand">
-        <a href="{% url 'core:home' %}" aria-label="Netxodo, inicio"><img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo"></a>
+        <a href="{% url 'core:home' %}" aria-label="Netxodo, inicio"><img class="brand-logo" src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo"></a>
         <button class="sidebar-close" type="button" aria-label="Cerrar menú" data-sidebar-close>&times;</button>
     </div>
     <nav class="sidebar-nav" aria-label="Navegación principal">
