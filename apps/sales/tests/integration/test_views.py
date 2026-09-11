@@ -416,6 +416,81 @@ class SaleViewsIntegrationTests(TestCase):
             ).exists()
         )
 
+    def test_open_sale_edit_and_complete_never_require_sensitive_action_pin(self):
+        settings = self.business.pos_settings
+        settings.require_pin_for_sensitive_actions = True
+        settings.save(update_fields=["require_pin_for_sensitive_actions", "updated_at"])
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+
+        header_response = self.client.post(
+            reverse(
+                "sales:sale_header_update",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            data={"customer": "", "document_type_requested": "ticket"},
+        )
+        self.assertEqual(header_response.status_code, 302)
+        add_response = self.client.post(
+            reverse(
+                "sales:sale_line_add",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            data={
+                "product": self.product.pk,
+                "quantity": "1.000",
+                "unit_base_price": "10.00",
+                "discount_amount": "0.00",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+        line = sale.lines.get()
+        update_response = self.client.post(
+            reverse(
+                "sales:sale_line_update",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "sale_pk": sale.pk,
+                    "line_pk": line.pk,
+                },
+            ),
+            data={
+                "quantity": "2.000",
+                "unit_base_price": "10.00",
+                "discount_amount": "0.00",
+            },
+        )
+        self.assertEqual(update_response.status_code, 302)
+        delete_response = self.client.post(
+            reverse(
+                "sales:sale_line_delete",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "sale_pk": sale.pk,
+                    "line_pk": line.pk,
+                },
+            )
+        )
+        self.assertEqual(delete_response.status_code, 302)
+        self.assertFalse(sale.lines.exists())
+        add_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("1.000"),
+            user=self.owner,
+        )
+        complete_response = self.client.post(
+            reverse(
+                "sales:sale_complete",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            )
+        )
+        self.assertEqual(complete_response.status_code, 302)
+        sale.refresh_from_db()
+        self.assertEqual(sale.status, SaleStatusChoices.COMPLETED)
+        self.assertEqual(sale.closed_by, self.owner)
+
     def test_sale_detail_returns_404_for_sale_from_other_business(self):
         self.login_as(self.owner)
         other_owner = create_sales_user(

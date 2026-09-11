@@ -14,7 +14,10 @@ Las views deben coordinar la petición HTTP.
 Los services deben contener reglas de negocio.
 """
 
-from apps.catalog.models import Tax, Product
+from django.core.exceptions import ValidationError
+from django.db.models.deletion import ProtectedError
+
+from apps.catalog.models import Product, Tax
 
 
 class ProductTaxResolutionError(Exception):
@@ -28,6 +31,52 @@ class ProductTaxResolutionError(Exception):
 
 class BusinessDefaultTaxResolutionError(Exception):
     """Raised when a business has no active canonical default Tax."""
+
+
+def _validate_catalog_object_business(*, business, obj):
+    if obj.business_id != business.pk:
+        raise ValidationError("El registro no pertenece al negocio actual.")
+
+
+def delete_category(*, business, category):
+    """Delete a category while preserving SET_NULL product/child relations."""
+    _validate_catalog_object_business(business=business, obj=category)
+    try:
+        category.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "No se puede eliminar esta categoría porque tiene información "
+            "relacionada que debe conservarse."
+        ) from exc
+
+
+def delete_product(*, business, product):
+    """Delete a product unless a protected commercial relation exists."""
+    _validate_catalog_object_business(business=business, obj=product)
+    try:
+        product.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "No se puede eliminar este producto porque tiene información "
+            "relacionada que debe conservarse."
+        ) from exc
+
+
+def delete_tax(*, business, tax):
+    """Delete a non-default tax unless a current product protects it."""
+    _validate_catalog_object_business(business=business, obj=tax)
+    if tax.is_default:
+        raise ValidationError(
+            "No puedes eliminar el impuesto predeterminado. Establece otro "
+            "impuesto como predeterminado antes de eliminarlo."
+        )
+    try:
+        tax.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "No se puede eliminar este impuesto porque está asignado a uno "
+            "o más productos."
+        ) from exc
 
 
 def resolve_business_default_tax(*, business) -> Tax:

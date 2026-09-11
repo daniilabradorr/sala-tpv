@@ -3,8 +3,11 @@ from django.urls import reverse
 from decimal import Decimal
 from apps.catalog.models import Category, Tax, Product
 from apps.catalog.tests.factories import create_category, create_tax, create_product
+from apps.inventory.models import InventoryItem
+from apps.sales.services import add_sale_line, open_sale
+from apps.sales.tests.factories import create_pos_settings
 from apps.users.models import RoleChoices
-from apps.users.tests.factories import create_business, create_user
+from apps.users.tests.factories import create_business, create_store, create_user
 
 
 class CatalogViewsIntegrationTests(TestCase):
@@ -516,3 +519,180 @@ class CatalogViewsIntegrationTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertTrue(self.product.is_active)
+
+    def test_owner_catalog_lists_expose_complete_management_actions(self):
+        self.login_as(self.owner)
+        expectations = (
+            ("category_list", ("Nueva categoría", "Ver", "Editar", "Eliminar")),
+            ("product_list", ("Nuevo producto", "Ver", "Editar", "Eliminar")),
+            (
+                "tax_list",
+                (
+                    "Nuevo impuesto",
+                    "Ver",
+                    "Editar",
+                    "Eliminar",
+                    "Establecer como predeterminado",
+                ),
+            ),
+        )
+        extra_tax = create_tax(
+            business=self.business, name="IVA 10%", code="IVA_10", is_default=False
+        )
+        self.assertFalse(extra_tax.is_default)
+        for route, labels in expectations:
+            with self.subTest(route=route):
+                response = self.client.get(reverse(f"catalog:{route}"))
+                for label in labels:
+                    self.assertContains(response, label)
+
+    def test_category_delete_is_real_post_only_and_sets_products_category_null(self):
+        self.login_as(self.owner)
+        url = reverse("catalog:category_delete", kwargs={"pk": self.category.pk})
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertTrue(Category.objects.filter(pk=self.category.pk).exists())
+
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse("catalog:category_list"))
+        self.assertFalse(Category.objects.filter(pk=self.category.pk).exists())
+        self.product.refresh_from_db()
+        self.assertIsNone(self.product.category)
+
+    def test_category_delete_is_tenant_scoped_and_permission_protected(self):
+        self.login_as(self.owner)
+        other_url = reverse(
+            "catalog:category_delete", kwargs={"pk": self.other_category.pk}
+        )
+        self.assertEqual(self.client.post(other_url).status_code, 404)
+        self.client.logout()
+        self.login_as(self.cashier)
+        own_url = reverse("catalog:category_delete", kwargs={"pk": self.category.pk})
+        self.assertEqual(self.client.post(own_url).status_code, 403)
+        self.assertTrue(Category.objects.filter(pk=self.category.pk).exists())
+
+    def test_product_delete_preserves_sale_line_snapshot(self):
+        create_pos_settings(
+            business=self.business,
+            require_open_cash_register=False,
+            enable_stock_control=False,
+        )
+        store = create_store(
+            business=self.business, name="Tienda ventas", code="VENTAS"
+        )
+        sale = open_sale(business=self.business, store=store, opened_by=self.owner)
+        line = add_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("2.000"),
+            user=self.owner,
+        )
+        snapshot = (
+            line.product_name,
+            line.sku,
+            line.quantity,
+            line.unit_base_price,
+            line.tax_rate,
+            line.line_total,
+        )
+        self.login_as(self.owner)
+        url = reverse("catalog:product_delete", kwargs={"pk": self.product.pk})
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertTrue(Product.objects.filter(pk=self.product.pk).exists())
+
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse("catalog:product_list"))
+        self.assertFalse(Product.objects.filter(pk=self.product.pk).exists())
+        line.refresh_from_db()
+        self.assertIsNone(line.product)
+        self.assertEqual(
+            (
+                line.product_name,
+                line.sku,
+                line.quantity,
+                line.unit_base_price,
+                line.tax_rate,
+                line.line_total,
+            ),
+            snapshot,
+        )
+        self.assertTrue(type(sale).objects.filter(pk=sale.pk).exists())
+
+    def test_product_delete_is_tenant_scoped_permission_protected_and_safe(self):
+        self.login_as(self.owner)
+        self.assertEqual(
+            self.client.post(
+                reverse("catalog:product_delete", kwargs={"pk": self.other_product.pk})
+            ).status_code,
+            404,
+        )
+        store = create_store(business=self.business, name="Inventario", code="INV")
+        item = InventoryItem.objects.create(
+            business=self.business, store=store, product=self.product
+        )
+        response = self.client.post(
+            reverse("catalog:product_delete", kwargs={"pk": self.product.pk}),
+            follow=True,
+        )
+        self.assertContains(response, "información relacionada que debe conservarse")
+        self.assertTrue(Product.objects.filter(pk=self.product.pk).exists())
+        self.assertTrue(InventoryItem.objects.filter(pk=item.pk).exists())
+        self.client.logout()
+        self.login_as(self.cashier)
+        self.assertEqual(
+            self.client.post(
+                reverse("catalog:product_delete", kwargs={"pk": self.product.pk})
+            ).status_code,
+            403,
+        )
+
+    def test_tax_delete_contract_default_product_and_explicit_replacement(self):
+        removable = create_tax(
+            business=self.business, name="IVA 4%", code="IVA_4", is_default=False
+        )
+        self.login_as(self.owner)
+        removable_url = reverse("catalog:tax_delete", kwargs={"pk": removable.pk})
+        self.assertEqual(self.client.get(removable_url).status_code, 200)
+        self.assertTrue(Tax.objects.filter(pk=removable.pk).exists())
+        self.assertRedirects(
+            self.client.post(removable_url), reverse("catalog:tax_list")
+        )
+        self.assertFalse(Tax.objects.filter(pk=removable.pk).exists())
+
+        default_url = reverse("catalog:tax_delete", kwargs={"pk": self.tax.pk})
+        response = self.client.post(default_url, follow=True)
+        self.assertContains(response, "impuesto predeterminado")
+        self.assertTrue(Tax.objects.filter(pk=self.tax.pk).exists())
+
+        replacement = create_tax(
+            business=self.business, name="IVA 10%", code="IVA_10", is_default=False
+        )
+        self.client.post(
+            reverse("catalog:tax_set_default", kwargs={"pk": replacement.pk})
+        )
+        response = self.client.post(default_url, follow=True)
+        self.assertContains(response, "asignado a uno o más productos")
+        self.assertTrue(Tax.objects.filter(pk=self.tax.pk).exists())
+        self.product.tax = None
+        self.product.save(update_fields=["tax", "updated_at"])
+        self.assertRedirects(self.client.post(default_url), reverse("catalog:tax_list"))
+        self.assertFalse(Tax.objects.filter(pk=self.tax.pk).exists())
+
+    def test_tax_delete_is_tenant_scoped_and_permission_protected(self):
+        self.login_as(self.owner)
+        self.assertEqual(
+            self.client.post(
+                reverse("catalog:tax_delete", kwargs={"pk": self.other_tax.pk})
+            ).status_code,
+            404,
+        )
+        self.client.logout()
+        self.login_as(self.cashier)
+        self.assertEqual(
+            self.client.post(
+                reverse("catalog:tax_delete", kwargs={"pk": self.tax.pk})
+            ).status_code,
+            403,
+        )
