@@ -628,6 +628,14 @@ class SaleLineUpdateForm(BaseSaleLineForm):
         return self.line.unit_base_price
 
 
+class SaleLineQuantityUpdateForm(forms.Form):
+    """Validate a quantity-only cart update."""
+
+    quantity = forms.DecimalField(
+        label="Cantidad", max_digits=14, decimal_places=3, min_value=Decimal("0.001")
+    )
+
+
 # ==========================================================
 # Cancelación de venta
 # ==========================================================

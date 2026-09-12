@@ -14,8 +14,9 @@ Arquitectura:
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
 from django.http import Http404
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 
 from apps.billing.models import (
@@ -28,11 +29,14 @@ from apps.billing.selectors import (
 )
 from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import get_cash_session_detail
+from apps.business_config.models import POSSettings
+from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
     SaleHeaderUpdateForm,
     SaleLineCreateForm,
+    SaleLineQuantityUpdateForm,
     SaleLineUpdateForm,
     SaleOpenForm,
     SaleReturnCancelForm,
@@ -51,6 +55,8 @@ from apps.sales.selectors import (
     get_sale_return_line_detail,
     get_sale_returns_for_business,
     get_sales_for_business,
+    get_sellable_products_for_workspace,
+    get_workspace_categories,
 )
 from apps.sales.services import (
     add_sale_line,
@@ -174,6 +180,26 @@ def _ensure_sale_editable(sale):
 
     if not sale.is_editable:
         raise PermissionDenied("Esta venta ya no puede modificarse.")
+
+
+def _is_htmx(request):
+    return request.headers.get("HX-Request") == "true"
+
+
+def _workspace_cart_response(request, *, business, store, sale, form=None):
+    sale = get_sale_detail(business=business, pk=sale.pk)
+    pos_settings = POSSettings.objects.filter(business=business).first()
+    return render(
+        request,
+        "sales/partials/_cart.html",
+        {
+            "store": store,
+            "sale": sale,
+            "lines": sale.lines.all(),
+            "cart_form": form,
+            "pos_settings": pos_settings,
+        },
+    )
 
 
 def _ensure_return_editable(return_doc):
@@ -326,6 +352,62 @@ class SaleDetailView(
 
     def get(self, request, store_id, sale_pk):
         sale = self.get_sale()
+
+        if sale.is_editable:
+            business = _get_business(request)
+            query = request.GET.get("q", "")
+            category = None
+            if request.GET.get("category"):
+                category = get_object_or_404(
+                    get_workspace_categories(business=business),
+                    pk=request.GET["category"],
+                )
+            page = Paginator(
+                get_sellable_products_for_workspace(
+                    business=business, query=query, category=category
+                ),
+                24,
+            ).get_page(request.GET.get("page"))
+            pos_settings = POSSettings.objects.filter(business=business).first()
+            products = list(page.object_list)
+            resolved_taxes = {}
+            for product in products:
+                try:
+                    tax_key = product.tax_id
+                    if tax_key not in resolved_taxes:
+                        resolved_taxes[tax_key] = resolve_product_tax(product)
+                    tax = resolved_taxes[tax_key]
+                    product.display_price = pos_settings.get_display_price(
+                        product.base_price, tax.rate
+                    )
+                except ProductTaxResolutionError:
+                    product.display_price = None
+            context = {
+                "store": self.store,
+                "sale": sale,
+                "lines": sale.lines.all(),
+                "products": products,
+                "product_page": page,
+                "categories": get_workspace_categories(business=business),
+                "selected_category": category,
+                "query": query,
+                "header_form": SaleHeaderUpdateForm(
+                    business=business,
+                    store=self.store,
+                    sale=sale,
+                    initial={
+                        "customer": sale.customer,
+                        "document_type_requested": sale.document_type_requested,
+                    },
+                ),
+                "pos_settings": pos_settings,
+            }
+            template = (
+                "sales/partials/_product_grid.html"
+                if _is_htmx(request)
+                else "sales/sale_workspace.html"
+            )
+            return render(request, template, context)
 
         issued_documents = billing_documents_for_sale(
             business=_get_business(request), sale=sale
@@ -579,11 +661,16 @@ class SaleHeaderUpdateView(
 
             return render(
                 request,
-                self.template_name,
+                (
+                    "sales/partials/_workspace_header.html"
+                    if _is_htmx(request)
+                    else self.template_name
+                ),
                 {
                     "store": store,
                     "sale": sale,
                     "form": form,
+                    "header_form": form,
                 },
             )
 
@@ -600,18 +687,41 @@ class SaleHeaderUpdateView(
 
             return render(
                 request,
-                self.template_name,
+                (
+                    "sales/partials/_workspace_header.html"
+                    if _is_htmx(request)
+                    else self.template_name
+                ),
                 {
                     "store": store,
                     "sale": sale,
                     "form": form,
+                    "header_form": form,
                 },
             )
 
-        messages.success(
-            request,
-            "Cabecera de la venta actualizada correctamente.",
-        )
+        if _is_htmx(request):
+            sale = get_sale_detail(business=business, pk=sale.pk)
+            form = SaleHeaderUpdateForm(
+                business=business,
+                store=store,
+                sale=sale,
+                initial={
+                    "customer": sale.customer,
+                    "document_type_requested": sale.document_type_requested,
+                },
+            )
+            return render(
+                request,
+                "sales/partials/_workspace_header.html",
+                {
+                    "store": store,
+                    "sale": sale,
+                    "header_form": form,
+                },
+            )
+
+        messages.success(request, "Cabecera de la venta actualizada correctamente.")
 
         return redirect(
             "sales:sale_detail",
@@ -711,10 +821,12 @@ class SaleLineAddView(
                 },
             )
 
-        messages.success(
-            request,
-            "Producto añadido a la venta.",
-        )
+        if _is_htmx(request):
+            return _workspace_cart_response(
+                request, business=business, store=store, sale=sale
+            )
+
+        messages.success(request, "Producto añadido a la venta.")
 
         return redirect(
             "sales:sale_detail",
@@ -896,11 +1008,56 @@ class SaleLineDeleteView(
                 "Línea retirada de la venta.",
             )
 
+        if _is_htmx(request):
+            return _workspace_cart_response(
+                request, business=business, store=store, sale=sale
+            )
+
         return redirect(
             "sales:sale_detail",
             store_id=store.pk,
             sale_pk=sale.pk,
         )
+
+
+class SaleLineQuantityUpdateView(
+    SaleObjectMixin,
+    CanSellInStoreMixin,
+    BusinessRequiredMixin,
+    View,
+):
+    """Update only quantity while preserving price and discount snapshots."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, store_id, sale_pk, line_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
+        line = get_sale_line_detail(business=business, pk=line_pk, sale=sale)
+        form = SaleLineQuantityUpdateForm(request.POST)
+
+        if form.is_valid():
+            try:
+                update_sale_line(
+                    business=business,
+                    sale=sale,
+                    line=line,
+                    quantity=form.cleaned_data["quantity"],
+                    unit_base_price=line.unit_base_price,
+                    discount_amount=line.discount_amount,
+                    user=request.user,
+                )
+            except ValidationError as error:
+                _add_service_errors_to_form(form, error)
+
+        if form.errors and not _is_htmx(request):
+            _add_invalid_form_messages(request, form)
+        if _is_htmx(request):
+            return _workspace_cart_response(
+                request, business=business, store=store, sale=sale, form=form
+            )
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
 # ==========================================================

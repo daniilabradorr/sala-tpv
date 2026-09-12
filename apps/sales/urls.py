@@ -40,6 +40,11 @@ urlpatterns = [
         name="sale_line_update",
     ),
     path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/quantity/",
+        views.SaleLineQuantityUpdateView.as_view(),
+        name="sale_line_quantity_update",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/delete/",
         views.SaleLineDeleteView.as_view(),
         name="sale_line_delete",
