@@ -422,9 +422,9 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertTemplateUsed(response, "sales/partials/_cart.html")
         self.assertTemplateNotUsed(response, "sales/sale_line_form.html")
         self.assertContains(response, "sale-cart")
-        self.assertContains(
-            response, "Asegúrese de que este valor sea mayor o igual a 0,001"
-        )
+        form = response.context["cart_form"]
+        self.assertIn("quantity", form.errors)
+        self.assertEqual(form.errors.as_data()["quantity"][0].code, "min_value")
 
         with patch(
             "apps.sales.views.add_sale_line",
