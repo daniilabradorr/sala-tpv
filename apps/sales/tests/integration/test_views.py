@@ -1,7 +1,9 @@
 """Tests de integración HTTP para las views del módulo sales."""
 
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -16,6 +18,7 @@ from apps.sales.tests.factories import (
     create_sale_return,
     create_sale_return_line,
     create_sales_business,
+    create_sales_customer,
     create_sales_inventory_item,
     create_sales_product,
     create_sales_store,
@@ -54,7 +57,8 @@ TEST_TEMPLATES = [
                             "grid {% for product in products %}{{ product.name }}{% endfor %}"
                         ),
                         "sales/partials/_cart.html": (
-                            "cart {{ sale.total_amount }} {{ cart_form.errors }}"
+                            "<aside id='sale-cart'>cart {{ sale.total_amount }} "
+                            "{{ cart_form.errors }}</aside>"
                         ),
                         "sales/partials/_workspace_header.html": (
                             "header {{ sale.customer }} {{ header_form.errors }}"
@@ -317,6 +321,132 @@ class SaleViewsIntegrationTests(TestCase):
             ),
             fetch_redirect_response=False,
         )
+
+    def test_header_customer_mode_is_processed_server_side(self):
+        self.login_as(self.owner)
+        customer = create_sales_customer(business=self.business)
+        sale = open_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+            customer=customer,
+        )
+        url = reverse(
+            "sales:sale_header_update",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "customer_mode": "counter",
+                "customer": customer.pk,
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(sale.customer)
+
+        response = self.client.post(
+            url,
+            {
+                "customer_mode": "customer",
+                "customer": customer.pk,
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(sale.customer, customer)
+
+    def test_header_rejects_invalid_customer_mode_without_modifying_sale(self):
+        self.login_as(self.owner)
+        customer = create_sales_customer(business=self.business)
+        sale = open_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+            customer=customer,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_header_update",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {
+                "customer_mode": "invalid",
+                "customer": "",
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("customer_mode", response.context["form"].errors)
+        self.assertEqual(sale.customer, customer)
+
+    def test_invoice_without_customer_is_rejected_for_fallback_and_htmx(self):
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        url = reverse(
+            "sales:sale_header_update",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+        data = {
+            "customer_mode": "customer",
+            "customer": "",
+            "document_type_requested": "invoice",
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("customer", response.context["form"].errors)
+        response = self.client.post(url, data, HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_workspace_header.html")
+        sale.refresh_from_db()
+        self.assertEqual(sale.document_type_requested, "ticket")
+
+    def test_quick_add_htmx_keeps_cart_on_error_and_success(self):
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        url = reverse(
+            "sales:sale_line_add",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+        response = self.client.post(
+            url,
+            {"product": self.product.pk, "quantity": "0"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateNotUsed(response, "sales/sale_line_form.html")
+        self.assertContains(response, "sale-cart")
+        self.assertContains(
+            response, "Asegúrese de que este valor sea mayor o igual a 0,001"
+        )
+
+        with patch(
+            "apps.sales.views.add_sale_line",
+            side_effect=ValidationError("No se puede añadir este producto."),
+        ):
+            response = self.client.post(
+                url,
+                {"product": self.product.pk, "quantity": "1.000"},
+                HTTP_HX_REQUEST="true",
+            )
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertContains(response, "No se puede añadir este producto.")
+        self.assertEqual(sale.lines.count(), 0)
+
+        response = self.client.post(
+            url,
+            {"product": self.product.pk, "quantity": "1.000"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertEqual(sale.lines.count(), 1)
 
     def test_owner_can_open_sale(self):
         self.login_as(self.owner)

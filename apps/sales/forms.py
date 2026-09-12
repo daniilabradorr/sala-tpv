@@ -325,6 +325,12 @@ class SaleOpenForm(forms.Form):
 class SaleHeaderUpdateForm(forms.Form):
     """Formulario para modificar la cabecera editable."""
 
+    customer_mode = forms.ChoiceField(
+        label="Tipo de venta",
+        choices=(("counter", "Mostrador"), ("customer", "Cliente")),
+        required=False,
+    )
+
     customer = forms.ModelChoiceField(
         label="Cliente",
         required=False,
@@ -361,9 +367,17 @@ class SaleHeaderUpdateForm(forms.Form):
     def clean(self):
         cleaned_data = super().clean()
 
-        customer = cleaned_data.get(
-            "customer",
-        )
+        customer_mode = cleaned_data.get("customer_mode")
+        customer = cleaned_data.get("customer")
+        if customer_mode == "counter":
+            customer = None
+            cleaned_data["customer"] = None
+        elif customer_mode == "customer":
+            pass
+        elif "customer_mode" not in self.data:
+            # Preserve the legacy form/HTTP contract outside the workspace.
+            customer_mode = "customer" if customer is not None else "counter"
+            cleaned_data["customer_mode"] = customer_mode
 
         document_type = cleaned_data.get(
             "document_type_requested",

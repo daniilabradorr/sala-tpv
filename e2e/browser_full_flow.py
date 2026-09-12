@@ -155,7 +155,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             self.page.get_by_role("heading", name=re.compile(r"Venta #"))
         ).to_be_visible()
         if customer:
-            self.page.get_by_label("Cliente", exact=True).check()
+            self.page.get_by_role("radio", name="Cliente", exact=True).check()
             self.page.locator("#id_customer").select_option(label=customer)
         self.page.get_by_label(
             "Factura"

@@ -786,6 +786,11 @@ class SaleLineAddView(
         if not form.is_valid():
             _add_invalid_form_messages(request, form)
 
+            if _is_htmx(request):
+                return _workspace_cart_response(
+                    request, business=business, store=store, sale=sale, form=form
+                )
+
             return render(
                 request,
                 self.template_name,
@@ -809,6 +814,11 @@ class SaleLineAddView(
             )
         except ValidationError as error:
             _add_service_errors_to_form(form, error)
+
+            if _is_htmx(request):
+                return _workspace_cart_response(
+                    request, business=business, store=store, sale=sale, form=form
+                )
 
             return render(
                 request,
