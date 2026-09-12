@@ -150,20 +150,31 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _open_sale(self, *, customer, document_type, session_id):
         self.step = f"open {document_type} sale"
         self._goto(f"/cash-register/stores/{self.store.pk}/sessions/{session_id}/")
-        self.page.get_by_role("link", name="Nueva venta").click()
+        self.page.get_by_role("button", name="Nueva venta").click()
+        expect(
+            self.page.get_by_role("heading", name=re.compile(r"Venta #"))
+        ).to_be_visible()
         if customer:
-            self.page.get_by_label("Cliente").select_option(label=customer)
-        self.page.get_by_label("Documento solicitado").select_option(document_type)
-        self.page.get_by_role("button", name="Guardar").click()
+            self.page.get_by_role("radio", name="Cliente", exact=True).check()
+            self.page.locator("#id_customer").select_option(label=customer)
+        self.page.get_by_label(
+            "Factura"
+            if document_type == RequestedDocumentTypeChoices.INVOICE
+            else "Ticket"
+        ).check()
+        self.page.get_by_role("button", name="Actualizar cabecera").click()
         return self._id_from_url(r"/sales/(\d+)/$")
 
     def _add_product(self, product_name, quantity):
         self.step = f"add {product_name}"
-        self.page.get_by_role("link", name="Anadir linea").click()
-        self.page.get_by_label("Producto o servicio").select_option(label=product_name)
-        self.page.get_by_label("Cantidad").fill(str(quantity))
-        self.page.get_by_role("button", name="Guardar").click()
+        self.page.get_by_label("Buscar producto").fill(product_name)
+        self.page.get_by_role("button", name=re.compile(product_name)).click()
         expect(self.page.get_by_text(product_name, exact=False)).to_be_visible()
+        quantity_input = self.page.get_by_label("Cantidad").last
+        quantity_input.fill(str(quantity))
+        quantity_input.locator("xpath=ancestor::form").get_by_role(
+            "button", name="Actualizar"
+        ).click()
 
     def _complete_sale(self):
         self.step = "complete sale"

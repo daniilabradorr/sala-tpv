@@ -1,12 +1,15 @@
 """Tests de integración HTTP para las views del módulo sales."""
 
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.cash_register.models import CashRegister, CashSession
+from apps.catalog.models import Category
 from apps.inventory.models import StockMovement
 from apps.sales.models import Sale, SaleReturn, SaleStatusChoices
 from apps.sales.services import add_sale_line, complete_sale, open_sale
@@ -15,6 +18,7 @@ from apps.sales.tests.factories import (
     create_sale_return,
     create_sale_return_line,
     create_sales_business,
+    create_sales_customer,
     create_sales_inventory_item,
     create_sales_product,
     create_sales_store,
@@ -43,6 +47,21 @@ TEST_TEMPLATES = [
                         ),
                         "sales/sale_detail.html": (
                             "{{ sale.pk }} {% for line in lines %}{{ line.pk }} {% endfor %}"
+                        ),
+                        "sales/sale_workspace.html": (
+                            "workspace {{ sale.pk }} {% for product in products %}"
+                            "{{ product.name }} {{ product.sku }} {{ product.barcode }}"
+                            "{% endfor %}"
+                        ),
+                        "sales/partials/_product_grid.html": (
+                            "grid {% for product in products %}{{ product.name }}{% endfor %}"
+                        ),
+                        "sales/partials/_cart.html": (
+                            "<aside id='sale-cart'>cart {{ sale.total_amount }} "
+                            "{{ cart_form.errors }}</aside>"
+                        ),
+                        "sales/partials/_workspace_header.html": (
+                            "header {{ sale.customer }} {{ header_form.errors }}"
                         ),
                         "sales/sale_open.html": "{{ form.errors }}",
                         "sales/sale_header_form.html": "{{ form.errors }}",
@@ -130,6 +149,11 @@ class SaleViewsIntegrationTests(TestCase):
             "sale_header_update": {"store_id": 1, "sale_pk": 2},
             "sale_line_add": {"store_id": 1, "sale_pk": 2},
             "sale_line_update": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
+            "sale_line_quantity_update": {
+                "store_id": 1,
+                "sale_pk": 2,
+                "line_pk": 3,
+            },
             "sale_line_delete": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
             "sale_complete": {"store_id": 1, "sale_pk": 2},
             "sale_cancel": {"store_id": 1, "sale_pk": 2},
@@ -148,8 +172,8 @@ class SaleViewsIntegrationTests(TestCase):
             for name, kwargs in route_kwargs.items()
         }
 
-        self.assertEqual(len(reversed_urls), 17)
-        self.assertEqual(len(set(reversed_urls.values())), 17)
+        self.assertEqual(len(reversed_urls), 18)
+        self.assertEqual(len(set(reversed_urls.values())), 18)
         for url in reversed_urls.values():
             # URLs are included under the `sales/` prefix in config.urls,
             # so assert presence of the expected store fragment instead
@@ -210,6 +234,219 @@ class SaleViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("/users/login/", response.url)
+
+    def test_open_sale_uses_workspace_with_scoped_search_and_htmx_grid(self):
+        self.login_as(self.owner)
+        sale, _line = self.create_open_sale_with_line()
+        create_sales_product(
+            business=self.business, tax=self.tax, name="Café Especial", sku="CAF-1"
+        )
+        inactive = create_sales_product(
+            business=self.business, tax=self.tax, name="Café inactivo"
+        )
+        inactive.is_active = False
+        inactive.save(update_fields=["is_active", "updated_at"])
+
+        response = self.client.get(
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {"q": "CAF-1"},
+        )
+
+        self.assertTemplateUsed(response, "sales/sale_workspace.html")
+        self.assertContains(response, "Café Especial")
+        self.assertNotContains(response, "Café inactivo")
+        self.assertNotContains(response, self.other_product.name)
+
+        response = self.client.get(
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {"q": "Café"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertTemplateUsed(response, "sales/partials/_product_grid.html")
+
+    def test_workspace_category_filter_is_tenant_scoped(self):
+        self.login_as(self.owner)
+        sale, _line = self.create_open_sale_with_line()
+        category = Category.objects.create(business=self.business, name="Bebidas")
+        product = create_sales_product(
+            business=self.business,
+            tax=self.tax,
+            name="Agua filtrada",
+        )
+        product.category = category
+        product.save(update_fields=["category", "updated_at"])
+        response = self.client.get(
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {"category": category.pk},
+        )
+        self.assertContains(response, product.name)
+        self.assertNotContains(response, self.product.name)
+
+    def test_quantity_endpoint_preserves_price_and_discount_and_supports_htmx(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        original_price = line.unit_base_price
+        original_discount = line.discount_amount
+        url = reverse(
+            "sales:sale_line_quantity_update",
+            kwargs={
+                "store_id": self.store.pk,
+                "sale_pk": sale.pk,
+                "line_pk": line.pk,
+            },
+        )
+        response = self.client.post(url, {"quantity": "2.500"}, HTTP_HX_REQUEST="true")
+        line.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertEqual(line.quantity, Decimal("2.500"))
+        self.assertEqual(line.unit_base_price, original_price)
+        self.assertEqual(line.discount_amount, original_discount)
+
+        response = self.client.post(url, {"quantity": "3.000"})
+        self.assertRedirects(
+            response,
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+
+    def test_header_customer_mode_is_processed_server_side(self):
+        self.login_as(self.owner)
+        customer = create_sales_customer(business=self.business)
+        sale = open_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+            customer=customer,
+        )
+        url = reverse(
+            "sales:sale_header_update",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "customer_mode": "counter",
+                "customer": customer.pk,
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(sale.customer)
+
+        response = self.client.post(
+            url,
+            {
+                "customer_mode": "customer",
+                "customer": customer.pk,
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(sale.customer, customer)
+
+    def test_header_rejects_invalid_customer_mode_without_modifying_sale(self):
+        self.login_as(self.owner)
+        customer = create_sales_customer(business=self.business)
+        sale = open_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+            customer=customer,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:sale_header_update",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {
+                "customer_mode": "invalid",
+                "customer": "",
+                "document_type_requested": "ticket",
+            },
+        )
+        sale.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("customer_mode", response.context["form"].errors)
+        self.assertEqual(sale.customer, customer)
+
+    def test_invoice_without_customer_is_rejected_for_fallback_and_htmx(self):
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        url = reverse(
+            "sales:sale_header_update",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+        data = {
+            "customer_mode": "customer",
+            "customer": "",
+            "document_type_requested": "invoice",
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("customer", response.context["form"].errors)
+        response = self.client.post(url, data, HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_workspace_header.html")
+        sale.refresh_from_db()
+        self.assertEqual(sale.document_type_requested, "ticket")
+
+    def test_quick_add_htmx_keeps_cart_on_error_and_success(self):
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        url = reverse(
+            "sales:sale_line_add",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+        response = self.client.post(
+            url,
+            {"product": self.product.pk, "quantity": "0"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateNotUsed(response, "sales/sale_line_form.html")
+        self.assertContains(response, "sale-cart")
+        form = response.context["cart_form"]
+        self.assertIn("quantity", form.errors)
+        self.assertEqual(form.errors.as_data()["quantity"][0].code, "min_value")
+
+        with patch(
+            "apps.sales.views.add_sale_line",
+            side_effect=ValidationError("No se puede añadir este producto."),
+        ):
+            response = self.client.post(
+                url,
+                {"product": self.product.pk, "quantity": "1.000"},
+                HTTP_HX_REQUEST="true",
+            )
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertContains(response, "No se puede añadir este producto.")
+        self.assertEqual(sale.lines.count(), 0)
+
+        response = self.client.post(
+            url,
+            {"product": self.product.pk, "quantity": "1.000"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertEqual(sale.lines.count(), 1)
 
     def test_owner_can_open_sale(self):
         self.login_as(self.owner)

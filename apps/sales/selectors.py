@@ -26,6 +26,7 @@ from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
 from apps.cash_register.models import CashRegister, CashSession
+from apps.catalog.models import Category, Product
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -65,6 +66,29 @@ def get_sale_open_cash_initial(*, business, store):
     if len(open_sessions) == 1:
         initial["cash_session"] = open_sessions[0]
     return initial
+
+
+def get_sellable_products_for_workspace(*, business, query="", category=None):
+    """Return the tenant-scoped, eager-loaded TPV catalogue."""
+    queryset = Product.objects.filter(business=business, is_active=True).select_related(
+        "category", "tax", "business"
+    )
+    query = query.strip()
+    if query:
+        queryset = queryset.filter(
+            Q(name__icontains=query)
+            | Q(sku__icontains=query)
+            | Q(barcode__icontains=query)
+        )
+    if category is not None:
+        queryset = queryset.filter(category=category)
+    return queryset.order_by("sort_order", "name", "pk")
+
+
+def get_workspace_categories(*, business):
+    return Category.objects.filter(business=business, is_active=True).order_by(
+        "sort_order", "name", "pk"
+    )
 
 
 # ==========================================================
