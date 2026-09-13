@@ -1,9 +1,25 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ title|default:"Operación de caja" }} | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/cash_register.css' %}">{% endblock %}
 {% block content %}
-<section class="card card-form">
-  <span class="eyebrow">Caja</span><h1>{{ title|default:"Operación de caja" }}</h1>
-  {% if cash_register %}<p class="catalog-note">{{ cash_register.name }} · {{ cash_register.code }}</p>{% endif %}
-  <form class="stacked-form" method="post">{% csrf_token %}{{ form.as_p }}<div class="actions"><button class="button" type="submit">Guardar</button><a class="button button-secondary" href="javascript:history.back()">Cancelar</a></div></form>
+<section class="cash-operation cash-operation--{{ operation_kind|default:'standard' }}">
+  <header class="cash-operation__heading"><span class="eyebrow">Caja · Operación</span><h1>{{ title|default:"Operación de caja" }}</h1><p>{{ description }}</p></header>
+  <div class="cash-operation__layout">
+    <aside class="cash-context" aria-label="Contexto de la operación">
+      <h2>Estás operando en</h2>
+      <dl>
+        {% if cash_register %}<div><dt>Caja</dt><dd>{{ cash_register.name }} · {{ cash_register.code }}</dd></div>{% elif session %}<div><dt>Caja</dt><dd>{{ session.cash_register.name }} · {{ session.cash_register.code }}</dd></div>{% endif %}
+        <div><dt>Tienda</dt><dd>{{ store.name }}</dd></div>
+        {% if session %}<div><dt>Sesión</dt><dd>#{{ session.pk }}</dd></div><div class="cash-context__expected"><dt>Efectivo esperado</dt><dd>{{ session.expected_cash_amount|floatformat:2 }} €</dd></div>{% endif %}
+      </dl>
+      {% if operation_kind == "review" %}<p class="cash-operation__notice">Este arqueo es de control y no cierra la caja.</p>{% elif operation_kind == "close" %}<p class="cash-operation__warning">Esta acción termina el turno. El servicio de caja calculará y guardará la diferencia real.</p>{% endif %}
+    </aside>
+    <div class="cash-form-panel">
+      <form class="stacked-form" method="post" novalidate>{% csrf_token %}{{ form.as_p }}
+        <div class="actions"><button class="button{% if operation_kind == 'close' %} button-danger{% endif %}" type="submit">{{ submit_label|default:"Guardar" }}</button><a class="button button-secondary" href="{{ cancel_url }}">Cancelar</a></div>
+      </form>
+    </div>
+  </div>
 </section>
 {% endblock %}

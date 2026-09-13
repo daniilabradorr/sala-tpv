@@ -4,7 +4,7 @@ import uuid
 from django.db import transaction
 from django.test import TestCase
 
-from apps.cash_register.models import CashSession
+from apps.cash_register.models import CashCount, CashSession
 from apps.cash_register.services import register_payment_cash_movement
 from apps.cash_register.selectors import (
     get_cash_session_counts,
@@ -65,6 +65,33 @@ class CashRegisterSelectorsTests(TestCase):
             get_cash_registers_for_store(business=self.business, store=self.store)
         )
         self.assertEqual(registers[0].open_sessions, [self.session])
+
+    def test_counts_select_related_counted_by_without_per_count_queries(self):
+        for index in range(3):
+            CashCount.objects.create(
+                business=self.business,
+                store=self.store,
+                cash_session=self.session,
+                count_type=CashCount.CountType.REVIEW,
+                counted_amount=Decimal("10.00") + index,
+                expected_amount=Decimal("10.00"),
+                difference_amount=Decimal(index),
+                counted_by=self.user,
+                notes=f"Control {index}",
+            )
+
+        with self.assertNumQueries(1):
+            counts = list(
+                get_cash_session_counts(
+                    business=self.business,
+                    store=self.store,
+                    cash_session=self.session,
+                )
+            )
+            self.assertEqual(
+                [count.counted_by.email for count in counts],
+                [self.user.email] * 3,
+            )
 
     def test_sales_for_session_are_explicitly_tenant_and_store_scoped(self):
         included = create_sale(
@@ -204,5 +231,9 @@ class CashRegisterSelectorsTests(TestCase):
                 "transfer": (Decimal("40"), Decimal("0"), Decimal("40")),
             },
         )
+        self.assertTrue(summary["cash"]["method__affects_cash_register"])
+        self.assertFalse(summary["card"]["method__affects_cash_register"])
+        self.assertFalse(summary["bizum"]["method__affects_cash_register"])
+        self.assertFalse(summary["transfer"]["method__affects_cash_register"])
         self.session.refresh_from_db()
         self.assertEqual(self.session.expected_cash_amount, Decimal("190.00"))

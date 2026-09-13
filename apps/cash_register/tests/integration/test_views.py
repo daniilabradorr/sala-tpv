@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cash_register.models import CashSession
+from apps.cash_register.models import CashCount, CashSession
 from apps.cash_register.test_factories import (
     create_cash_business,
     create_cash_register,
@@ -343,3 +343,83 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             )
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_closed_session_is_read_only_and_shows_final_cash(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opening_amount="25.00",
+            expected_cash_amount="25.00",
+        )
+        session.status = CashSession.Status.CLOSED
+        session.closed_at = timezone.now()
+        session.closed_by = self.user
+        session.counted_cash_amount = "25.00"
+        session.save()
+
+        response = self.client.get(
+            self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        )
+
+        self.assertContains(response, "Caja cerrada")
+        self.assertContains(response, "25,00 €", count=3)
+        self.assertContains(response, "Vista histórica de solo lectura")
+        self.assertNotContains(response, ">Nueva venta<")
+        self.assertNotContains(response, ">Entrada de efectivo<")
+        self.assertNotContains(response, ">Cerrar caja<")
+
+    def test_session_operation_cancel_returns_to_session_without_javascript(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.get(
+            reverse(
+                "cash_register:cash_in",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            )
+        )
+        cancel_url = self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        self.assertContains(response, f'href="{cancel_url}"')
+        self.assertNotContains(response, "javascript:history.back()")
+
+    def test_session_detail_renders_cash_count_operational_fields(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opening_amount="20.00",
+            expected_cash_amount="20.00",
+        )
+        count = CashCount.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_session=session,
+            count_type=CashCount.CountType.REVIEW,
+            counted_amount="19.00",
+            expected_amount="20.00",
+            difference_amount="-1.00",
+            counted_by=self.user,
+            notes="Arqueo de cambio de turno",
+        )
+
+        response = self.client.get(
+            self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        )
+
+        self.assertContains(response, count.get_count_type_display())
+        rendered_at = timezone.localtime(count.created_at).strftime("%d/%m/%Y %H:%M")
+        self.assertContains(response, rendered_at)
+        self.assertContains(response, self.user.email)
+        self.assertContains(response, "20,00 €")
+        self.assertContains(response, "19,00 €")
+        self.assertContains(response, "-1,00 €")
+        self.assertContains(response, "Arqueo de cambio de turno")
