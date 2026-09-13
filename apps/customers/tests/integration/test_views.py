@@ -60,13 +60,18 @@ class CustomerViewTests(TestCase):
         self.assertFalse(c.account.is_blocked)
 
     def test_empty_list_has_a_useful_create_action(self):
-        self.account.customer.delete()
-        self.client.force_login(self.owner)
+        empty_business = create_business(name="Empty", slug="empty-customers")
+        empty_owner = create_customer_user(
+            business=empty_business, role=RoleChoices.OWNER
+        )
+        self.client.force_login(empty_owner)
 
         response = self.client.get(reverse("customers:customer_list"))
 
         self.assertContains(response, "No hay clientes con estos filtros.")
         self.assertContains(response, reverse("customers:customer_create"))
+        self.assertNotContains(response, self.account.customer.name)
+        self.assertNotContains(response, self.other_account.customer.name)
 
     def test_permissions_and_post_actions(self):
         self.client.force_login(self.cashier)

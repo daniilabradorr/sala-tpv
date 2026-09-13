@@ -1,9 +1,10 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 
 from apps.stores.models import Store
-from apps.users.models import CustomUser
+from apps.users.models import CustomUser, UserStoreAccess
 from apps.users.helpers import (
     is_owner,
     is_owner_or_manager,
@@ -38,7 +39,15 @@ class BusinessUserQuerysetMixin:
         """
         qs = (
             CustomUser.objects.select_related("business")
-            .prefetch_related("store_accesses__store")
+            .prefetch_related(
+                Prefetch(
+                    "store_accesses",
+                    queryset=UserStoreAccess.objects.filter(
+                        is_active=True
+                    ).select_related("store"),
+                    to_attr="active_store_accesses",
+                )
+            )
             .order_by("email")
         )
 
