@@ -1,7 +1,7 @@
 {% if messages %}
-<div class="messages" aria-live="polite" aria-atomic="true">
+<div class="messages">
     {% for message in messages %}
-        <div class="message{% if message.tags %} message-{{ message.tags }}{% endif %}" role="status">{{ message }}</div>
+        <div class="message{% if message.tags %} message-{{ message.tags }}{% endif %}" role="{% if 'error' in message.tags %}alert{% else %}status{% endif %}">{{ message }}</div>
     {% endfor %}
 </div>
 {% endif %}

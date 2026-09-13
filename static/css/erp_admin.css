@@ -6,8 +6,8 @@
 .erp-subtitle, .intro { margin:.4rem 0 0; color:var(--nx-text-muted,#a9b8c8); }
 .erp-context { display:flex; flex-wrap:wrap; gap:.5rem 1.25rem; padding:.75rem 1rem; color:var(--nx-text-muted,#a9b8c8); background:rgba(0,97,193,.12); border-left:3px solid var(--nx-blue,#0061c1); }
 .erp-toolbar, .filter-grid { display:flex; align-items:end; flex-wrap:wrap; gap:.85rem; padding:1rem; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08); border-radius:.65rem; }
-.erp-toolbar .form-field, .filter-grid .form-field { flex:1 1 12rem; margin:0; }
-.table-scroll { max-width:100%; overflow-x:auto; border-radius:.6rem; }
+.erp-toolbar .form-field, .filter-grid .form-field { min-width:0; flex:1 1 12rem; margin:0; }
+.table-scroll { border-radius:.6rem; }
 .table-scroll table { width:100%; min-width:42rem; border-collapse:collapse; }
 .table-scroll th { color:var(--nx-text-muted,#a9b8c8); font-size:.76rem; font-weight:800; letter-spacing:.05em; text-align:left; text-transform:uppercase; background:rgba(255,255,255,.04); }
 .table-scroll th, .table-scroll td { padding:.8rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:middle; }

@@ -41,6 +41,12 @@ body {
 }
 a { color: var(--nx-blue-bright); text-decoration: none; }
 a:hover { color: var(--text); }
+.skip-link {
+    position: fixed; z-index: 100; top: .75rem; left: .75rem; padding: .7rem 1rem; border-radius: 8px;
+    background: var(--nx-yellow); color: var(--nx-bg); font-weight: 800;
+    transform: translateY(calc(-100% - 1rem));
+}
+.skip-link:focus { color: var(--nx-bg); transform: translateY(0); }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
     outline: 3px solid var(--nx-blue-bright);
     outline-offset: 3px;
@@ -131,7 +137,8 @@ h3 { font-weight: 700; }
 .delete-warning { margin-top: 1.25rem; padding: 1rem; border: 1px solid #a43f49; border-radius: 8px; background: #321117; color: #ffb1b6; }
 .delete-warning p { margin-top: .5rem; color: inherit; }
 
-.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
+.table-scroll:focus-within { outline: 2px solid rgba(7, 148, 242, .7); outline-offset: 2px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: .8rem; border-bottom: 1px solid var(--border); color: var(--text); text-align: left; vertical-align: middle; }
 th { color: var(--muted); font-size: .8rem; font-weight: 700; text-transform: uppercase; }
@@ -203,7 +210,7 @@ tbody tr:hover { background: rgba(0, 97, 193, .08); }
     .site-header .container { gap: .6rem; padding-block: .8rem; }
     .brand-logo { width: 132px; }
     .site-nav { justify-content: flex-start; gap: .2rem .8rem; }
-    .access-row, .form-grid, .inventory-metrics, .module-grid, .store-grid { grid-template-columns: 1fr; }
+    .access-row, .form-grid, .inventory-metrics, .module-grid, .store-grid, .details-grid, .details-grid.compact, .payment-grid { grid-template-columns: minmax(0, 1fr); }
     th, td { padding: .65rem; }
     .actions .button, .actions form, .actions form .button, .store-card .actions .button, .config-nav .button { width: 100%; }
     .adjustment-actions { align-items: stretch; flex-direction: column; }
@@ -214,7 +221,7 @@ tbody tr:hover { background: rgba(0, 97, 193, .08); }
     .card { padding: 1rem; }
 }
 @media (prefers-reduced-motion: no-preference) {
-    .button, .module-card { transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s ease; }
+    .button, .module-card, .skip-link { transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s ease; }
 }
 
 
@@ -244,6 +251,8 @@ body.sidebar-open { overflow: hidden; }
 .user-name { font-weight: 700; }
 .erp-workspace .site-main { padding: clamp(1rem, 2.5vw, 2rem); }
 .content-container { width: min(100%, var(--container)); margin-inline: auto; }
+.content-container, .topbar-context, .topbar-user, .page-heading > *, .erp-header > * { min-width: 0; }
+.topbar-context strong, .topbar-user span, .page-heading p, .erp-header p { overflow-wrap: anywhere; }
 .content-container > .messages, .public-container > .messages { margin-bottom: 1rem; }
 .sidebar-overlay { position: fixed; z-index: 25; inset: 0; background: rgba(0, 0, 0, .64); }
 .public-shell { display: flex; min-height: 100vh; flex-direction: column; }
