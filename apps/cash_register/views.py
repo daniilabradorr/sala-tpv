@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from apps.cash_register.forms import (
     CashAdjustmentForm,
@@ -35,16 +36,6 @@ def _store(request, store_id):
 
         raise PermissionDenied
     return store
-
-
-def _run(request, operation, success_url):
-    try:
-        operation()
-    except ValidationError as exc:
-        messages.error(request, " ".join(exc.messages))
-    else:
-        messages.success(request, "Operación de caja completada.")
-    return redirect(success_url)
 
 
 @login_required
@@ -135,11 +126,32 @@ def open_session(request, store_id, cash_register_id=None):
     return render(
         request,
         "cash_register/form.html",
-        {"form": form, "title": "Abrir caja", "cash_register": register},
+        {
+            "form": form,
+            "title": "Abrir caja",
+            "description": "Inicia un nuevo turno indicando el efectivo físico inicial.",
+            "submit_label": "Abrir caja",
+            "operation_kind": "open",
+            "cash_register": register,
+            "store": store,
+            "cancel_url": reverse("cash_register:register_list", args=[store.pk]),
+        },
     )
 
 
-def _session_action(request, store_id, session_id, form_class, method):
+def _session_action(
+    request,
+    store_id,
+    session_id,
+    form_class,
+    method,
+    *,
+    title,
+    description,
+    submit_label,
+    operation_kind,
+    success_message,
+):
     store = _store(request, store_id)
     try:
         session = get_cash_session_detail(
@@ -157,12 +169,30 @@ def _session_action(request, store_id, session_id, form_class, method):
             cash_session_id=session.pk,
             user=request.user,
         )
-        return _run(
-            request,
-            lambda: method(common, data),
-            f"/cash-register/stores/{store.pk}/sessions/{session.pk}/",
-        )
-    return render(request, "cash_register/form.html", {"form": form})
+        try:
+            method(common, data)
+        except ValidationError as exc:
+            for message in exc.messages:
+                form.add_error(None, message)
+        else:
+            messages.success(request, success_message)
+            return redirect("cash_register:session_detail", store.pk, session.pk)
+    return render(
+        request,
+        "cash_register/form.html",
+        {
+            "form": form,
+            "store": store,
+            "session": session,
+            "title": title,
+            "description": description,
+            "submit_label": submit_label,
+            "operation_kind": operation_kind,
+            "cancel_url": reverse(
+                "cash_register:session_detail", args=[store.pk, session.pk]
+            ),
+        },
+    )
 
 
 @login_required
@@ -173,6 +203,11 @@ def cash_in(request, store_id, session_id):
         session_id,
         CashInForm,
         lambda common, data: CashRegisterService().register_cash_in(**common, **data),
+        title="Entrada de efectivo",
+        description="Registra dinero que entra físicamente en la caja.",
+        submit_label="Registrar entrada",
+        operation_kind="cash-in",
+        success_message="Entrada de efectivo registrada.",
     )
 
 
@@ -184,6 +219,11 @@ def cash_out(request, store_id, session_id):
         session_id,
         CashOutForm,
         lambda common, data: CashRegisterService().register_cash_out(**common, **data),
+        title="Salida de efectivo",
+        description="Registra una retirada física de efectivo.",
+        submit_label="Registrar salida",
+        operation_kind="cash-out",
+        success_message="Salida de efectivo registrada.",
     )
 
 
@@ -197,6 +237,11 @@ def adjustment(request, store_id, session_id):
         lambda common, data: CashRegisterService().register_adjustment(
             **common, **data
         ),
+        title="Ajuste de caja",
+        description="Corrige el saldo esperado con trazabilidad. Indica si el efectivo entra o sale.",
+        submit_label="Registrar ajuste",
+        operation_kind="adjustment",
+        success_message="Ajuste de caja registrado.",
     )
 
 
@@ -208,6 +253,11 @@ def review(request, store_id, session_id):
         session_id,
         CashCountReviewForm,
         lambda common, data: CashRegisterService().review_cash_count(**common, **data),
+        title="Arqueo de control",
+        description="Cuenta el efectivo actual sin cerrar la sesión. La caja permanecerá abierta.",
+        submit_label="Guardar arqueo",
+        operation_kind="review",
+        success_message="Arqueo guardado. La caja sigue abierta.",
     )
 
 
@@ -224,6 +274,11 @@ def close(request, store_id, session_id):
             pin=data["pin"],
             notes=data["notes"],
         ),
+        title="Cerrar caja",
+        description="Cuenta el efectivo final y cierra definitivamente el turno.",
+        submit_label="Cerrar caja",
+        operation_kind="close",
+        success_message="Caja cerrada correctamente.",
     )
 
 

@@ -81,7 +81,12 @@ def get_cash_session_payment_summary(*, business, store, cash_session):
             cash_session=cash_session,
             status=PaymentStatusChoices.COMPLETED,
         )
-        .values("method_id", "method__code", "method__name")
+        .values(
+            "method_id",
+            "method__code",
+            "method__name",
+            "method__affects_cash_register",
+        )
         .annotate(
             payments=Coalesce(
                 Sum(

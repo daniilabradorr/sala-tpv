@@ -343,3 +343,48 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             )
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_closed_session_is_read_only_and_shows_final_cash(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opening_amount="25.00",
+            expected_cash_amount="25.00",
+        )
+        session.status = CashSession.Status.CLOSED
+        session.closed_at = timezone.now()
+        session.closed_by = self.user
+        session.counted_cash_amount = "25.00"
+        session.save()
+
+        response = self.client.get(
+            self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        )
+
+        self.assertContains(response, "Caja cerrada")
+        self.assertContains(response, "25,00 €", count=3)
+        self.assertContains(response, "Vista histórica de solo lectura")
+        self.assertNotContains(response, ">Nueva venta<")
+        self.assertNotContains(response, ">Entrada de efectivo<")
+        self.assertNotContains(response, ">Cerrar caja<")
+
+    def test_session_operation_cancel_returns_to_session_without_javascript(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.get(
+            reverse(
+                "cash_register:cash_in",
+                kwargs={"store_id": self.store.pk, "session_id": session.pk},
+            )
+        )
+        cancel_url = self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        self.assertContains(response, f'href="{cancel_url}"')
+        self.assertNotContains(response, "javascript:history.back()")

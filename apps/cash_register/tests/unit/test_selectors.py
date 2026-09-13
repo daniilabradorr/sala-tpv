@@ -204,5 +204,9 @@ class CashRegisterSelectorsTests(TestCase):
                 "transfer": (Decimal("40"), Decimal("0"), Decimal("40")),
             },
         )
+        self.assertTrue(summary["cash"]["method__affects_cash_register"])
+        self.assertFalse(summary["card"]["method__affects_cash_register"])
+        self.assertFalse(summary["bizum"]["method__affects_cash_register"])
+        self.assertFalse(summary["transfer"]["method__affects_cash_register"])
         self.session.refresh_from_db()
         self.assertEqual(self.session.expected_cash_amount, Decimal("190.00"))
