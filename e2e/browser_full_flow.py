@@ -228,9 +228,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             self.page.get_by_role("heading", name="Venta completada")
         ).to_be_visible()
         self.page.get_by_role("link", name="VER DOCUMENTO").click()
-        expect(
-            self.page.get_by_text("Estado").locator("xpath=following-sibling::dd[1]")
-        ).to_have_text("Emitido")
+        expect(self.page.locator(".erp-context .status-issued")).to_have_text("Emitido")
         return amount, self._id_from_url(r"/documents/(\d+)/$")
 
     def _create_return(self, *, sale_id, product_name, reason):

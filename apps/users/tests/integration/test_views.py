@@ -1,4 +1,8 @@
+from django import forms
+from django.db import connection
+from django.template.loader import render_to_string
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -87,6 +91,89 @@ class UserViewsIntegrationTests(TestCase):
             password=self.password,
         )
         self.assertTrue(logged_in)
+
+    def test_user_list_uses_management_header_and_prefetched_store_access(self):
+        inactive_store = create_store(
+            business=self.business,
+            name="Tienda Inactiva",
+            code="INACTIVA",
+        )
+        second_active_store = create_store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=self.store,
+            is_active=True,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=second_active_store,
+            is_active=True,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=inactive_store,
+            is_active=False,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            is_active=False,
+        )
+        self.login_as(self.owner)
+
+        with CaptureQueriesContext(connection) as initial_queries:
+            response = self.client.get(reverse("users:user_list"))
+
+        self.assertContains(response, "Roles y acceso operativo")
+        self.assertContains(response, "Todas las tiendas")
+        self.assertContains(response, self.store.name)
+        self.assertContains(response, f"{self.store.name}, {second_active_store.name}")
+        self.assertContains(response, "Sin tiendas asignadas")
+        self.assertNotContains(response, f"{second_active_store.name},")
+        self.assertNotContains(response, inactive_store.name)
+        self.assertNotContains(response, self.other_store.name)
+
+        for index in range(5):
+            user = create_user(
+                business=self.business,
+                email=f"additional-{index}@test.com",
+                password=self.password,
+                role=RoleChoices.CASHIER,
+            )
+            create_store_access(
+                business=self.business,
+                user=user,
+                store=self.store,
+                is_active=True,
+            )
+
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded_response = self.client.get(reverse("users:user_list"))
+
+        self.assertEqual(len(expanded_queries), len(initial_queries))
+        self.assertContains(expanded_response, "additional-4@test.com")
+
+    def test_shared_form_include_exposes_hidden_field_errors(self):
+        class HiddenFieldForm(forms.Form):
+            token = forms.IntegerField(widget=forms.HiddenInput(), label="Token")
+
+        form = HiddenFieldForm({"token": "invalid"})
+        self.assertFalse(form.is_valid())
+
+        rendered = render_to_string("includes/erp_form_fields.html", {"form": form})
+
+        self.assertEqual(rendered.count('name="token"'), 1)
+        self.assertIn('type="hidden"', rendered)
+        self.assertIn('role="alert"', rendered)
+        self.assertIn("Token:", rendered)
 
     # ============================================================
     # AUTENTICACIÓN

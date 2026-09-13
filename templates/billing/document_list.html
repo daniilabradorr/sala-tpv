@@ -1,8 +1,41 @@
 {% extends "base.html" %}
 {% block title %}Documentos fiscales | Netxodo{% endblock %}
 {% block content %}
-<section class="card"><h1>Documentos fiscales</h1>
-  <form method="get">{{ form.non_field_errors }}{{ form.as_p }}<button type="submit">Filtrar</button></form>
-  {% for document in documents %}<p><a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">{{ document }}</a> — {{ document.get_status_display }} — {{ document.total_amount }} EUR</p>{% empty %}<p>No hay documentos.</p>{% endfor %}
+<section class="erp-page">
+    <header class="erp-header">
+        <div>
+            <p class="erp-eyebrow">Facturación</p>
+            <h1>Documentos fiscales</h1>
+            <p class="erp-subtitle">Consulta los documentos emitidos en esta tienda.</p>
+        </div>
+    </header>
+    <div class="erp-context">
+        <span><strong>Tienda:</strong> {{ store.name }}</span>
+        <span><strong>Código:</strong> {{ store.code }}</span>
+        <span><strong>Estado:</strong> {% if store.is_active %}Activa{% else %}Inactiva{% endif %}</span>
+    </div>
+    <form method="get" class="erp-toolbar" novalidate>
+        {% include "includes/erp_form_fields.html" %}
+        <button class="button button-secondary" type="submit">Filtrar</button>
+    </form>
+    <div class="table-scroll">
+        <table>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Fecha</th><th scope="col">Cliente</th><th scope="col">Estado</th><th scope="col" class="number-cell">Total</th><th scope="col" class="actions-cell">Acciones</th></tr></thead>
+            <tbody>
+            {% for document in documents %}
+                <tr>
+                    <td>{{ document }}</td>
+                    <td>{{ document.operation_date|date:"d/m/Y" }}</td>
+                    <td>{{ document.recipient_legal_name|default:document.recipient_name|default:"—" }}</td>
+                    <td><span class="badge status-{{ document.status }}">{{ document.get_status_display }}</span></td>
+                    <td class="number-cell">{{ document.total_amount }} EUR</td>
+                    <td class="actions-cell"><a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">Ver</a></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6"><div class="erp-empty"><strong>No hay documentos fiscales.</strong><p>Los documentos emitidos en {{ store.name }} aparecerán aquí.</p></div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </section>
 {% endblock %}
