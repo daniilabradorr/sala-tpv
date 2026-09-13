@@ -1,3 +1,6 @@
+from django.contrib.messages import constants
+from django.contrib.messages.storage.base import Message
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 
@@ -36,6 +39,12 @@ class AppShellIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Iniciar sesión")
         self.assertNotContains(response, 'id="app-sidebar"')
+        self.assertContains(
+            response,
+            '<a class="skip-link" href="#main-content">Saltar al contenido principal</a>',
+            html=True,
+        )
+        self.assertContains(response, '<main id="main-content"', count=1)
 
     def test_owner_sees_complete_business_navigation(self):
         self.client.force_login(self.owner)
@@ -101,3 +110,27 @@ class AppShellIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="app-sidebar"')
         self.assertContains(response, 'aria-current="page">Catálogo</a>')
+
+    def test_authenticated_shell_has_one_main_and_skip_link(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("core:home"))
+
+        self.assertContains(response, '<main id="main-content"', count=1)
+        self.assertContains(response, 'class="skip-link" href="#main-content"')
+        self.assertContains(response, 'aria-current="page">Inicio</a>', count=1)
+
+    def test_messages_expose_appropriate_live_region_roles(self):
+        html = render_to_string(
+            "includes/messages.html",
+            {
+                "messages": [
+                    Message(constants.SUCCESS, "Operación completada."),
+                    Message(constants.ERROR, "No se pudo completar."),
+                ]
+            },
+        )
+
+        self.assertIn('class="message message-success" role="status"', html)
+        self.assertIn('class="message message-error" role="alert"', html)
+        self.assertNotIn("aria-live", html)

@@ -248,7 +248,7 @@ jobs:
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
 
-      - name: Run full browser workflow
+      - name: Run browser workflows
         env:
           DJANGO_SETTINGS_MODULE: config.settings.test
           SECRET_KEY: test-secret-key
@@ -258,6 +258,7 @@ jobs:
         run: >-
           uv run python manage.py test
           e2e.browser_full_flow
+          e2e.browser_responsive_shell
           --verbosity 2
 
       - name: Upload browser failure artifacts
