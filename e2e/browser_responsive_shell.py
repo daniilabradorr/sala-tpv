@@ -62,11 +62,12 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Iniciar sesión").click()
                 page.wait_for_url(f"{self.live_server_url}/")
 
-                toggle = page.get_by_role("button", name="Abrir menú")
+                toggle = page.locator("[data-sidebar-toggle]")
                 sidebar = page.locator("#app-sidebar")
                 overlay = page.locator("[data-sidebar-overlay]")
                 expect(toggle).to_be_visible()
                 expect(toggle).to_have_attribute("aria-expanded", "false")
+                expect(toggle).to_have_attribute("aria-label", "Abrir menú")
                 expect(sidebar).to_have_attribute("inert", "")
                 expect(overlay).to_be_hidden()
                 expect(page.locator("main#main-content")).to_have_count(1)
@@ -74,6 +75,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 toggle.click()
                 expect(toggle).to_have_attribute("aria-expanded", "true")
+                expect(toggle).to_have_attribute("aria-label", "Cerrar menú")
                 expect(sidebar).not_to_have_attribute("inert", "")
                 expect(sidebar.locator("a").first).to_be_focused()
                 expect(page.get_by_role("link", name="Catálogo")).to_be_visible()
@@ -87,6 +89,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 page.keyboard.press("Escape")
                 expect(toggle).to_have_attribute("aria-expanded", "false")
+                expect(toggle).to_have_attribute("aria-label", "Abrir menú")
                 expect(toggle).to_be_focused()
                 expect(overlay).to_be_hidden()
 
