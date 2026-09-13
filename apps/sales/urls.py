@@ -55,6 +55,11 @@ urlpatterns = [
         name="sale_complete",
     ),
     path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/checkout/",
+        views.SaleCheckoutView.as_view(),
+        name="sale_checkout",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/cancel/",
         views.SaleCancelView.as_view(),
         name="sale_cancel",

@@ -1,0 +1,28 @@
+<section class="checkout card" aria-labelledby="checkout-title" aria-live="polite">
+  <header class="checkout-heading"><div><span class="eyebrow">Checkout integrado</span><h2 id="checkout-title">Venta #{{ sale.pk }}</h2></div><button type="button" class="checkout-close" data-checkout-close aria-label="Cerrar">×</button></header>
+  <ol class="checkout-progress">
+    <li class="{% if sale.is_completed %}done{% endif %}">Venta completada</li>
+    <li class="{% if sale.payment_status == 'paid' %}done{% endif %}">{% if sale.payment_status == 'paid' %}Cobro registrado{% else %}Cobro pendiente{% endif %}</li>
+    <li class="{% if document %}done{% elif sale.payment_status == 'paid' %}warning{% endif %}">{% if document %}Documento emitido{% elif sale.payment_status == 'paid' %}Documento pendiente de emisión{% else %}Documento fiscal{% endif %}</li>
+  </ol>
+  {% if checkout_error %}<div class="tpv-errors" role="alert">{{ checkout_error }}</div>{% endif %}
+  {% if complete %}
+    <div class="checkout-success"><div class="success-mark">✓</div><h3>Venta completada</h3>
+      <dl class="success-summary"><div><dt>Total</dt><dd>{{ sale.total_amount|floatformat:2 }} €</dd></div><div><dt>Cobro</dt><dd>{% for payment in payments %}{{ payment.method.name }} · {{ payment.amount|floatformat:2 }} €{% if not forloop.last %}<br>{% endif %}{% endfor %}</dd></div><div><dt>Documento</dt><dd>{{ document.series_text }} / {{ document.number|stringformat:"06d" }}</dd></div><div><dt>Tienda</dt><dd>{{ sale.store.name }}</dd></div><div><dt>Caja</dt><dd>{{ sale.cash_register.name }}</dd></div><div><dt>Sesión</dt><dd>#{{ sale.cash_session_id }}</dd></div>{% if cash_change != None %}<div><dt>Cambio</dt><dd>{{ cash_change|floatformat:2 }} €</dd></div>{% endif %}</dl>
+      <div class="success-actions">{% if sale.cash_session_id %}<a class="button" href="{% url 'cash_register:session_detail' store.pk sale.cash_session_id %}">VOLVER A CAJA</a><form method="post" action="{% url 'sales:sale_open_for_session' store.pk sale.cash_session_id %}">{% csrf_token %}<input type="hidden" name="document_type_requested" value="ticket"><button class="button button-secondary" type="submit">NUEVA VENTA</button></form>{% else %}<a class="button" href="{% url 'sales:sale_detail' store.pk sale.pk %}">Volver a venta</a>{% endif %}<a class="button button-secondary" href="{% url 'billing:document_detail' store.pk document.pk %}">VER DOCUMENTO</a></div>
+    </div>
+  {% else %}
+    {% if sale.is_completed %}<p class="recovery-note">Venta completada. {% if sale.payment_status == 'paid' %}Cobro completado; reintenta la emisión del documento.{% else %}Cobro pendiente.{% endif %}</p>{% endif %}
+    <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" data-checkout-form>
+      {% csrf_token %}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
+      {% if series|length == 1 %}<p><strong>Serie:</strong> {{ series.0 }}</p><input type="hidden" name="series" value="{{ series.0.pk }}">{% elif series|length > 1 %}<label>Serie {{ form.series }}</label>{% endif %}
+      {% if sale.pending_amount > 0 %}<p class="checkout-due">Pendiente <strong>{{ sale.pending_amount|floatformat:2 }} €</strong></p>
+        <div class="checkout-modes"><label><input type="radio" name="mode" value="single" {% if form.mode.value != 'split' %}checked{% endif %}> Pago simple</label>{% if allow_split %}<label><input type="radio" name="mode" value="split" {% if form.mode.value == 'split' %}checked{% endif %}> Pago mixto</label>{% endif %}</div>
+        <div data-single-payment {% if form.mode.value == 'split' %}hidden{% endif %}><div class="payment-methods">{% for method in methods %}<label class="payment-method method-{{ method.code }}"><input type="radio" name="method" value="{{ method.pk }}" data-method-code="{{ method.code }}" {% if form.method.value|stringformat:'s' == method.pk|stringformat:'s' %}checked{% endif %}>{{ method.name }}</label>{% empty %}<p>No hay métodos de pago activos.</p>{% endfor %}</div><div data-cash-fields {% if selected_method_code != 'cash' %}hidden{% endif %}><label>Entregado <input name="cash_received" type="number" min="0" step="0.01" value="{{ form.cash_received.value|default_if_none:'' }}"></label><p>Cambio: <strong data-cash-change>0,00 €</strong></p></div><label>Referencia externa (opcional) {{ form.external_reference }}</label></div>
+        {% if allow_split %}<div data-split-payment {% if form.mode.value != 'split' %}hidden{% endif %}>{{ payment_formset.management_form }}{% for part in payment_formset %}<fieldset class="split-part"><legend>Parte {{ forloop.counter }}</legend>{{ part.idempotency_key }}<label>Método {{ part.method }}</label><label>Importe {{ part.amount }}</label><label>Entregado (efectivo) {{ part.cash_received }}</label><label>Referencia {{ part.external_reference }}</label>{{ part.errors }}</fieldset>{% endfor %}<p>Total dividido: <strong data-split-total>0,00 €</strong></p></div>{% endif %}
+      {% endif %}
+      {{ form.errors }}{{ payment_formset.non_form_errors }}
+      <button class="checkout-confirm" type="submit" data-loading-text="Procesando…">{% if sale.payment_status == 'paid' %}Reintentar emisión{% else %}Confirmar cobro{% endif %}</button>
+    </form>
+  {% endif %}
+</section>

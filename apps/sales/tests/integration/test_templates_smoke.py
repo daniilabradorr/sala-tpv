@@ -140,6 +140,36 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
         self.assertEqual(return_list_response.status_code, 200)
         self.assertEqual(return_detail_response.status_code, 200)
 
+    def test_workspace_quantity_number_input_uses_unlocalized_decimal(self):
+        self.login_as_owner()
+        sale = open_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.owner,
+        )
+        line = add_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("2.000"),
+            user=self.owner,
+        )
+
+        response = self.client.get(
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'id="quantity-{line.pk}" name="quantity" type="number" '
+            'min="0.001" step="0.001" value="2.000"',
+        )
+        self.assertNotContains(response, 'value="2,000"')
+
     def test_return_complete_requires_pin_and_accepts_valid_pin(self):
         self.login_as_owner()
         self.pos_settings.require_pin_for_sensitive_actions = True

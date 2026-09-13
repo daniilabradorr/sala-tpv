@@ -32,6 +32,8 @@ from apps.cash_register.selectors import get_cash_session_detail
 from apps.business_config.models import POSSettings
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
 from apps.sales.forms import (
+    CheckoutForm,
+    CheckoutPaymentFormSet,
     SaleCancelForm,
     SaleFilterForm,
     SaleHeaderUpdateForm,
@@ -45,6 +47,12 @@ from apps.sales.forms import (
     SaleReturnLineCreateForm,
     SaleReturnLineUpdateForm,
     SaleReturnCompleteForm,
+)
+from apps.sales.checkout import (
+    PaymentIntent,
+    checkout_options,
+    checkout_state,
+    run_checkout,
 )
 from apps.sales.selectors import (
     get_sale_open_cash_initial,
@@ -1122,6 +1130,138 @@ class SaleCompleteView(
             store_id=store.pk,
             sale_pk=sale.pk,
         )
+
+
+class SaleCheckoutView(
+    SaleObjectMixin,
+    CanSellInStoreMixin,
+    BusinessRequiredMixin,
+    View,
+):
+    """Progressively-enhanced entry point for the durable checkout workflow."""
+
+    template_name = "sales/checkout.html"
+    partial_name = "sales/partials/_checkout.html"
+
+    def _forms(self, request, business, sale):
+        options = checkout_options(business=business, sale=sale)
+        data = request.POST if request.method == "POST" else None
+        initial = {}
+        candidates = list(options["series"])
+        if len(candidates) == 1:
+            initial["series"] = candidates[0]
+        form = CheckoutForm(
+            data,
+            methods=options["methods"],
+            series=options["series"],
+            initial=initial,
+        )
+        formset = CheckoutPaymentFormSet(
+            data,
+            prefix="payments",
+            form_kwargs={"methods": options["methods"]},
+        )
+        return options, form, formset
+
+    def _render(self, request, business, store, sale, *, error=None, cash_change=None):
+        options, form, formset = self._forms(request, business, sale)
+        state = checkout_state(business=business, sale=sale)
+        pos_settings = POSSettings.objects.filter(business=business).first()
+        selected_method = next(
+            (
+                method
+                for method in options["methods"]
+                if str(method.pk) == str(form["method"].value())
+            ),
+            None,
+        )
+        context = {
+            **state,
+            **options,
+            "store": store,
+            "form": form,
+            "payment_formset": formset,
+            "allow_split": bool(pos_settings and pos_settings.allow_split_payments),
+            "checkout_error": error,
+            "cash_change": cash_change,
+            "selected_method_code": getattr(selected_method, "code", None),
+        }
+        return render(
+            request,
+            self.partial_name if _is_htmx(request) else self.template_name,
+            context,
+        )
+
+    def get(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        return self._render(request, business, store, self.get_sale())
+
+    def post(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        options, form, formset = self._forms(request, business, sale)
+        mode = request.POST.get("mode", "single")
+        valid = form.is_valid() and (mode != "split" or formset.is_valid())
+        if not valid:
+            return self._render(request, business, store, sale)
+        pos_settings = POSSettings.objects.filter(business=business).first()
+        intents = []
+        if sale.pending_amount > 0:
+            if mode == "split":
+                intents = [
+                    PaymentIntent(
+                        method_id=part["method"].pk,
+                        amount=part["amount"],
+                        cash_received=(
+                            part.get("cash_received")
+                            if part["method"].code == "cash"
+                            else None
+                        ),
+                        external_reference=part.get("external_reference", ""),
+                        idempotency_key=part["idempotency_key"],
+                    )
+                    for part in formset.cleaned_data
+                    if part
+                ]
+            elif form.cleaned_data.get("method"):
+                intents = [
+                    PaymentIntent(
+                        method_id=form.cleaned_data["method"].pk,
+                        amount=sale.pending_amount,
+                        cash_received=(
+                            form.cleaned_data.get("cash_received")
+                            if form.cleaned_data["method"].code == "cash"
+                            else None
+                        ),
+                        external_reference=form.cleaned_data.get(
+                            "external_reference", ""
+                        ),
+                        idempotency_key=form.cleaned_data["payment_idempotency_key"],
+                    )
+                ]
+        try:
+            run_checkout(
+                business=business,
+                sale=sale,
+                user=request.user,
+                intents=intents,
+                series_id=getattr(form.cleaned_data.get("series"), "pk", None),
+                billing_key=form.cleaned_data["billing_idempotency_key"],
+                allow_split=bool(pos_settings and pos_settings.allow_split_payments),
+            )
+        except (ValidationError, ValueError) as error:
+            # Re-read persisted state so partial success is represented truthfully.
+            return self._render(request, business, store, sale, error=error)
+        cash_change = next(
+            (
+                intent.cash_received - intent.amount
+                for intent in intents
+                if intent.cash_received is not None
+                and intent.cash_received >= intent.amount
+            ),
+            None,
+        )
+        return self._render(request, business, store, sale, cash_change=cash_change)
 
 
 # ==========================================================

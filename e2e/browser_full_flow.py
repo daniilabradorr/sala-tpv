@@ -169,39 +169,62 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.step = f"add {product_name}"
         self.page.get_by_label("Buscar producto").fill(product_name)
         self.page.get_by_role("button", name=re.compile(product_name)).click()
-        expect(self.page.get_by_text(product_name, exact=False)).to_be_visible()
-        quantity_input = self.page.get_by_label("Cantidad").last
+        cart_line = self.page.locator("#sale-cart .cart-line").filter(
+            has_text=product_name
+        )
+        expect(cart_line).to_be_visible()
+        quantity_input = cart_line.get_by_label("Cantidad")
         quantity_input.fill(str(quantity))
-        quantity_input.locator("xpath=ancestor::form").get_by_role(
+        update_button = quantity_input.locator("xpath=ancestor::form").get_by_role(
             "button", name="Actualizar"
-        ).click()
+        )
+        self.page.locator("#sale-cart").evaluate(
+            "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
+        )
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/quantity/" in response.url
+            )
+        ) as response_info:
+            update_button.click()
+        self.assertLess(response_info.value.status, 400)
+        updated_cart = self.page.locator(
+            "#sale-cart:not([data-e2e-before-quantity-swap])"
+        )
+        expect(updated_cart).to_be_visible()
+        updated_quantity = (
+            updated_cart.locator(".cart-line")
+            .filter(has_text=product_name)
+            .get_by_label("Cantidad")
+        )
+        expect(updated_quantity).to_have_value(
+            re.compile(rf"^{re.escape(str(quantity))}(?:[.,]0+)?$")
+        )
 
-    def _complete_sale(self):
-        self.step = "complete sale"
-        self.page.get_by_role("button", name="Completar venta").click()
-        expect(self.page.get_by_text("Completada", exact=True)).to_be_visible()
-
-    def _pay_sale(self, method):
-        self.step = f"pay sale by {method}"
-        pending_text = self.page.get_by_text(re.compile(r"^Pendiente:")).inner_text()
-        amount = self._decimal_from_text(pending_text)
-        self.page.get_by_role("link", name="Registrar cobro").click()
-        self.page.get_by_label("Method").select_option(label=method)
-        self.page.get_by_label("Amount").fill(str(amount))
-        self.page.get_by_label("Cash session").select_option(index=1)
-        self.page.get_by_role("button", name="Registrar cobro").click()
-        expect(self.page.get_by_text("Pago: Pagada")).to_be_visible()
-        return amount
-
-    def _issue_document(self, expected_type):
-        self.step = f"issue {expected_type}"
-        self.page.get_by_role("link", name="Emitir documento fiscal").click()
-        self.page.locator("#id_series").select_option(index=1)
-        self.page.get_by_role("button", name="Emitir", exact=True).click()
+    def _checkout_sale(self, method, expected_type):
+        self.step = f"checkout sale by {method} as {expected_type}"
+        amount = self._decimal_from_text(
+            self.page.get_by_text(re.compile(r"^COBRAR")).inner_text()
+        )
+        self.page.get_by_role("link", name=re.compile(r"^COBRAR")).click()
+        expect(
+            self.page.get_by_role("heading", name=re.compile(r"Venta #"))
+        ).to_be_visible()
+        series = self.page.locator('select[name="series"]')
+        if series.count():
+            series.select_option(index=1)
+        self.page.get_by_role("radio", name=method, exact=True).check()
+        if method == "Efectivo":
+            self.page.locator('input[name="cash_received"]').fill(str(amount))
+        self.page.get_by_role("button", name="Confirmar cobro").click()
+        expect(
+            self.page.get_by_role("heading", name="Venta completada")
+        ).to_be_visible()
+        self.page.get_by_role("link", name="VER DOCUMENTO").click()
         expect(
             self.page.get_by_text("Estado").locator("xpath=following-sibling::dd[1]")
         ).to_have_text("Emitido")
-        return self._id_from_url(r"/documents/(\d+)/$")
+        return amount, self._id_from_url(r"/documents/(\d+)/$")
 
     def _create_return(self, *, sale_id, product_name, reason):
         self.step = f"create return for {product_name}"
@@ -312,9 +335,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         )
         self._add_product("Agua mineral 500 ml", 2)
         self._add_product("Envoltorio para regalo", 1)
-        self._complete_sale()
-        cash_payment_amount = self._pay_sale("Efectivo")
-        f2_document_id = self._issue_document(BillingDocumentTypeChoices.F2)
+        cash_payment_amount, f2_document_id = self._checkout_sale(
+            "Efectivo", BillingDocumentTypeChoices.F2
+        )
         f2_return_id = self._create_return(
             sale_id=f2_sale_id,
             product_name="Agua mineral 500 ml",
@@ -329,9 +352,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             session_id=session_id,
         )
         self._add_product("Refresco cola 330 ml", 2)
-        self._complete_sale()
-        card_payment_amount = self._pay_sale("Tarjeta")
-        f1_document_id = self._issue_document(BillingDocumentTypeChoices.F1)
+        card_payment_amount, f1_document_id = self._checkout_sale(
+            "Tarjeta", BillingDocumentTypeChoices.F1
+        )
         f1_return_id = self._create_return(
             sale_id=f1_sale_id,
             product_name="Refresco cola 330 ml",
@@ -454,17 +477,25 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             business=self.business, status=PaymentStatusChoices.COMPLETED
         )
         self.assertEqual(payments.count(), 4)
+        actual_payments = list(
+            payments.values_list("payment_type", "method__code", "amount")
+        )
         for payment_type, method_code, amount in (
             (PaymentTypeChoices.SALE_PAYMENT, PaymentMethodCodeChoices.CASH, cash_paid),
             (PaymentTypeChoices.REFUND, PaymentMethodCodeChoices.CASH, cash_refunded),
             (PaymentTypeChoices.SALE_PAYMENT, PaymentMethodCodeChoices.CARD, card_paid),
             (PaymentTypeChoices.REFUND, PaymentMethodCodeChoices.CARD, card_refunded),
         ):
-            self.assertTrue(
-                payments.filter(
-                    payment_type=payment_type, method__code=method_code, amount=amount
-                ).exists()
-            )
+            expected_payment = (payment_type, method_code, amount)
+            with self.subTest(expected_payment=expected_payment):
+                self.assertIn(
+                    expected_payment,
+                    actual_payments,
+                    msg=(
+                        f"Expected payment {expected_payment!r}; "
+                        f"actual payments={actual_payments!r}"
+                    ),
+                )
 
         session = CashSession.objects.get(pk=session_id)
         self.assertEqual(session.status, CashSession.Status.CLOSED)

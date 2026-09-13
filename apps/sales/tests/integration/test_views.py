@@ -67,6 +67,8 @@ TEST_TEMPLATES = [
                         "sales/sale_header_form.html": "{{ form.errors }}",
                         "sales/sale_line_form.html": "{{ form.errors }}",
                         "sales/sale_cancel_confirm.html": "{{ form.errors }}",
+                        "sales/checkout.html": "checkout {{ sale.pk }} {{ form.errors }}",
+                        "sales/partials/_checkout.html": "checkout {{ sale.pk }} {{ form.errors }}",
                         "sales/return_list.html": (
                             "{% for return_doc in returns %}{{ return_doc.pk }} {% endfor %}"
                         ),
@@ -156,6 +158,7 @@ class SaleViewsIntegrationTests(TestCase):
             },
             "sale_line_delete": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
             "sale_complete": {"store_id": 1, "sale_pk": 2},
+            "sale_checkout": {"store_id": 1, "sale_pk": 2},
             "sale_cancel": {"store_id": 1, "sale_pk": 2},
             "return_list": {"store_id": 1},
             "return_create": {"store_id": 1, "sale_pk": 2},
@@ -172,8 +175,8 @@ class SaleViewsIntegrationTests(TestCase):
             for name, kwargs in route_kwargs.items()
         }
 
-        self.assertEqual(len(reversed_urls), 18)
-        self.assertEqual(len(set(reversed_urls.values())), 18)
+        self.assertEqual(len(reversed_urls), 19)
+        self.assertEqual(len(set(reversed_urls.values())), 19)
         for url in reversed_urls.values():
             # URLs are included under the `sales/` prefix in config.urls,
             # so assert presence of the expected store fragment instead
