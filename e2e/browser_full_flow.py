@@ -188,7 +188,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         series = self.page.locator('select[name="series"]')
         if series.count():
             series.select_option(index=1)
-        self.page.get_by_text(method, exact=True).click()
+        self.page.get_by_role("radio", name=method, exact=True).check()
         if method == "Efectivo":
             self.page.get_by_label("Entregado").fill(str(amount))
         self.page.get_by_role("button", name="Confirmar cobro").click()

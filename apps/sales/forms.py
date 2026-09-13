@@ -73,7 +73,7 @@ class CheckoutPaymentPartForm(forms.Form):
 
 
 CheckoutPaymentFormSet = forms.formset_factory(
-    CheckoutPaymentPartForm, extra=2, min_num=2, validate_min=True
+    CheckoutPaymentPartForm, extra=0, min_num=2, validate_min=True
 )
 
 

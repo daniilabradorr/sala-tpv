@@ -1167,6 +1167,14 @@ class SaleCheckoutView(
         options, form, formset = self._forms(request, business, sale)
         state = checkout_state(business=business, sale=sale)
         pos_settings = POSSettings.objects.filter(business=business).first()
+        selected_method = next(
+            (
+                method
+                for method in options["methods"]
+                if str(method.pk) == str(form["method"].value())
+            ),
+            None,
+        )
         context = {
             **state,
             **options,
@@ -1176,6 +1184,7 @@ class SaleCheckoutView(
             "allow_split": bool(pos_settings and pos_settings.allow_split_payments),
             "checkout_error": error,
             "cash_change": cash_change,
+            "selected_method_code": getattr(selected_method, "code", None),
         }
         return render(
             request,
@@ -1203,7 +1212,11 @@ class SaleCheckoutView(
                     PaymentIntent(
                         method_id=part["method"].pk,
                         amount=part["amount"],
-                        cash_received=part.get("cash_received"),
+                        cash_received=(
+                            part.get("cash_received")
+                            if part["method"].code == "cash"
+                            else None
+                        ),
                         external_reference=part.get("external_reference", ""),
                         idempotency_key=part["idempotency_key"],
                     )
@@ -1215,7 +1228,11 @@ class SaleCheckoutView(
                     PaymentIntent(
                         method_id=form.cleaned_data["method"].pk,
                         amount=sale.pending_amount,
-                        cash_received=form.cleaned_data.get("cash_received"),
+                        cash_received=(
+                            form.cleaned_data.get("cash_received")
+                            if form.cleaned_data["method"].code == "cash"
+                            else None
+                        ),
                         external_reference=form.cleaned_data.get(
                             "external_reference", ""
                         ),

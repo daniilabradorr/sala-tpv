@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% load static %}
 {% block title %}Cobrar venta #{{ sale.pk }} | Netxodo{% endblock %}
 {% block extra_head %}<link rel="stylesheet" href="{% static 'css/sales_tpv.css' %}">{% endblock %}
-{% block content %}<main class="checkout-page">{% include "sales/partials/_checkout.html" %}</main>{% endblock %}
+{% block content %}<section class="checkout-page" aria-label="Cobro de venta">{% include "sales/partials/_checkout.html" %}</section>{% endblock %}
 {% block extra_js %}<script src="{% static 'js/sales_tpv.js' %}" defer></script>{% endblock %}

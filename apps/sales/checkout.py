@@ -34,15 +34,23 @@ class PaymentIntent:
     external_reference: str = ""
 
 
+def expected_document_type(sale):
+    """Return the sole initial fiscal document type valid for this checkout."""
+    return {
+        RequestedDocumentTypeChoices.TICKET: BillingDocumentTypeChoices.F2,
+        RequestedDocumentTypeChoices.INVOICE: BillingDocumentTypeChoices.F1,
+    }.get(sale.document_type_requested)
+
+
 def initial_document(sale, business):
+    document_type = expected_document_type(sale)
+    if document_type is None:
+        return None
     return (
         billing_documents_for_sale(business=business, sale=sale)
         .filter(
             status=BillingDocumentStatusChoices.ISSUED,
-            document_type__in=(
-                BillingDocumentTypeChoices.F1,
-                BillingDocumentTypeChoices.F2,
-            ),
+            document_type=document_type,
         )
         .first()
     )
@@ -69,10 +77,7 @@ def checkout_state(*, business, sale):
 
 
 def checkout_options(*, business, sale):
-    document_type = {
-        RequestedDocumentTypeChoices.TICKET: BillingDocumentTypeChoices.F2,
-        RequestedDocumentTypeChoices.INVOICE: BillingDocumentTypeChoices.F1,
-    }.get(sale.document_type_requested)
+    document_type = expected_document_type(sale)
     series = (
         active_billing_series(
             business=business,
