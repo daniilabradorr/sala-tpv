@@ -64,6 +64,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 toggle = page.locator("[data-sidebar-toggle]")
                 sidebar = page.locator("#app-sidebar")
+                catalog_link = sidebar.get_by_role("link", name="Catálogo")
                 overlay = page.locator("[data-sidebar-overlay]")
                 expect(toggle).to_be_visible()
                 expect(toggle).to_have_attribute("aria-expanded", "false")
@@ -78,7 +79,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 expect(toggle).to_have_attribute("aria-label", "Cerrar menú")
                 expect(sidebar).not_to_have_attribute("inert", "")
                 expect(sidebar.locator("a").first).to_be_focused()
-                expect(page.get_by_role("link", name="Catálogo")).to_be_visible()
+                expect(catalog_link).to_be_visible()
 
                 page.keyboard.press("Shift+Tab")
                 expect(
@@ -94,7 +95,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 expect(overlay).to_be_hidden()
 
                 toggle.click()
-                page.get_by_role("link", name="Catálogo").click()
+                catalog_link.click()
                 page.wait_for_url(f"{self.live_server_url}/catalog/")
                 expect(page.locator('[aria-current="page"]')).to_have_text("Catálogo")
                 self.assertTrue(
