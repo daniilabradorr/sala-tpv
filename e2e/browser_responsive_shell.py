@@ -53,9 +53,9 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
             page.on("pageerror", lambda error: javascript_errors.append(str(error)))
             try:
                 page.goto(f"{self.live_server_url}/users/login/")
-                expect(
-                    page.locator('a.skip-link[href="#main-content"]')
-                ).to_have_count(1)
+                expect(page.locator('a.skip-link[href="#main-content"]')).to_have_count(
+                    1
+                )
                 expect(page.locator("main#main-content")).to_have_count(1)
                 page.get_by_label("Correo electrónico").fill(self.email)
                 page.get_by_label("Contraseña").fill(self.password)
@@ -79,7 +79,9 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 expect(page.get_by_role("link", name="Catálogo")).to_be_visible()
 
                 page.keyboard.press("Shift+Tab")
-                expect(sidebar.get_by_role("button", name="Cerrar sesión")).to_be_focused()
+                expect(
+                    sidebar.get_by_role("button", name="Cerrar sesión")
+                ).to_be_focused()
                 page.keyboard.press("Tab")
                 expect(sidebar.locator("a").first).to_be_focused()
 
