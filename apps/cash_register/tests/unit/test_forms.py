@@ -2,7 +2,13 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.cash_register.forms import CashAdjustmentForm, CashSessionOpenForm
+from apps.cash_register.forms import (
+    CashAdjustmentForm,
+    CashCountReviewForm,
+    CashInForm,
+    CashSessionCloseForm,
+    CashSessionOpenForm,
+)
 from apps.cash_register.models import CashMovement
 from apps.cash_register.test_factories import (
     create_cash_business,
@@ -12,6 +18,20 @@ from apps.cash_register.test_factories import (
 
 
 class CashRegisterFormsTests(TestCase):
+    def test_operational_form_labels_are_in_spanish(self):
+        self.assertEqual(CashInForm().fields["amount"].label, "Importe")
+        self.assertEqual(CashInForm().fields["reason"].label, "Motivo")
+        self.assertEqual(
+            CashAdjustmentForm().fields["adjustment_direction"].label,
+            "Dirección del ajuste",
+        )
+        self.assertEqual(
+            CashCountReviewForm().fields["counted_amount"].label,
+            "Efectivo contado",
+        )
+        self.assertEqual(CashCountReviewForm().fields["notes"].label, "Observaciones")
+        self.assertEqual(CashSessionCloseForm().fields["pin"].label, "PIN")
+
     def test_open_form_scopes_active_registers_to_business_and_store(self):
         business = create_cash_business()
         store = create_cash_store(business=business)

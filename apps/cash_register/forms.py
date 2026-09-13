@@ -28,9 +28,12 @@ class CashSessionOpenForm(forms.Form):
 
 class CashAmountForm(forms.Form):
     amount = forms.DecimalField(
-        min_value=Decimal("0.01"), decimal_places=2, max_digits=14
+        label="Importe",
+        min_value=Decimal("0.01"),
+        decimal_places=2,
+        max_digits=14,
     )
-    reason = forms.CharField(required=False, widget=forms.Textarea)
+    reason = forms.CharField(label="Motivo", required=False, widget=forms.Textarea)
 
 
 class CashInForm(CashAmountForm):
@@ -43,14 +46,18 @@ class CashOutForm(CashAmountForm):
 
 class CashAdjustmentForm(CashAmountForm):
     adjustment_direction = forms.ChoiceField(
-        choices=CashMovement.AdjustmentDirection.choices
+        label="Dirección del ajuste", choices=CashMovement.AdjustmentDirection.choices
     )
 
 
 class CashCountReviewForm(forms.Form):
-    counted_amount = forms.DecimalField(min_value=0, decimal_places=2, max_digits=14)
-    notes = forms.CharField(required=False, widget=forms.Textarea)
+    counted_amount = forms.DecimalField(
+        label="Efectivo contado", min_value=0, decimal_places=2, max_digits=14
+    )
+    notes = forms.CharField(
+        label="Observaciones", required=False, widget=forms.Textarea
+    )
 
 
 class CashSessionCloseForm(CashCountReviewForm):
-    pin = forms.CharField(required=False, widget=forms.PasswordInput)
+    pin = forms.CharField(label="PIN", required=False, widget=forms.PasswordInput)

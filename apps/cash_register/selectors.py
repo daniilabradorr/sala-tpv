@@ -57,7 +57,7 @@ def get_sales_for_cash_session(*, business, store, cash_session):
 def get_cash_session_counts(*, business, store, cash_session):
     return CashCount.objects.filter(
         business=business, store=store, cash_session=cash_session
-    )
+    ).select_related("counted_by")
 
 
 def get_cash_session_expected_cash(*, business, store, cash_session_id):
