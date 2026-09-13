@@ -36,6 +36,8 @@ class CustomerViewTests(TestCase):
         self.client.force_login(self.cashier)
         response = self.client.get(url)
         self.assertContains(response, self.account.customer.name)
+        self.assertContains(response, "Personas y empresas asociadas a tus ventas.")
+        self.assertContains(response, 'class="table-scroll"', html=False)
         self.assertNotContains(response, self.other_account.customer.name)
         self.assertEqual(
             self.client.get(
@@ -56,6 +58,15 @@ class CustomerViewTests(TestCase):
         c = Customer.objects.get(name="Nuevo")
         self.assertEqual(c.account.credit_limit, Decimal("0.00"))
         self.assertFalse(c.account.is_blocked)
+
+    def test_empty_list_has_a_useful_create_action(self):
+        self.account.customer.delete()
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("customers:customer_list"))
+
+        self.assertContains(response, "No hay clientes con estos filtros.")
+        self.assertContains(response, reverse("customers:customer_create"))
 
     def test_permissions_and_post_actions(self):
         self.client.force_login(self.cashier)

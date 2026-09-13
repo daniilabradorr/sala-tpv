@@ -53,6 +53,7 @@ from apps.users.mixins import (
     BusinessRequiredMixin,
     ManagerOrOwnerRequiredMixin,
 )
+from apps.users.helpers import is_owner_or_manager
 
 
 # ==========================================================
@@ -117,6 +118,9 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
             latest_adjustments_limit=self.latest_adjustments_limit,
         )
 
+        dashboard_data["can_manage_inventory"] = request.user.is_superuser or (
+            is_owner_or_manager(request.user)
+        )
         return render(request, self.template_name, dashboard_data)
 
 
@@ -159,6 +163,8 @@ class InventoryItemListView(BusinessRequiredMixin, View):
         context = {
             "form": form,
             "inventory_items": inventory_items,
+            "can_manage_inventory": request.user.is_superuser
+            or is_owner_or_manager(request.user),
         }
 
         return render(request, self.template_name, context)
@@ -536,6 +542,8 @@ class StockAdjustmentListView(BusinessRequiredMixin, View):
         context = {
             "form": form,
             "stock_adjustments": stock_adjustments,
+            "can_manage_inventory": request.user.is_superuser
+            or is_owner_or_manager(request.user),
         }
 
         return render(request, self.template_name, context)

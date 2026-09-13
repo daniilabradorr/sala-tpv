@@ -20,18 +20,28 @@ from apps.sales.models import RequestedDocumentTypeChoices
 
 
 class BillingDocumentFilterForm(forms.Form):
-    customer = forms.ModelChoiceField(Customer.objects.none(), required=False)
+    customer = forms.ModelChoiceField(
+        Customer.objects.none(), required=False, label="Cliente"
+    )
     document_type = forms.ChoiceField(
-        choices=[("", "Todos"), *BillingDocumentTypeChoices.choices], required=False
+        choices=[("", "Todos"), *BillingDocumentTypeChoices.choices],
+        required=False,
+        label="Tipo de documento",
     )
     status = forms.ChoiceField(
-        choices=[("", "Todos"), *BillingDocumentStatusChoices.choices], required=False
+        choices=[("", "Todos"), *BillingDocumentStatusChoices.choices],
+        required=False,
+        label="Estado",
     )
     date_from = forms.DateField(
-        required=False, widget=forms.DateInput(attrs={"type": "date"})
+        required=False,
+        label="Desde",
+        widget=forms.DateInput(attrs={"type": "date"}),
     )
     date_to = forms.DateField(
-        required=False, widget=forms.DateInput(attrs={"type": "date"})
+        required=False,
+        label="Hasta",
+        widget=forms.DateInput(attrs={"type": "date"}),
     )
 
     def __init__(self, *args, business, **kwargs):

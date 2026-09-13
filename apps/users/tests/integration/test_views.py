@@ -1,4 +1,6 @@
 from django.test import TestCase
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -87,6 +89,23 @@ class UserViewsIntegrationTests(TestCase):
             password=self.password,
         )
         self.assertTrue(logged_in)
+
+    def test_user_list_uses_management_header_and_prefetched_store_access(self):
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=self.store,
+            is_active=True,
+        )
+        self.login_as(self.owner)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(reverse("users:user_list"))
+
+        self.assertLessEqual(len(queries), 6)
+        self.assertContains(response, "Roles y acceso operativo")
+        self.assertContains(response, self.store.name)
+        self.assertNotContains(response, self.other_store.name)
 
     # ============================================================
     # AUTENTICACIÓN
