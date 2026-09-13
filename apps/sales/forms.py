@@ -6,6 +6,7 @@ Reglas:
 - Ningún formulario calcula o persiste totales definitivos.
 """
 
+import uuid
 from decimal import Decimal
 
 from django import forms
@@ -15,6 +16,8 @@ from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
+from apps.billing.models import BillingSeries
+from apps.payments.models import PaymentMethod
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -27,6 +30,51 @@ from apps.users.models import CustomUser
 
 
 EMPTY_CHOICE = [("", "Todos")]
+
+
+class CheckoutForm(forms.Form):
+    mode = forms.ChoiceField(
+        choices=(("single", "Pago simple"), ("split", "Pago mixto")), required=False
+    )
+    method = forms.ModelChoiceField(PaymentMethod.objects.none(), required=False)
+    cash_received = forms.DecimalField(
+        required=False, min_value=Decimal("0.00"), max_digits=14, decimal_places=2
+    )
+    external_reference = forms.CharField(required=False, max_length=150)
+    payment_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+    billing_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+    series = forms.ModelChoiceField(BillingSeries.objects.none(), required=False)
+
+    def __init__(self, *args, methods, series, **kwargs):
+        kwargs.setdefault("initial", {})
+        kwargs["initial"].setdefault("mode", "single")
+        kwargs["initial"].setdefault("payment_idempotency_key", uuid.uuid4())
+        kwargs["initial"].setdefault("billing_idempotency_key", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["method"].queryset = methods
+        self.fields["series"].queryset = series
+
+
+class CheckoutPaymentPartForm(forms.Form):
+    method = forms.ModelChoiceField(PaymentMethod.objects.none())
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_digits=14, decimal_places=2
+    )
+    cash_received = forms.DecimalField(
+        required=False, min_value=Decimal("0.00"), max_digits=14, decimal_places=2
+    )
+    external_reference = forms.CharField(required=False, max_length=150)
+    idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, methods, **kwargs):
+        kwargs.setdefault("initial", {}).setdefault("idempotency_key", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["method"].queryset = methods
+
+
+CheckoutPaymentFormSet = forms.formset_factory(
+    CheckoutPaymentPartForm, extra=2, min_num=2, validate_min=True
+)
 
 
 def _get_pos_settings(business):

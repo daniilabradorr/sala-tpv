@@ -176,32 +176,30 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             "button", name="Actualizar"
         ).click()
 
-    def _complete_sale(self):
-        self.step = "complete sale"
-        self.page.get_by_role("button", name="Completar venta").click()
-        expect(self.page.get_by_text("Completada", exact=True)).to_be_visible()
-
-    def _pay_sale(self, method):
-        self.step = f"pay sale by {method}"
-        pending_text = self.page.get_by_text(re.compile(r"^Pendiente:")).inner_text()
-        amount = self._decimal_from_text(pending_text)
-        self.page.get_by_role("link", name="Registrar cobro").click()
-        self.page.get_by_label("Method").select_option(label=method)
-        self.page.get_by_label("Amount").fill(str(amount))
-        self.page.get_by_label("Cash session").select_option(index=1)
-        self.page.get_by_role("button", name="Registrar cobro").click()
-        expect(self.page.get_by_text("Pago: Pagada")).to_be_visible()
-        return amount
-
-    def _issue_document(self, expected_type):
-        self.step = f"issue {expected_type}"
-        self.page.get_by_role("link", name="Emitir documento fiscal").click()
-        self.page.locator("#id_series").select_option(index=1)
-        self.page.get_by_role("button", name="Emitir", exact=True).click()
+    def _checkout_sale(self, method, expected_type):
+        self.step = f"checkout sale by {method} as {expected_type}"
+        amount = self._decimal_from_text(
+            self.page.get_by_text(re.compile(r"^COBRAR")).inner_text()
+        )
+        self.page.get_by_role("link", name=re.compile(r"^COBRAR")).click()
+        expect(
+            self.page.get_by_role("heading", name=re.compile(r"Venta #"))
+        ).to_be_visible()
+        series = self.page.locator('select[name="series"]')
+        if series.count():
+            series.select_option(index=1)
+        self.page.get_by_text(method, exact=True).click()
+        if method == "Efectivo":
+            self.page.get_by_label("Entregado").fill(str(amount))
+        self.page.get_by_role("button", name="Confirmar cobro").click()
+        expect(
+            self.page.get_by_role("heading", name="Venta completada")
+        ).to_be_visible()
+        self.page.get_by_role("link", name="VER DOCUMENTO").click()
         expect(
             self.page.get_by_text("Estado").locator("xpath=following-sibling::dd[1]")
         ).to_have_text("Emitido")
-        return self._id_from_url(r"/documents/(\d+)/$")
+        return amount, self._id_from_url(r"/documents/(\d+)/$")
 
     def _create_return(self, *, sale_id, product_name, reason):
         self.step = f"create return for {product_name}"
@@ -312,9 +310,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         )
         self._add_product("Agua mineral 500 ml", 2)
         self._add_product("Envoltorio para regalo", 1)
-        self._complete_sale()
-        cash_payment_amount = self._pay_sale("Efectivo")
-        f2_document_id = self._issue_document(BillingDocumentTypeChoices.F2)
+        cash_payment_amount, f2_document_id = self._checkout_sale(
+            "Efectivo", BillingDocumentTypeChoices.F2
+        )
         f2_return_id = self._create_return(
             sale_id=f2_sale_id,
             product_name="Agua mineral 500 ml",
@@ -329,9 +327,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             session_id=session_id,
         )
         self._add_product("Refresco cola 330 ml", 2)
-        self._complete_sale()
-        card_payment_amount = self._pay_sale("Tarjeta")
-        f1_document_id = self._issue_document(BillingDocumentTypeChoices.F1)
+        card_payment_amount, f1_document_id = self._checkout_sale(
+            "Tarjeta", BillingDocumentTypeChoices.F1
+        )
         f1_return_id = self._create_return(
             sale_id=f1_sale_id,
             product_name="Refresco cola 330 ml",
