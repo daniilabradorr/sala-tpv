@@ -190,7 +190,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             series.select_option(index=1)
         self.page.get_by_role("radio", name=method, exact=True).check()
         if method == "Efectivo":
-            self.page.get_by_label("Entregado").fill(str(amount))
+            self.page.locator('input[name="cash_received"]').fill(str(amount))
         self.page.get_by_role("button", name="Confirmar cobro").click()
         expect(
             self.page.get_by_role("heading", name="Venta completada")

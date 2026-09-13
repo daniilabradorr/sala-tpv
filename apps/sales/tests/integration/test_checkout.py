@@ -13,7 +13,12 @@ from apps.billing.models import BillingDocument, BillingSeries
 from apps.business_config.services import create_business_configuration
 from apps.cash_register.models import CashRegister, CashSession
 from apps.payments.models import Payment, PaymentMethod
-from apps.sales.checkout import PaymentIntent, checkout_state, run_checkout
+from apps.sales.checkout import (
+    PaymentIntent,
+    checkout_options,
+    checkout_state,
+    run_checkout,
+)
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -129,7 +134,9 @@ class CheckoutIntegrationTests(TestCase):
             cash_received=received,
         )
 
-    def run(self, sale, intents, series=None, billing_key=None, allow_split=True):
+    def _run_checkout(
+        self, sale, intents, series=None, billing_key=None, allow_split=True
+    ):
         return run_checkout(
             business=self.business,
             sale=sale,
@@ -146,20 +153,12 @@ class CheckoutIntegrationTests(TestCase):
         self.assertFalse(Payment.objects.filter(sale=sale).exists())
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
 
-    def test_preflight_rejects_missing_lines_none_invoice_customer_and_series(self):
+    def test_preflight_rejects_missing_lines_none_and_invoice_without_customer(self):
         valid_series = self.series()
         cases = [
             (self.sale(lines=False), valid_series, "sin líneas"),
             (self.sale(), valid_series, "Ticket o Factura"),
             (self.sale(), valid_series, "requiere un cliente"),
-            (
-                self.sale(
-                    requested=RequestedDocumentTypeChoices.INVOICE,
-                    customer=self.customer,
-                ),
-                None,
-                "No existe una serie",
-            ),
         ]
         type(cases[1][0]).objects.filter(pk=cases[1][0].pk).update(
             document_type_requested=RequestedDocumentTypeChoices.NONE
@@ -174,24 +173,34 @@ class CheckoutIntegrationTests(TestCase):
                 self.subTest(message=message),
                 self.assertRaisesMessage(ValidationError, message),
             ):
-                self.run(sale, [self.intent()], series)
+                self._run_checkout(sale, [self.intent()], series)
             self.assert_pristine(sale)
+
+    def test_preflight_rejects_when_no_valid_billing_series_exists(self):
+        sale = self.sale(
+            requested=RequestedDocumentTypeChoices.INVOICE,
+            customer=self.customer,
+        )
+        with self.assertRaisesMessage(ValidationError, "No existe una serie"):
+            self._run_checkout(sale, [self.intent()], series=None)
+        self.assert_pristine(sale)
 
     def test_one_series_is_automatic_but_multiple_require_selection(self):
         sale = self.sale()
         only = self.series()
-        state = self.run(sale, [self.intent()], series=None)
+        state = self._run_checkout(sale, [self.intent()], series=None)
         self.assertTrue(state["complete"])
         self.assertEqual(state["document"].series, only)
 
         second_sale = self.sale()
         self.series()
         with self.assertRaisesMessage(ValidationError, "Selecciona una serie"):
-            self.run(second_sale, [self.intent()], series=None)
+            self._run_checkout(second_sale, [self.intent()], series=None)
         self.assert_pristine(second_sale)
 
     def test_series_isolation_rejects_tenant_store_register_and_type(self):
         sale = self.sale()
+        valid_series = self.series()
         other_register = CashRegister.objects.create(
             business=self.business,
             store=self.store,
@@ -204,19 +213,23 @@ class CheckoutIntegrationTests(TestCase):
             self.series(cash_register=other_register),
             self.series(kind="F1"),
         ]
+        self.assertEqual(
+            list(checkout_options(business=self.business, sale=sale)["series"]),
+            [valid_series],
+        )
         for candidate in invalid:
             with (
                 self.subTest(series=candidate),
                 self.assertRaisesMessage(ValidationError, "no es válida"),
             ):
-                self.run(sale, [self.intent()], candidate)
+                self._run_checkout(sale, [self.intent()], candidate)
             self.assert_pristine(sale)
 
     def test_simple_cash_and_card_complete_pay_and_issue(self):
         for method in (self.cash, self.card):
             with self.subTest(method=method.code):
                 sale = self.sale()
-                state = self.run(
+                state = self._run_checkout(
                     sale,
                     [
                         self.intent(
@@ -250,7 +263,7 @@ class CheckoutIntegrationTests(TestCase):
                     ValidationError, "inactivo o pertenece a otro negocio"
                 ),
             ):
-                self.run(sale, [self.intent(method)], self.series())
+                self._run_checkout(sale, [self.intent(method)], self.series())
             self.assert_pristine(sale)
 
     def test_cash_received_is_operational_and_insufficient_cash_is_preflight_error(
@@ -259,7 +272,7 @@ class CheckoutIntegrationTests(TestCase):
         self.product.base_price = Decimal("12.50")
         self.product.save()
         sale = self.sale()
-        self.run(
+        self._run_checkout(
             sale,
             [self.intent(self.cash, Decimal("12.50"), received=Decimal("20.00"))],
             self.series(),
@@ -268,7 +281,7 @@ class CheckoutIntegrationTests(TestCase):
 
         insufficient = self.sale()
         with self.assertRaisesMessage(ValidationError, "efectivo entregado"):
-            self.run(
+            self._run_checkout(
                 insufficient,
                 [self.intent(self.cash, Decimal("12.50"), received=Decimal("10.00"))],
                 self.series(),
@@ -281,7 +294,7 @@ class CheckoutIntegrationTests(TestCase):
             self.intent(self.card, Decimal("25.00")),
         ]
         sale = self.sale()
-        self.run(sale, intents, self.series())
+        self._run_checkout(sale, intents, self.series())
         sale.refresh_from_db()
         self.assertCountEqual(
             Payment.objects.filter(sale=sale).values_list("amount", flat=True),
@@ -299,7 +312,7 @@ class CheckoutIntegrationTests(TestCase):
                 self.subTest(amounts=amounts, allowed=allowed),
                 self.assertRaises(ValidationError),
             ):
-                self.run(candidate, parts, self.series(), allow_split=allowed)
+                self._run_checkout(candidate, parts, self.series(), allow_split=allowed)
             self.assert_pristine(candidate)
 
     def test_payment_idempotency_and_partial_split_recovery(self):
@@ -326,14 +339,14 @@ class CheckoutIntegrationTests(TestCase):
             "apps.sales.checkout.register_sale_payment", side_effect=fail_second
         ):
             with self.assertRaises(ValidationError):
-                self.run(sale, intents, series)
+                self._run_checkout(sale, intents, series)
         sale.refresh_from_db()
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
         self.assertEqual(sale.payment_status, PaymentStatusChoices.PARTIAL)
         self.assertEqual(sale.pending_amount, Decimal("25.00"))
 
-        self.run(sale, intents, series)
-        self.run(sale, intents, series)
+        self._run_checkout(sale, intents, series)
+        self._run_checkout(sale, intents, series)
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 2)
 
     def test_payment_and_billing_failures_are_durable_and_recoverable(self):
@@ -345,12 +358,12 @@ class CheckoutIntegrationTests(TestCase):
             side_effect=ValidationError("Fallo de cobro"),
         ):
             with self.assertRaises(ValidationError):
-                self.run(sale, [intent], series)
+                self._run_checkout(sale, [intent], series)
         sale.refresh_from_db()
         self.assertEqual(sale.status, SaleStatusChoices.COMPLETED)
         self.assertEqual(sale.payment_status, PaymentStatusChoices.UNPAID)
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
-        self.run(sale, [intent], series)
+        self._run_checkout(sale, [intent], series)
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
 
         billing_sale = self.sale()
@@ -361,12 +374,12 @@ class CheckoutIntegrationTests(TestCase):
             side_effect=ValidationError("Fallo fiscal"),
         ):
             with self.assertRaises(ValidationError):
-                self.run(billing_sale, [billing_intent], billing_series)
+                self._run_checkout(billing_sale, [billing_intent], billing_series)
         billing_sale.refresh_from_db()
         self.assertEqual(billing_sale.payment_status, PaymentStatusChoices.PAID)
         self.assertEqual(Payment.objects.filter(sale=billing_sale).count(), 1)
         self.assertFalse(BillingDocument.objects.filter(sale=billing_sale).exists())
-        self.run(billing_sale, [], billing_series)
+        self._run_checkout(billing_sale, [], billing_series)
         self.assertEqual(Payment.objects.filter(sale=billing_sale).count(), 1)
         self.assertEqual(BillingDocument.objects.filter(sale=billing_sale).count(), 1)
 
@@ -381,7 +394,7 @@ class CheckoutIntegrationTests(TestCase):
                 if requested == RequestedDocumentTypeChoices.INVOICE
                 else None,
             )
-            self.run(sale, [self.intent()], self.series(expected))
+            self._run_checkout(sale, [self.intent()], self.series(expected))
             BillingDocument.objects.filter(sale=sale).update(document_type=wrong)
             self.assertFalse(
                 checkout_state(business=self.business, sale=sale)["complete"]
