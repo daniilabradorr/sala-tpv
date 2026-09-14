@@ -358,7 +358,7 @@ class PurchaseLine(TimeStampedModel):
 
 
 class PurchaseReceipt(TimeStampedModel):
-    """Evento de recepción, todavía sin integración ni efectos sobre stock."""
+    """Evento inmutable de recepción comercial y, cuando aplica, de stock."""
 
     business = models.ForeignKey(
         Business, on_delete=models.CASCADE, related_name="purchase_receipts"
