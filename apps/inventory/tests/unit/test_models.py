@@ -1,8 +1,10 @@
 """Tests unitarios de modelos de inventory."""
 
 from decimal import Decimal
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -13,6 +15,14 @@ from apps.inventory.tests.factories import (
     create_inventory_owner,
     create_inventory_product,
     create_inventory_store,
+)
+from apps.purchases.models import (
+    Purchase,
+    PurchaseLine,
+    PurchaseReceipt,
+    PurchaseReceiptLine,
+    PurchaseStatusChoices,
+    Supplier,
 )
 from apps.sales.tests.factories import (
     create_sale,
@@ -196,6 +206,132 @@ class InventoryModelsTests(TestCase):
                 system_stock=Decimal("-3.000"),
                 counted_stock=Decimal("-1.000"),
             )
+
+
+class StockMovementPurchasesIntegrityTests(TestCase):
+    """Protege la cadena fuerte desde una recepción hasta su movimiento."""
+
+    def setUp(self):  # noqa: N802
+        self.business = create_business(name="Compras", slug="inventory-purchases")
+        self.store = create_inventory_store(business=self.business)
+        self.user = create_inventory_owner(business=self.business)
+        self.product = create_inventory_product(business=self.business)
+        self.item = create_inventory_item(
+            business=self.business, store=self.store, product=self.product
+        )
+        self.supplier = Supplier.objects.create(
+            business=self.business, name="Proveedor"
+        )
+        self.purchase = Purchase.objects.create(
+            business=self.business,
+            store=self.store,
+            supplier=self.supplier,
+            created_by=self.user,
+            status=PurchaseStatusChoices.ORDERED,
+            ordered_at=timezone.now(),
+        )
+        self.purchase_line = PurchaseLine.objects.create(
+            business=self.business,
+            purchase=self.purchase,
+            product=self.product,
+            product_name=self.product.name,
+            unit="ud",
+            quantity_ordered=Decimal("10.000"),
+            quantity_received=Decimal("0.000"),
+            unit_cost=Decimal("4.00"),
+        )
+        self.receipt = PurchaseReceipt.objects.create(
+            business=self.business,
+            store=self.store,
+            purchase=self.purchase,
+            received_by=self.user,
+            idempotency_key=uuid4(),
+            idempotency_fingerprint="a" * 64,
+        )
+        self.receipt_line = PurchaseReceiptLine.objects.create(
+            business=self.business,
+            receipt=self.receipt,
+            purchase_line=self.purchase_line,
+            quantity_received=Decimal("3.000"),
+        )
+
+    def movement(self, **overrides):
+        values = {
+            "business": self.business,
+            "inventory_item": self.item,
+            "store": self.store,
+            "product": self.product,
+            "movement_type": StockMovement.TYPE_PURCHASE_RECEIPT,
+            "quantity": Decimal("3.000"),
+            "stock_before": Decimal("0.000"),
+            "stock_after": Decimal("3.000"),
+            "purchase": self.purchase,
+            "purchase_line": self.purchase_line,
+            "purchase_receipt": self.receipt,
+            "purchase_receipt_line": self.receipt_line,
+        }
+        values.update(overrides)
+        return StockMovement(**values)
+
+    def test_coherent_purchase_receipt_movement_saves(self):
+        movement = self.movement()
+        movement.full_clean()
+        movement.save()
+        self.assertEqual(movement.purchase_receipt_line, self.receipt_line)
+
+    def test_purchase_receipt_requires_all_strong_relations(self):
+        for field in (
+            "purchase",
+            "purchase_line",
+            "purchase_receipt",
+            "purchase_receipt_line",
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                self.movement(**{field: None}).full_clean()
+
+    def test_receipt_relations_require_purchase_receipt_type(self):
+        with self.assertRaises(ValidationError):
+            self.movement(movement_type=StockMovement.TYPE_ADJUSTMENT_IN).full_clean()
+
+    def test_purchase_and_line_alone_are_allowed_for_future_types(self):
+        movement = self.movement(
+            movement_type=StockMovement.TYPE_ADJUSTMENT_IN,
+            purchase_receipt=None,
+            purchase_receipt_line=None,
+        )
+        movement.full_clean()
+
+    def test_rejects_wrong_quantity_or_product(self):
+        other_product = create_inventory_product(
+            business=self.business, name="Producto distinto"
+        )
+        for overrides in (
+            {"quantity": Decimal("2.000"), "stock_after": Decimal("2.000")},
+            {"product": other_product},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(ValidationError):
+                self.movement(**overrides).full_clean()
+
+    def test_rejects_cross_tenant_purchase(self):
+        other_business = create_business(name="Ajeno", slug="purchase-foreign")
+        other_store = create_inventory_store(business=other_business)
+        other_user = create_inventory_owner(business=other_business)
+        other_supplier = Supplier.objects.create(
+            business=other_business, name="Proveedor ajeno"
+        )
+        other_purchase = Purchase.objects.create(
+            business=other_business,
+            store=other_store,
+            supplier=other_supplier,
+            created_by=other_user,
+        )
+        with self.assertRaises(ValidationError):
+            self.movement(purchase=other_purchase).full_clean()
+
+    def test_database_rejects_two_movements_for_same_receipt_line(self):
+        self.movement().save()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            StockMovement.objects.bulk_create([self.movement()])
 
 
 class StockMovementSalesIntegrityTests(TestCase):
