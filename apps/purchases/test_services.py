@@ -35,6 +35,9 @@ from apps.users.models import RoleChoices, UserStoreAccess
 from apps.users.tests.factories import create_user
 
 
+_DEFAULT_KEY = object()
+
+
 class PurchasesServiceTests(TestCase):
     def setUp(self):  # noqa: N802
         self.business = self.make_business("Principal")
@@ -513,13 +516,13 @@ class PurchasesServiceTests(TestCase):
         self.assertEqual(StockMovement.objects.count(), movement_count)
         self.assertEqual(self.product.cost_price, Decimal("3.00"))
 
-    def receive(self, purchase, lines, *, key=None, user=None, **kwargs):
+    def receive(self, purchase, lines, *, key=_DEFAULT_KEY, user=None, **kwargs):
         return register_purchase_receipt(
             business=self.business,
             purchase=purchase,
             received_by=user or self.owner,
             lines=lines,
-            idempotency_key=key or uuid4(),
+            idempotency_key=uuid4() if key is _DEFAULT_KEY else key,
             **kwargs,
         )
 
@@ -705,3 +708,332 @@ class PurchasesServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             self.receive(other, [{"purchase_line": line, "quantity_received": 1}])
         self.assertFalse(PurchaseReceipt.objects.exists())
+
+    def test_retry_after_purchase_is_received_has_no_duplicate_effects(self):
+        purchase = self.make_purchase()
+        line = self.add_line(purchase, quantity="5")
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        key = uuid4()
+
+        receipt = self.receive(
+            purchase, [{"purchase_line": line, "quantity_received": 5}], key=key
+        )
+        purchase.refresh_from_db()
+        self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
+        Store.objects.filter(pk=self.store.pk).update(is_active=False)
+        retry = self.receive(
+            purchase,
+            [{"purchase_line": line, "quantity_received": Decimal("5.000")}],
+            key=key,
+        )
+
+        line.refresh_from_db()
+        inventory = InventoryItem.objects.get(store=self.store, product=self.product)
+        self.assertEqual(retry.pk, receipt.pk)
+        self.assertEqual(PurchaseReceipt.objects.filter(purchase=purchase).count(), 1)
+        self.assertEqual(PurchaseReceiptLine.objects.filter(receipt=receipt).count(), 1)
+        self.assertEqual(StockMovement.objects.filter(purchase=purchase).count(), 1)
+        self.assertEqual(line.quantity_received, Decimal("5.000"))
+        self.assertEqual(inventory.current_stock, Decimal("5.000"))
+
+    def test_retry_canonicalizes_different_line_order(self):
+        second_product = self.make_product(self.business, "Té", "TEA")
+        purchase = self.make_purchase()
+        line_a = self.add_line(purchase, quantity=3)
+        line_b = self.add_line(purchase, product=second_product, quantity=4)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        key = uuid4()
+        receipt = self.receive(
+            purchase,
+            [
+                {"purchase_line": line_a, "quantity_received": 1},
+                {"purchase_line": line_b, "quantity_received": 2},
+            ],
+            key=key,
+        )
+        retry = self.receive(
+            purchase,
+            [
+                {"purchase_line": line_b, "quantity_received": Decimal("2.000")},
+                {"purchase_line": line_a, "quantity_received": Decimal("1.000")},
+            ],
+            key=key,
+        )
+
+        self.assertEqual(retry.pk, receipt.pk)
+        self.assertEqual(PurchaseReceipt.objects.filter(purchase=purchase).count(), 1)
+        self.assertEqual(PurchaseReceiptLine.objects.filter(receipt=receipt).count(), 2)
+        self.assertEqual(StockMovement.objects.filter(purchase=purchase).count(), 2)
+        self.assertEqual(
+            InventoryItem.objects.get(product=self.product).current_stock,
+            Decimal("1.000"),
+        )
+        self.assertEqual(
+            InventoryItem.objects.get(product=second_product).current_stock,
+            Decimal("2.000"),
+        )
+
+    def test_two_purchase_lines_for_same_product_have_distinct_movements(self):
+        purchase = self.make_purchase()
+        line_a = self.add_line(purchase, quantity=3)
+        line_b = self.add_line(purchase, quantity=2)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        receipt = self.receive(
+            purchase,
+            [
+                {"purchase_line": line_a, "quantity_received": 3},
+                {"purchase_line": line_b, "quantity_received": 2},
+            ],
+        )
+
+        inventory = InventoryItem.objects.get(store=self.store, product=self.product)
+        receipt_lines = {
+            item.purchase_line_id: item
+            for item in PurchaseReceiptLine.objects.filter(receipt=receipt)
+        }
+        movements = list(
+            StockMovement.objects.filter(purchase_receipt=receipt).order_by(
+                "purchase_line_id"
+            )
+        )
+        self.assertEqual(
+            InventoryItem.objects.filter(
+                store=self.store, product=self.product
+            ).count(),
+            1,
+        )
+        self.assertEqual(len(receipt_lines), 2)
+        self.assertEqual(len(movements), 2)
+        self.assertEqual(inventory.current_stock, Decimal("5.000"))
+        self.assertEqual(
+            {movement.purchase_line_id for movement in movements},
+            {line_a.pk, line_b.pk},
+        )
+        for movement in movements:
+            self.assertEqual(
+                movement.purchase_receipt_line_id,
+                receipt_lines[movement.purchase_line_id].pk,
+            )
+        self.assertEqual(len({movement.operation_id for movement in movements}), 1)
+
+    def test_multiline_receipt_keeps_purchase_partial_when_omitted_line_remains(self):
+        product_b = self.make_product(self.business, "B", "B")
+        product_c = self.make_product(self.business, "C", "C")
+        purchase = self.make_purchase()
+        line_a = self.add_line(purchase, quantity=10)
+        line_b = self.add_line(purchase, product=product_b, quantity=8)
+        line_c = self.add_line(purchase, product=product_c, quantity=4)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        self.receive(
+            purchase,
+            [
+                {"purchase_line": line_a, "quantity_received": 5},
+                {"purchase_line": line_c, "quantity_received": 4},
+            ],
+        )
+        line_a.refresh_from_db()
+        line_b.refresh_from_db()
+        line_c.refresh_from_db()
+        purchase.refresh_from_db()
+        self.assertEqual(line_a.quantity_received, Decimal("5.000"))
+        self.assertEqual(line_b.quantity_received, Decimal("0.000"))
+        self.assertEqual(line_c.quantity_received, Decimal("4.000"))
+        self.assertEqual(purchase.status, PurchaseStatusChoices.PARTIALLY_RECEIVED)
+
+    def test_receipt_permissions_allow_owner_and_store_manager_only(self):
+        for actor in (self.owner, self.manager):
+            with self.subTest(allowed=actor.role):
+                purchase = self.make_purchase()
+                line = self.add_line(purchase)
+                order_purchase(
+                    business=self.business, purchase=purchase, ordered_by=self.owner
+                )
+                receipt = self.receive(
+                    purchase,
+                    [{"purchase_line": line, "quantity_received": 2}],
+                    user=actor,
+                )
+                self.assertEqual(receipt.received_by, actor)
+
+        for actor in (
+            self.manager_without_access,
+            self.cashier,
+            self.other_owner,
+        ):
+            with self.subTest(rejected=actor.role):
+                purchase = self.make_purchase()
+                line = self.add_line(purchase)
+                order_purchase(
+                    business=self.business, purchase=purchase, ordered_by=self.owner
+                )
+                receipt_count = PurchaseReceipt.objects.count()
+                receipt_line_count = PurchaseReceiptLine.objects.count()
+                movement_count = StockMovement.objects.count()
+                with self.assertRaises(ValidationError):
+                    self.receive(
+                        purchase,
+                        [{"purchase_line": line, "quantity_received": 1}],
+                        user=actor,
+                    )
+                line.refresh_from_db()
+                self.assertEqual(PurchaseReceipt.objects.count(), receipt_count)
+                self.assertEqual(
+                    PurchaseReceiptLine.objects.count(), receipt_line_count
+                )
+                self.assertEqual(StockMovement.objects.count(), movement_count)
+                self.assertEqual(line.quantity_received, Decimal("0.000"))
+
+    def test_receipt_is_tenant_scoped_for_purchase_and_received_by(self):
+        POSSettings.objects.create(
+            business=self.other_business, enable_stock_control=True
+        )
+        foreign_purchase = create_purchase(
+            business=self.other_business,
+            store=self.other_store,
+            supplier=self.other_supplier,
+            created_by=self.other_owner,
+        )
+        foreign_line = add_purchase_line(
+            business=self.other_business,
+            purchase=foreign_purchase,
+            product=self.other_product,
+            quantity=2,
+            unit_cost=5,
+            user=self.other_owner,
+        )
+        order_purchase(
+            business=self.other_business,
+            purchase=foreign_purchase,
+            ordered_by=self.other_owner,
+        )
+        with self.assertRaises(ValidationError):
+            register_purchase_receipt(
+                business=self.business,
+                purchase=foreign_purchase,
+                received_by=self.owner,
+                lines=[{"purchase_line": foreign_line, "quantity_received": 1}],
+                idempotency_key=uuid4(),
+            )
+        with self.assertRaises(ValidationError):
+            register_purchase_receipt(
+                business=self.other_business,
+                purchase=foreign_purchase,
+                received_by=self.owner,
+                lines=[{"purchase_line": foreign_line, "quantity_received": 1}],
+                idempotency_key=uuid4(),
+            )
+        foreign_line.refresh_from_db()
+        foreign_purchase.refresh_from_db()
+        self.assertEqual(foreign_line.quantity_received, Decimal("0.000"))
+        self.assertEqual(foreign_purchase.status, PurchaseStatusChoices.ORDERED)
+        self.assertFalse(
+            PurchaseReceipt.objects.filter(purchase=foreign_purchase).exists()
+        )
+        self.assertFalse(
+            StockMovement.objects.filter(purchase=foreign_purchase).exists()
+        )
+
+    def test_new_receipt_rejects_store_deactivated_after_order(self):
+        purchase = self.make_purchase()
+        line = self.add_line(purchase)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        Store.objects.filter(pk=self.store.pk).update(is_active=False)
+        with self.assertRaises(ValidationError):
+            self.receive(purchase, [{"purchase_line": line, "quantity_received": 1}])
+        line.refresh_from_db()
+        purchase.refresh_from_db()
+        self.assertEqual(line.quantity_received, Decimal("0.000"))
+        self.assertEqual(purchase.status, PurchaseStatusChoices.ORDERED)
+        self.assertFalse(PurchaseReceipt.objects.filter(purchase=purchase).exists())
+        self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+
+    def test_operation_id_is_shared_per_receipt_and_differs_between_receipts(self):
+        second_product = self.make_product(self.business, "Té", "TEA")
+        purchase = self.make_purchase()
+        line_a = self.add_line(purchase, quantity=2)
+        line_b = self.add_line(purchase, product=second_product, quantity=2)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        first = self.receive(
+            purchase,
+            [
+                {"purchase_line": line_a, "quantity_received": 1},
+                {"purchase_line": line_b, "quantity_received": 1},
+            ],
+        )
+        second = self.receive(
+            purchase,
+            [
+                {"purchase_line": line_a, "quantity_received": 1},
+                {"purchase_line": line_b, "quantity_received": 1},
+            ],
+        )
+        first_ids = set(
+            StockMovement.objects.filter(purchase_receipt=first).values_list(
+                "operation_id", flat=True
+            )
+        )
+        second_ids = set(
+            StockMovement.objects.filter(purchase_receipt=second).values_list(
+                "operation_id", flat=True
+            )
+        )
+        self.assertEqual(len(first_ids), 1)
+        self.assertEqual(len(second_ids), 1)
+        self.assertNotEqual(first_ids, second_ids)
+
+    def test_stock_control_disabled_still_posts_commercial_receipt(self):
+        POSSettings.objects.filter(business=self.business).update(
+            enable_stock_control=False
+        )
+        purchase = self.make_purchase()
+        line = self.add_line(purchase)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        receipt = self.receive(
+            purchase, [{"purchase_line": line, "quantity_received": 2}]
+        )
+        line.refresh_from_db()
+        purchase.refresh_from_db()
+        self.assertEqual(PurchaseReceipt.objects.filter(pk=receipt.pk).count(), 1)
+        self.assertEqual(PurchaseReceiptLine.objects.filter(receipt=receipt).count(), 1)
+        self.assertEqual(line.quantity_received, Decimal("2.000"))
+        self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
+        self.assertFalse(InventoryItem.objects.filter(product=self.product).exists())
+        self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+
+    def test_product_without_stock_tracking_still_posts_commercial_receipt(self):
+        product = self.make_product(
+            self.business, "Servicio comercial", "SERV", track_stock=False
+        )
+        purchase = self.make_purchase()
+        line = self.add_line(purchase, product=product)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        receipt = self.receive(
+            purchase, [{"purchase_line": line, "quantity_received": 2}]
+        )
+        line.refresh_from_db()
+        purchase.refresh_from_db()
+        self.assertEqual(PurchaseReceipt.objects.filter(pk=receipt.pk).count(), 1)
+        self.assertEqual(PurchaseReceiptLine.objects.filter(receipt=receipt).count(), 1)
+        self.assertEqual(line.quantity_received, Decimal("2.000"))
+        self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
+        self.assertFalse(InventoryItem.objects.filter(product=product).exists())
+        self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+
+    def test_invalid_idempotency_keys_have_no_effects(self):
+        purchase = self.make_purchase()
+        line = self.add_line(purchase)
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        for key in (None, "", "no-es-un-uuid"):
+            with self.subTest(key=key), self.assertRaises(ValidationError):
+                self.receive(
+                    purchase,
+                    [{"purchase_line": line, "quantity_received": 1}],
+                    key=key,
+                )
+        line.refresh_from_db()
+        purchase.refresh_from_db()
+        self.assertEqual(line.quantity_received, Decimal("0.000"))
+        self.assertEqual(purchase.status, PurchaseStatusChoices.ORDERED)
+        self.assertFalse(PurchaseReceipt.objects.filter(purchase=purchase).exists())
+        self.assertFalse(PurchaseReceiptLine.objects.exists())
+        self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
