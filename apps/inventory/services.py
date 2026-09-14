@@ -15,12 +15,15 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.catalog.models import Product
+from apps.core.models import Business
 from apps.inventory.models import (
     InventoryItem,
     StockAdjustment,
     StockAdjustmentLine,
     StockMovement,
 )
+from apps.stores.models import Store
 
 # Compatibilidad temporal:
 # Si alguna view antigua importa get_inventory_dashboard_data desde services.py,
@@ -249,24 +252,35 @@ def get_or_create_inventory_item_for_purchase_receipt(*, business, store, produc
 
     if business is None or business.pk is None:
         raise ValidationError("No se ha indicado un negocio existente.")
-    if store.business_id != business.pk:
+    current_business = Business.objects.filter(pk=business.pk).first()
+    if current_business is None:
+        raise ValidationError("No se ha indicado un negocio existente.")
+
+    current_store = Store.objects.filter(
+        pk=getattr(store, "pk", None), business=current_business
+    ).first()
+    if current_store is None:
         raise ValidationError("La tienda debe pertenecer al mismo negocio.")
-    if product.business_id != business.pk:
-        raise ValidationError("El producto debe pertenecer al mismo negocio.")
-    if not store.is_active:
+    if not current_store.is_active:
         raise ValidationError("No puedes crear inventario en una tienda inactiva.")
-    if product.is_service:
+
+    current_product = Product.objects.filter(
+        pk=getattr(product, "pk", None), business=current_business
+    ).first()
+    if current_product is None:
+        raise ValidationError("El producto debe pertenecer al mismo negocio.")
+    if current_product.is_service:
         raise ValidationError("No se puede controlar stock de un servicio.")
-    if not product.track_stock:
+    if not current_product.track_stock:
         raise ValidationError(
             "No se puede crear inventario para un producto que no controla stock."
         )
 
     with transaction.atomic():
         inventory_item, _created = InventoryItem.objects.get_or_create(
-            business=business,
-            store=store,
-            product=product,
+            business=current_business,
+            store=current_store,
+            product=current_product,
             defaults={
                 "current_stock": Decimal("0.000"),
                 "reserved_stock": Decimal("0.000"),

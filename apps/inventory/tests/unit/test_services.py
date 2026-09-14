@@ -701,6 +701,51 @@ class InventoryServicesTests(TestCase):
                 business=other_business, store=self.store, product=self.product
             )
 
+    def test_purchase_receipt_resolver_rejects_stale_active_store(self):
+        stale_store = create_inventory_store(
+            business=self.business, name="Tienda stale"
+        )
+        product = create_inventory_product(
+            business=self.business, name="Producto tienda stale"
+        )
+        type(stale_store).objects.filter(pk=stale_store.pk).update(is_active=False)
+        self.assertTrue(stale_store.is_active)
+
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=stale_store, product=product
+            )
+
+        stale_store.refresh_from_db()
+        self.assertFalse(stale_store.is_active)
+        self.assertFalse(
+            self.item.__class__.objects.filter(
+                business=self.business, store=stale_store, product=product
+            ).exists()
+        )
+
+    def test_purchase_receipt_resolver_rejects_stale_tracked_product(self):
+        stale_product = create_inventory_product(
+            business=self.business, name="Producto stale"
+        )
+        type(stale_product).objects.filter(pk=stale_product.pk).update(
+            track_stock=False
+        )
+        self.assertTrue(stale_product.track_stock)
+
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=self.store, product=stale_product
+            )
+
+        stale_product.refresh_from_db()
+        self.assertFalse(stale_product.track_stock)
+        self.assertFalse(
+            self.item.__class__.objects.filter(
+                business=self.business, store=self.store, product=stale_product
+            ).exists()
+        )
+
     def _purchase_receipt_relations(self):
         supplier = Supplier.objects.create(business=self.business, name="Proveedor")
         purchase = Purchase.objects.create(
