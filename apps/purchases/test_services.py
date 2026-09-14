@@ -134,9 +134,11 @@ class PurchasesServiceTests(TestCase):
             business=self.business,
             supplier=owner_supplier,
             user=self.owner,
+            email=" NEW@EXAMPLE.COM ",
             is_active=False,
         )
         self.assertFalse(updated.is_active)
+        self.assertEqual(updated.email, "new@example.com")
         self.assertTrue(Supplier.objects.filter(pk=updated.pk).exists())
 
     def test_update_supplier_is_tenant_scoped(self):
@@ -244,7 +246,7 @@ class PurchasesServiceTests(TestCase):
         )
         second = self.add_line(purchase, unit_cost="1.00", tax_rate="0")
         self.assertEqual(first.product_name, self.product.name)
-        self.assertEqual(first.sku, self.product.sku)
+        self.assertEqual(first.sku, self.product.sku.strip().upper())
         self.assertEqual(first.unit, self.product.unit)
         self.assertEqual(first.quantity_received, Decimal("0.000"))
         self.assertNotEqual(first.pk, second.pk)

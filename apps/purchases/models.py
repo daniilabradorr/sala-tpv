@@ -51,18 +51,22 @@ class Supplier(TimeStampedModel):
     def __str__(self):
         return self.name
 
-    def clean(self):
-        super().clean()
+    def _normalize_fields(self):
         self.name = (self.name or "").strip()
         self.legal_name = (self.legal_name or "").strip()
         self.tax_identifier = (self.tax_identifier or "").strip().upper()
         self.email = (self.email or "").strip().lower()
         self.phone = (self.phone or "").strip()
         self.address = (self.address or "").strip()
+
+    def clean(self):
+        super().clean()
+        self._normalize_fields()
         if not self.name:
             raise ValidationError({"name": "El nombre comercial es obligatorio."})
 
     def save(self, *args, **kwargs):
+        self._normalize_fields()
         self.full_clean()
         return super().save(*args, **kwargs)
 
