@@ -15,12 +15,15 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.catalog.models import Product
+from apps.core.models import Business
 from apps.inventory.models import (
     InventoryItem,
     StockAdjustment,
     StockAdjustmentLine,
     StockMovement,
 )
+from apps.stores.models import Store
 
 # Compatibilidad temporal:
 # Si alguna view antigua importa get_inventory_dashboard_data desde services.py,
@@ -107,6 +110,11 @@ def _create_stock_movement(
     sale_line=None,
     sale_return=None,
     sale_return_line=None,
+    purchase=None,
+    purchase_line=None,
+    purchase_receipt=None,
+    purchase_receipt_line=None,
+    occurred_at=None,
 ):
     """Crea un movimiento de stock.
 
@@ -132,12 +140,16 @@ def _create_stock_movement(
         reference_id=str(reference_id) if reference_id else "",
         reason=reason or "",
         notes=notes or "",
-        occurred_at=timezone.now(),
+        occurred_at=occurred_at or timezone.now(),
         created_by=user,
         sale=sale,
         sale_line=sale_line,
         sale_return=sale_return,
         sale_return_line=sale_return_line,
+        purchase=purchase,
+        purchase_line=purchase_line,
+        purchase_receipt=purchase_receipt,
+        purchase_receipt_line=purchase_receipt_line,
     )
 
     if operation_id:
@@ -226,6 +238,61 @@ def get_or_create_inventory_item(
             "is_active": True,
         },
     )
+
+    return inventory_item
+
+
+def get_or_create_inventory_item_for_purchase_receipt(*, business, store, product):
+    """Resuelve stock para una recepción, incluso si el producto fue desactivado.
+
+    No modifica stock ni crea movimientos. La fila devuelta se bloquea; si el
+    llamador necesita conservar ese bloqueo mientras cambia stock, debe envolver
+    esta llamada y la mutación en una misma transacción exterior.
+    """
+
+    if business is None or business.pk is None:
+        raise ValidationError("No se ha indicado un negocio existente.")
+    current_business = Business.objects.filter(pk=business.pk).first()
+    if current_business is None:
+        raise ValidationError("No se ha indicado un negocio existente.")
+
+    current_store = Store.objects.filter(
+        pk=getattr(store, "pk", None), business=current_business
+    ).first()
+    if current_store is None:
+        raise ValidationError("La tienda debe pertenecer al mismo negocio.")
+    if not current_store.is_active:
+        raise ValidationError("No puedes crear inventario en una tienda inactiva.")
+
+    current_product = Product.objects.filter(
+        pk=getattr(product, "pk", None), business=current_business
+    ).first()
+    if current_product is None:
+        raise ValidationError("El producto debe pertenecer al mismo negocio.")
+    if current_product.is_service:
+        raise ValidationError("No se puede controlar stock de un servicio.")
+    if not current_product.track_stock:
+        raise ValidationError(
+            "No se puede crear inventario para un producto que no controla stock."
+        )
+
+    with transaction.atomic():
+        inventory_item, _created = InventoryItem.objects.get_or_create(
+            business=current_business,
+            store=current_store,
+            product=current_product,
+            defaults={
+                "current_stock": Decimal("0.000"),
+                "reserved_stock": Decimal("0.000"),
+                "minimum_stock": Decimal("0.000"),
+                "is_active": True,
+            },
+        )
+        inventory_item = InventoryItem.objects.select_for_update().get(
+            pk=inventory_item.pk
+        )
+        if not inventory_item.is_active:
+            raise ValidationError("La ficha de inventario está inactiva.")
 
     return inventory_item
 
@@ -358,6 +425,11 @@ def increase_stock(
     sale_line=None,
     sale_return=None,
     sale_return_line=None,
+    purchase=None,
+    purchase_line=None,
+    purchase_receipt=None,
+    purchase_receipt_line=None,
+    occurred_at=None,
 ):
     """Incrementa stock y crea movimiento de entrada."""
 
@@ -407,6 +479,11 @@ def increase_stock(
             sale_line=sale_line,
             sale_return=sale_return,
             sale_return_line=sale_return_line,
+            purchase=purchase,
+            purchase_line=purchase_line,
+            purchase_receipt=purchase_receipt,
+            purchase_receipt_line=purchase_receipt_line,
+            occurred_at=occurred_at,
         )
 
     return locked_item, movement
