@@ -5,20 +5,32 @@ Reglas de arquitectura:
 - Los selectors realizan lecturas reutilizables.
 - Los services contienen las mutaciones y las reglas de negocio.
 - Crear u ordenar compras no modifica el inventario.
-- La recepción de mercancía todavía no se implementa en este módulo.
+- La recepción de mercancía integra Purchases e Inventory atómicamente.
 """
 
+import hashlib
+import json
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
+from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.core.models import Business
+from apps.inventory.models import StockMovement
+from apps.inventory.services import (
+    get_or_create_inventory_item_for_purchase_receipt,
+    increase_stock,
+)
 from apps.purchases.models import (
     Purchase,
     PurchaseLine,
+    PurchaseReceipt,
+    PurchaseReceiptLine,
     PurchaseStatusChoices,
     Supplier,
 )
@@ -56,6 +68,103 @@ def _quantity(value):
     return _to_decimal(value, field_name="quantity").quantize(
         QUANTITY_STEP, rounding=ROUND_HALF_UP
     )
+
+
+def _get_pos_settings(business):
+    settings = POSSettings.objects.filter(business_id=business.pk).first()
+    if settings is None:
+        raise ValidationError(
+            {"pos_settings": "El negocio no tiene configuración POS."}
+        )
+    return settings
+
+
+def _normalize_idempotency_key(value):
+    if value in (None, ""):
+        raise ValidationError({"idempotency_key": "Este valor es obligatorio."})
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError(
+            {"idempotency_key": "Debes indicar una clave UUID válida."}
+        ) from exc
+
+
+def _normalize_purchase_receipt_lines(lines):
+    if lines is None:
+        raise ValidationError({"lines": "Debes indicar al menos una línea."})
+    try:
+        entries = list(lines)
+    except TypeError as exc:
+        raise ValidationError({"lines": "Debes indicar una lista de líneas."}) from exc
+    if not entries:
+        raise ValidationError({"lines": "Debes indicar al menos una línea."})
+
+    normalized = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValidationError({"lines": "Cada línea debe ser un diccionario."})
+        line = entry.get("purchase_line")
+        line_id = getattr(line, "pk", None)
+        if not line_id:
+            raise ValidationError(
+                {"purchase_line": "La línea de compra debe estar persistida."}
+            )
+        if line_id in seen:
+            raise ValidationError(
+                {"purchase_line": "Una línea no puede repetirse en la recepción."}
+            )
+        seen.add(line_id)
+        quantity = _quantity(entry.get("quantity_received"))
+        if quantity <= ZERO_QUANTITY:
+            raise ValidationError(
+                {"quantity_received": "La cantidad debe ser mayor que cero."}
+            )
+        normalized.append((line_id, quantity))
+    return sorted(normalized, key=lambda item: item[0])
+
+
+def _build_purchase_receipt_fingerprint(*, business_id, purchase_id, store_id, lines):
+    payload = {
+        "version": 1,
+        "business_id": business_id,
+        "purchase_id": purchase_id,
+        "store_id": store_id,
+        "lines": [
+            {
+                "purchase_line_id": line_id,
+                "quantity_received": f"{quantity:.3f}",
+            }
+            for line_id, quantity in sorted(lines, key=lambda item: item[0])
+        ],
+    }
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _purchase_receipt_operation_id(*, business_id, receipt_id):
+    return uuid5(NAMESPACE_URL, f"netxodo:purchase_receipt:{business_id}:{receipt_id}")
+
+
+def _idempotent_receipt_or_conflict(*, business, key, fingerprint):
+    existing = PurchaseReceipt.objects.filter(
+        business_id=business.pk, idempotency_key=key
+    ).first()
+    if existing is None:
+        return None
+    if existing.idempotency_fingerprint != fingerprint:
+        raise ValidationError(
+            {
+                "idempotency_key": (
+                    "La clave de idempotencia ya fue utilizada con una "
+                    "recepción diferente."
+                )
+            }
+        )
+    return existing
 
 
 def _tax_rate(value):
@@ -498,3 +607,175 @@ def cancel_purchase(*, business, purchase, cancelled_by):
     locked.status = PurchaseStatusChoices.CANCELLED
     locked.save(update_fields=["status", "updated_at"])
     return locked
+
+
+@transaction.atomic
+def register_purchase_receipt(
+    *,
+    business,
+    purchase,
+    received_by,
+    lines,
+    idempotency_key,
+    notes="",
+    received_at=None,
+):
+    """Registra una recepción comercial y sus efectos físicos de forma atómica."""
+
+    normalized_lines = _normalize_purchase_receipt_lines(lines)
+    normalized_key = _normalize_idempotency_key(idempotency_key)
+
+    # Purchase is the aggregate mutex: all state-dependent validation happens
+    # after this lock, so concurrent receipts cannot consume the same remainder.
+    locked_purchase = _lock_purchase(business=business, purchase=purchase)
+    _validate_store_access(
+        business=business,
+        store=locked_purchase.store,
+        user=received_by,
+        require_active=False,
+    )
+    fingerprint = _build_purchase_receipt_fingerprint(
+        business_id=business.pk,
+        purchase_id=locked_purchase.pk,
+        store_id=locked_purchase.store_id,
+        lines=normalized_lines,
+    )
+    existing = _idempotent_receipt_or_conflict(
+        business=business, key=normalized_key, fingerprint=fingerprint
+    )
+    if existing is not None:
+        return existing
+
+    if locked_purchase.status not in {
+        PurchaseStatusChoices.ORDERED,
+        PurchaseStatusChoices.PARTIALLY_RECEIVED,
+    }:
+        raise ValidationError(
+            "Solo se pueden recibir compras pedidas o parcialmente recibidas."
+        )
+    current_store = _validate_store_access(
+        business=business,
+        store=locked_purchase.store,
+        user=received_by,
+        require_active=True,
+    )
+
+    locked_lines = list(
+        PurchaseLine.objects.select_for_update()
+        .select_related("product")
+        .filter(business=business, purchase=locked_purchase)
+        .order_by("pk")
+    )
+    lines_by_id = {line.pk: line for line in locked_lines}
+    requested = []
+    for line_id, quantity in normalized_lines:
+        locked_line = lines_by_id.get(line_id)
+        if locked_line is None:
+            raise ValidationError(
+                {
+                    "purchase_line": "La línea no pertenece a la compra y negocio actuales."
+                }
+            )
+        requested.append((locked_line, quantity))
+
+    historical_totals = {
+        row["purchase_line_id"]: row["total"]
+        for row in PurchaseReceiptLine.objects.filter(
+            business=business, purchase_line_id__in=lines_by_id
+        )
+        .values("purchase_line_id")
+        .annotate(total=Sum("quantity_received"))
+    }
+    for locked_line in locked_lines:
+        historical = historical_totals.get(locked_line.pk, ZERO_QUANTITY)
+        if locked_line.quantity_received != historical:
+            raise ValidationError(
+                {"quantity_received": "El histórico de recepciones es incoherente."}
+            )
+
+    for locked_line, quantity in requested:
+        if locked_line.product.business_id != business.pk:
+            raise ValidationError({"product": "El producto pertenece a otro negocio."})
+        remaining = locked_line.quantity_ordered - locked_line.quantity_received
+        if quantity > remaining:
+            raise ValidationError(
+                {"quantity_received": "La cantidad supera la pendiente de recibir."}
+            )
+
+    pos_settings = _get_pos_settings(business)
+    inventory_by_product_id = {}
+    if pos_settings.enable_stock_control:
+        products = {
+            line.product_id: line.product
+            for line, _quantity_received in requested
+            if line.product.track_stock
+        }
+        for product_id in sorted(products):
+            inventory_by_product_id[product_id] = (
+                get_or_create_inventory_item_for_purchase_receipt(
+                    business=business,
+                    store=current_store,
+                    product=products[product_id],
+                )
+            )
+
+    receipt_values = {
+        "business": business,
+        "store": current_store,
+        "purchase": locked_purchase,
+        "received_by": received_by,
+        "received_at": received_at or timezone.now(),
+        "notes": notes,
+        "idempotency_key": normalized_key,
+        "idempotency_fingerprint": fingerprint,
+    }
+    try:
+        with transaction.atomic():
+            receipt = PurchaseReceipt.objects.create(**receipt_values)
+    except IntegrityError:
+        existing = _idempotent_receipt_or_conflict(
+            business=business, key=normalized_key, fingerprint=fingerprint
+        )
+        if existing is not None:
+            return existing
+        raise
+
+    operation_id = _purchase_receipt_operation_id(
+        business_id=business.pk, receipt_id=receipt.pk
+    )
+    for locked_line, quantity in requested:
+        receipt_line = PurchaseReceiptLine.objects.create(
+            business=business,
+            receipt=receipt,
+            purchase_line=locked_line,
+            quantity_received=quantity,
+        )
+        inventory_item = inventory_by_product_id.get(locked_line.product_id)
+        if inventory_item is not None:
+            increase_stock(
+                inventory_item=inventory_item,
+                quantity=receipt_line.quantity_received,
+                movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
+                user=received_by,
+                unit_cost=locked_line.unit_cost,
+                reference_type=StockMovement.REF_PURCHASE,
+                reference_id=f"{receipt.pk}:{receipt_line.pk}",
+                operation_id=operation_id,
+                purchase=locked_purchase,
+                purchase_line=locked_line,
+                purchase_receipt=receipt,
+                purchase_receipt_line=receipt_line,
+                occurred_at=receipt.received_at,
+            )
+        locked_line.quantity_received = _quantity(
+            locked_line.quantity_received + quantity
+        )
+        locked_line.save(update_fields=["quantity_received", "updated_at"])
+
+    locked_purchase.status = (
+        PurchaseStatusChoices.RECEIVED
+        if all(line.quantity_received == line.quantity_ordered for line in locked_lines)
+        else PurchaseStatusChoices.PARTIALLY_RECEIVED
+    )
+    locked_purchase.save(update_fields=["status", "updated_at"])
+    return receipt
