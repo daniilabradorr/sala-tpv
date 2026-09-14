@@ -720,7 +720,7 @@ class PurchasesServiceTests(TestCase):
         )
         purchase.refresh_from_db()
         self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
-        Store.objects.filter(pk=self.store.pk).update(is_active=False)
+        Store.objects.filter(pk=self.store.pk).update(is_default=False, is_active=False)
         retry = self.receive(
             purchase,
             [{"purchase_line": line, "quantity_received": Decimal("5.000")}],
@@ -937,7 +937,7 @@ class PurchasesServiceTests(TestCase):
         purchase = self.make_purchase()
         line = self.add_line(purchase)
         order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
-        Store.objects.filter(pk=self.store.pk).update(is_active=False)
+        Store.objects.filter(pk=self.store.pk).update(is_default=False, is_active=False)
         with self.assertRaises(ValidationError):
             self.receive(purchase, [{"purchase_line": line, "quantity_received": 1}])
         line.refresh_from_db()
