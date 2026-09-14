@@ -8,6 +8,18 @@ from apps.stores.models import Store
 from apps.users.helpers import is_owner
 
 
+def _positive_pk(value):
+    """Normaliza filtros HTTP de PK sin permitir errores ni ampliar resultados."""
+
+    if hasattr(value, "pk"):
+        value = value.pk
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def get_suppliers_for_business(*, business, query="", status="active"):
     qs = Supplier.objects.filter(business=business)
     if status == "active":
@@ -52,9 +64,15 @@ def get_purchases_for_user(
     if status in valid_statuses:
         qs = qs.filter(status=status)
     if store:
-        qs = qs.filter(store_id=getattr(store, "pk", store))
+        store_id = _positive_pk(store)
+        if store_id is None:
+            return qs.none()
+        qs = qs.filter(store_id=store_id)
     if supplier:
-        qs = qs.filter(supplier_id=getattr(supplier, "pk", supplier))
+        supplier_id = _positive_pk(supplier)
+        if supplier_id is None:
+            return qs.none()
+        qs = qs.filter(supplier_id=supplier_id)
     query = (query or "").strip()
     if query:
         qs = qs.filter(
