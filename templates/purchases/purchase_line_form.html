@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}Línea de compra | Netxodo{% endblock %}
+{% block content %}<section class="card"><h1>{% if line %}Editar línea{% else %}Añadir línea{% endif %}</h1><p>Compra {{ purchase.pk }}</p><form method="post" novalidate>{% csrf_token %}{{ form.as_p }}<button class="btn" type="submit">Guardar</button> <a class="btn" href="{% url 'purchases:purchase_detail' purchase.pk %}">Cancelar</a></form></section>{% endblock %}
