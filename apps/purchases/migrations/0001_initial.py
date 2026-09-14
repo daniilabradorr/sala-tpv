@@ -230,11 +230,7 @@ class Migration(migrations.Migration):
                         condition=models.Q(
                             (
                                 "total_amount",
-                                models.ExpressionWrapper(
-                                    models.F("subtotal_amount")
-                                    + models.F("tax_amount"),
-                                    output_field=models.DecimalField(),
-                                ),
+                                models.F("subtotal_amount") + models.F("tax_amount"),
                             )
                         ),
                         name="chk_purchase_total_sum",

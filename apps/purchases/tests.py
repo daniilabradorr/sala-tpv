@@ -239,6 +239,23 @@ class PurchasesModelTests(TestCase):
         with self.assertRaises(ValidationError):
             self.create_receipt(purchase=purchase, idempotency_key=key)
 
+    def test_receipt_rejects_invalid_idempotency_fingerprint(self):
+        purchase = self.create_ordered_purchase()
+        invalid_fingerprints = (
+            "a" * 63,
+            "a" * 65,
+            "g" * 64,
+        )
+        for fingerprint in invalid_fingerprints:
+            with (
+                self.subTest(fingerprint=fingerprint),
+                self.assertRaises(ValidationError),
+            ):
+                self.create_receipt(
+                    purchase=purchase,
+                    idempotency_fingerprint=fingerprint,
+                )
+
     def test_receipt_line_rules_and_partial_receipts(self):
         purchase = self.create_ordered_purchase()
         line = self.create_line(purchase=purchase)
