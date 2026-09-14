@@ -406,7 +406,10 @@ class StockMovementPurchasesIntegrityTests(TestCase):
         self.assertIn("purchase_receipt", error.exception.message_dict)
 
     def test_rejects_purchase_receipt_from_another_store(self):
-        other_store = create_inventory_store(business=self.business)
+        other_store = create_inventory_store(
+            business=self.business,
+            name="Tienda secundaria receipts",
+        )
         other_purchase = self.create_purchase(store=other_store)
         other_receipt = self.create_receipt(purchase=other_purchase, store=other_store)
 
