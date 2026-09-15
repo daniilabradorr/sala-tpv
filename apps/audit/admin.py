@@ -92,6 +92,11 @@ class AuditEventAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         return tuple(field.name for field in self.model._meta.fields)
 
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser or request.user.has_perm(
+            "audit.view_auditevent"
+        )
+
     def has_add_permission(self, request):
         return False
 

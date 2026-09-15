@@ -78,31 +78,31 @@ class AuditTestMixin:
 class AuditServiceTests(AuditTestMixin, TestCase):
     def test_event_module_mapping_matches_pre_verifactu_contract(self):
         expected = {
-            AuditEventType.SALE_COMPLETED: AuditModule.SALES,
-            AuditEventType.SALE_CANCELLED: AuditModule.SALES,
-            AuditEventType.SALE_RETURN_COMPLETED: AuditModule.SALES,
-            AuditEventType.SALE_RETURN_CANCELLED: AuditModule.SALES,
-            AuditEventType.PAYMENT_COMPLETED: AuditModule.PAYMENTS,
-            AuditEventType.PAYMENT_REFUNDED: AuditModule.PAYMENTS,
-            AuditEventType.PAYMENT_CANCELLED: AuditModule.PAYMENTS,
-            AuditEventType.SALE_ON_ACCOUNT_REGISTERED: AuditModule.PAYMENTS,
-            AuditEventType.CASH_SESSION_OPENED: AuditModule.CASH_REGISTER,
-            AuditEventType.CASH_IN: AuditModule.CASH_REGISTER,
-            AuditEventType.CASH_OUT: AuditModule.CASH_REGISTER,
-            AuditEventType.CASH_ADJUSTED: AuditModule.CASH_REGISTER,
-            AuditEventType.CASH_COUNTED: AuditModule.CASH_REGISTER,
-            AuditEventType.CASH_SESSION_CLOSED: AuditModule.CASH_REGISTER,
-            AuditEventType.STOCK_INITIALIZED: AuditModule.INVENTORY,
-            AuditEventType.STOCK_ADJUSTED: AuditModule.INVENTORY,
-            AuditEventType.STOCK_ADJUSTMENT_CANCELLED: AuditModule.INVENTORY,
-            AuditEventType.PURCHASE_CREATED: AuditModule.PURCHASES,
-            AuditEventType.PURCHASE_ORDERED: AuditModule.PURCHASES,
-            AuditEventType.PURCHASE_RECEIVED: AuditModule.PURCHASES,
-            AuditEventType.PURCHASE_CANCELLED: AuditModule.PURCHASES,
-            AuditEventType.BILLING_DOCUMENT_ISSUED: AuditModule.BILLING,
-            AuditEventType.BILLING_DOCUMENT_SUBSTITUTED: AuditModule.BILLING,
-            AuditEventType.BILLING_DOCUMENT_RECTIFIED: AuditModule.BILLING,
-            AuditEventType.BUSINESS_CONFIG_CHANGED: AuditModule.BUSINESS_CONFIG,
+            "SALE_COMPLETED": "sales",
+            "SALE_CANCELLED": "sales",
+            "SALE_RETURN_COMPLETED": "sales",
+            "SALE_RETURN_CANCELLED": "sales",
+            "PAYMENT_COMPLETED": "payments",
+            "PAYMENT_REFUNDED": "payments",
+            "PAYMENT_CANCELLED": "payments",
+            "SALE_ON_ACCOUNT_REGISTERED": "payments",
+            "CASH_SESSION_OPENED": "cash_register",
+            "CASH_IN": "cash_register",
+            "CASH_OUT": "cash_register",
+            "CASH_ADJUSTED": "cash_register",
+            "CASH_COUNTED": "cash_register",
+            "CASH_SESSION_CLOSED": "cash_register",
+            "STOCK_INITIALIZED": "inventory",
+            "STOCK_ADJUSTED": "inventory",
+            "STOCK_ADJUSTMENT_CANCELLED": "inventory",
+            "PURCHASE_CREATED": "purchases",
+            "PURCHASE_ORDERED": "purchases",
+            "PURCHASE_RECEIVED": "purchases",
+            "PURCHASE_CANCELLED": "purchases",
+            "BILLING_DOCUMENT_ISSUED": "billing",
+            "BILLING_DOCUMENT_SUBSTITUTED": "billing",
+            "BILLING_DOCUMENT_RECTIFIED": "billing",
+            "BUSINESS_CONFIG_CHANGED": "business_config",
         }
 
         self.assertEqual(EVENT_MODULES, expected)
@@ -495,6 +495,24 @@ class AuditAdminTests(AuditTestMixin, TestCase):
         self.user.save(update_fields=["role", "is_staff"])
 
         self.assertFalse(self.model_admin.has_view_permission(self._request(self.user)))
+
+    def test_change_permission_does_not_grant_view_permission(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="change_auditevent")
+        )
+        request = self._request(self.user)
+
+        self.assertFalse(self.model_admin.has_view_permission(request))
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="view_auditevent")
+        )
+        self.user = CustomUser.objects.get(pk=self.user.pk)
+        request = self._request(self.user)
+        self.assertTrue(self.model_admin.has_view_permission(request))
+        self.assertEqual(list(self.model_admin.get_queryset(request)), [self.own_event])
 
     def test_manipulated_business_filter_cannot_escape_tenant_queryset(self):
         self.user.is_staff = True
