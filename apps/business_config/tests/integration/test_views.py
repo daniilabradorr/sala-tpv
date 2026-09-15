@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.business_config.forms import BusinessProfileForm
 from apps.business_config.models import BusinessProfile
 from apps.business_config.services import create_business_configuration
@@ -122,6 +124,11 @@ class BusinessProfileViewTests(TestCase):
         self.assertEqual(self.profile.email, "nueva@example.com")
         self.assertEqual(self.profile.address_line_1, "Gran Vía 2")
         self.assertEqual(self.profile.receipt_footer, "Hasta pronto")
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BUSINESS_CONFIG_CHANGED
+        )
+        self.assertEqual(event.user, self.owner)
+        self.assertEqual(event.entity_id, str(self.profile.pk))
         follow_response = self.client.get(self.url)
         self.assertContains(
             follow_response,

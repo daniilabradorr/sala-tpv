@@ -1,6 +1,8 @@
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.business_config.forms import POSSettingsForm
 from apps.business_config.models import POSSettings
 from apps.business_config.services import create_business_configuration
@@ -108,6 +110,11 @@ class POSSettingsViewTests(TestCase):
         self.assertTrue(self.settings.allow_sale_without_stock)
         self.assertFalse(self.settings.allow_manual_price)
         self.assertFalse(self.settings.allow_manual_discounts)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BUSINESS_CONFIG_CHANGED
+        )
+        self.assertEqual(event.user, self.owner)
+        self.assertEqual(event.entity_id, str(self.settings.pk))
         self.assertEqual(self.settings.max_manual_discount_percent, 0)
         self.assertFalse(self.settings.require_open_cash_register)
         self.assertFalse(self.settings.allow_split_payments)
