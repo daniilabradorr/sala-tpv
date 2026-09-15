@@ -2,10 +2,30 @@
 
 from decimal import Decimal
 
-from django.db.models import Count, Q, Sum
+from django.db.models import (
+    Case,
+    CharField,
+    Count,
+    Exists,
+    F,
+    OuterRef,
+    Q,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import TruncDay
 
 from apps.cash_register.models import CashMovement, CashSession
+from apps.billing.models import (
+    BillingDocument,
+    BillingDocumentRelation,
+    BillingDocumentRelationTypeChoices,
+    BillingDocumentStatusChoices,
+    BillingDocumentTypeChoices,
+    BillingTaxBreakdown,
+)
+from apps.inventory.models import InventoryItem, StockMovement
 from apps.payments.models import Payment, PaymentStatusChoices, PaymentTypeChoices
 from apps.sales.models import (
     Sale,
@@ -15,11 +35,35 @@ from apps.sales.models import (
     SaleReturnStatusChoices,
     SaleStatusChoices,
 )
+from apps.purchases.models import (
+    Purchase,
+    PurchaseLine,
+    PurchaseReceipt,
+    PurchaseReceiptLine,
+    PurchaseStatusChoices,
+)
 
 
 ZERO_MONEY = Decimal("0.00")
 ZERO_QUANTITY = Decimal("0.000")
 SALE_STATUSES = (SaleStatusChoices.COMPLETED, SaleStatusChoices.RETURNED)
+OUTPUT_DOCUMENT_TYPES = (
+    BillingDocumentTypeChoices.F1,
+    BillingDocumentTypeChoices.F2,
+    BillingDocumentTypeChoices.F3,
+)
+RECTIFICATION_DOCUMENT_TYPES = (
+    BillingDocumentTypeChoices.R1,
+    BillingDocumentTypeChoices.R2,
+    BillingDocumentTypeChoices.R3,
+    BillingDocumentTypeChoices.R4,
+    BillingDocumentTypeChoices.R5,
+)
+CONFIRMED_PURCHASE_STATUSES = (
+    PurchaseStatusChoices.ORDERED,
+    PurchaseStatusChoices.PARTIALLY_RECEIVED,
+    PurchaseStatusChoices.RECEIVED,
+)
 
 
 def _validate_scope(*, business, period=None, store=None, temporal=True):
@@ -57,6 +101,369 @@ def _returns(*, business, period, store):
 
 def _sum(queryset, field, zero):
     return queryset.aggregate(value=Sum(field))["value"] or zero
+
+
+def _issued_billing_documents(*, business, period, store):
+    return BillingDocument.objects.filter(
+        business=business,
+        status=BillingDocumentStatusChoices.ISSUED,
+        issued_at__gte=period.start,
+        issued_at__lt=period.end,
+        **_store_filter(store),
+    )
+
+
+def _effective_billing_documents(*, business, period, store):
+    valid_substitution = BillingDocumentRelation.objects.filter(
+        business=business,
+        target_document_id=OuterRef("pk"),
+        relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
+        source_document__status=BillingDocumentStatusChoices.ISSUED,
+    )
+    return (
+        _issued_billing_documents(business=business, period=period, store=store)
+        .annotate(is_substituted=Exists(valid_substitution))
+        .filter(is_substituted=False)
+    )
+
+
+def billing_documents_summary(*, business, period, store=None):
+    """Return issued-document history and the currently effective count."""
+    _validate_scope(business=business, period=period, store=store)
+    issued = _issued_billing_documents(
+        business=business, period=period, store=store
+    ).annotate(
+        is_substituted=Exists(
+            BillingDocumentRelation.objects.filter(
+                business=business,
+                target_document_id=OuterRef("pk"),
+                relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
+                source_document__status=BillingDocumentStatusChoices.ISSUED,
+            )
+        )
+    )
+    counts = issued.aggregate(
+        issued_document_count=Count("pk"),
+        effective_document_count=Count("pk", filter=Q(is_substituted=False)),
+        substituted_document_count=Count("pk", filter=Q(is_substituted=True)),
+        rectification_document_count=Count(
+            "pk", filter=Q(document_type__in=RECTIFICATION_DOCUMENT_TYPES)
+        ),
+    )
+    order = [choice.value for choice in BillingDocumentTypeChoices]
+    by_type = list(
+        issued.values("document_type").annotate(count=Count("pk")).order_by()
+    )
+    by_type.sort(key=lambda row: order.index(row["document_type"]))
+    return {**counts, "by_type": by_type}
+
+
+def tax_summary(*, business, period, store=None):
+    """Aggregate authoritative tax snapshots for effective issued documents."""
+    _validate_scope(business=business, period=period, store=store)
+    documents = _effective_billing_documents(
+        business=business, period=period, store=store
+    )
+    breakdowns = BillingTaxBreakdown.objects.filter(
+        business=business, billing_document__in=documents
+    )
+    totals = breakdowns.aggregate(
+        output_taxable_base=Sum(
+            "taxable_base_amount",
+            filter=Q(billing_document__document_type__in=OUTPUT_DOCUMENT_TYPES),
+        ),
+        output_tax_amount=Sum(
+            "tax_amount",
+            filter=Q(billing_document__document_type__in=OUTPUT_DOCUMENT_TYPES),
+        ),
+        rectified_taxable_base=Sum(
+            "taxable_base_amount",
+            filter=Q(billing_document__document_type__in=RECTIFICATION_DOCUMENT_TYPES),
+        ),
+        rectified_tax_amount=Sum(
+            "tax_amount",
+            filter=Q(billing_document__document_type__in=RECTIFICATION_DOCUMENT_TYPES),
+        ),
+    )
+    for key in totals:
+        totals[key] = totals[key] or ZERO_MONEY
+    totals["net_taxable_base"] = (
+        totals["output_taxable_base"] + totals["rectified_taxable_base"]
+    )
+    totals["net_tax_amount"] = (
+        totals["output_tax_amount"] + totals["rectified_tax_amount"]
+    )
+    return {
+        "effective_document_count": documents.count(),
+        **totals,
+        "effective_total_amount": _sum(documents, "total_amount", ZERO_MONEY),
+    }
+
+
+def tax_by_rate(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    documents = _effective_billing_documents(
+        business=business, period=period, store=store
+    )
+    rows = (
+        BillingTaxBreakdown.objects.filter(
+            business=business, billing_document__in=documents
+        )
+        .values("tax_type", "tax_rate")
+        .annotate(
+            output_taxable_base=Sum(
+                "taxable_base_amount",
+                filter=Q(billing_document__document_type__in=OUTPUT_DOCUMENT_TYPES),
+            ),
+            output_tax_amount=Sum(
+                "tax_amount",
+                filter=Q(billing_document__document_type__in=OUTPUT_DOCUMENT_TYPES),
+            ),
+            rectified_taxable_base=Sum(
+                "taxable_base_amount",
+                filter=Q(
+                    billing_document__document_type__in=RECTIFICATION_DOCUMENT_TYPES
+                ),
+            ),
+            rectified_tax_amount=Sum(
+                "tax_amount",
+                filter=Q(
+                    billing_document__document_type__in=RECTIFICATION_DOCUMENT_TYPES
+                ),
+            ),
+            document_count=Count("billing_document_id", distinct=True),
+        )
+        .order_by("tax_type", "tax_rate")
+    )
+    result = []
+    for row in rows:
+        for key in (
+            "output_taxable_base",
+            "output_tax_amount",
+            "rectified_taxable_base",
+            "rectified_tax_amount",
+        ):
+            row[key] = row[key] or ZERO_MONEY
+        row["net_taxable_base"] = (
+            row["output_taxable_base"] + row["rectified_taxable_base"]
+        )
+        row["net_tax_amount"] = row["output_tax_amount"] + row["rectified_tax_amount"]
+        result.append(row)
+    return result
+
+
+def inventory_summary(*, business, store=None):
+    _validate_scope(business=business, store=store, temporal=False)
+    rows = list(
+        InventoryItem.objects.filter(
+            business=business, is_active=True, **_store_filter(store)
+        )
+        .annotate(available_stock=F("current_stock") - F("reserved_stock"))
+        .values(
+            "id",
+            "store_id",
+            "store__name",
+            "product_id",
+            "product__name",
+            "product__sku",
+            "current_stock",
+            "reserved_stock",
+            "available_stock",
+            "minimum_stock",
+            "maximum_stock",
+        )
+    )
+    counts = {"out_of_stock": 0, "low_stock": 0, "healthy": 0}
+    result = []
+    for row in rows:
+        available = row["available_stock"]
+        status = (
+            "out_of_stock"
+            if available <= 0
+            else "low_stock"
+            if available <= row["minimum_stock"]
+            else "healthy"
+        )
+        counts[status] += 1
+        result.append(
+            {
+                "inventory_item_id": row["id"],
+                "store_id": row["store_id"],
+                "store_name": row["store__name"],
+                "product_id": row["product_id"],
+                "product_name": row["product__name"],
+                "sku": row["product__sku"],
+                "current_stock": row["current_stock"],
+                "reserved_stock": row["reserved_stock"],
+                "available_stock": available,
+                "minimum_stock": row["minimum_stock"],
+                "maximum_stock": row["maximum_stock"],
+                "stock_status": status,
+            }
+        )
+    rank = {"out_of_stock": 0, "low_stock": 1, "healthy": 2}
+    result.sort(
+        key=lambda row: (
+            rank[row["stock_status"]],
+            row["store_id"],
+            row["product_name"],
+            row["product_id"],
+        )
+    )
+    return {
+        "tracked_items_count": len(result),
+        "out_of_stock_count": counts["out_of_stock"],
+        "low_stock_count": counts["low_stock"],
+        "healthy_stock_count": counts["healthy"],
+        "items": result,
+    }
+
+
+def inventory_movements_summary(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    incoming = tuple(StockMovement.IN_TYPES)
+    outgoing = tuple(StockMovement.OUT_TYPES)
+    return list(
+        StockMovement.objects.filter(
+            business=business,
+            occurred_at__gte=period.start,
+            occurred_at__lt=period.end,
+            **_store_filter(store),
+        )
+        .annotate(
+            direction=Case(
+                When(movement_type__in=incoming, then=Value("incoming")),
+                When(movement_type__in=outgoing, then=Value("outgoing")),
+                When(
+                    movement_type=StockMovement.TYPE_STOCKTAKE,
+                    stock_after__gt=F("stock_before"),
+                    then=Value("incoming"),
+                ),
+                When(
+                    movement_type=StockMovement.TYPE_STOCKTAKE,
+                    stock_after__lt=F("stock_before"),
+                    then=Value("outgoing"),
+                ),
+                default=Value("neutral"),
+                output_field=CharField(),
+            ),
+            product_name=F("product__name"),
+            sku=F("product__sku"),
+        )
+        .values("product_id", "product_name", "sku", "movement_type", "direction")
+        .annotate(movement_count=Count("pk"), quantity=Sum("quantity"))
+        .order_by("product_name", "product_id", "movement_type", "direction")
+    )
+
+
+def _purchases(*, business, period, store):
+    return Purchase.objects.filter(
+        business=business,
+        status__in=CONFIRMED_PURCHASE_STATUSES,
+        ordered_at__gte=period.start,
+        ordered_at__lt=period.end,
+        **_store_filter(store),
+    )
+
+
+def purchase_summary(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    data = _purchases(business=business, period=period, store=store).aggregate(
+        purchase_count=Count("pk"),
+        subtotal_amount=Sum("subtotal_amount"),
+        tax_amount=Sum("tax_amount"),
+        total_amount=Sum("total_amount"),
+        ordered_count=Count("pk", filter=Q(status=PurchaseStatusChoices.ORDERED)),
+        partially_received_count=Count(
+            "pk", filter=Q(status=PurchaseStatusChoices.PARTIALLY_RECEIVED)
+        ),
+        received_count=Count("pk", filter=Q(status=PurchaseStatusChoices.RECEIVED)),
+    )
+    for key in ("subtotal_amount", "tax_amount", "total_amount"):
+        data[key] = data[key] or ZERO_MONEY
+    return data
+
+
+def _purchase_group(*, business, period, store, dimensions):
+    return list(
+        _purchases(business=business, period=period, store=store)
+        .values(*dimensions)
+        .annotate(
+            purchase_count=Count("pk"),
+            subtotal_amount=Sum("subtotal_amount"),
+            tax_amount=Sum("tax_amount"),
+            total_amount=Sum("total_amount"),
+        )
+    )
+
+
+def purchases_by_supplier(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    rows = _purchase_group(
+        business=business,
+        period=period,
+        store=store,
+        dimensions=("supplier_id", "supplier__name"),
+    )
+    for row in rows:
+        row["supplier_name"] = row.pop("supplier__name")
+    return sorted(rows, key=lambda row: (-row["total_amount"], row["supplier_id"]))
+
+
+def purchases_by_store(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    rows = _purchase_group(
+        business=business,
+        period=period,
+        store=store,
+        dimensions=("store_id", "store__name"),
+    )
+    for row in rows:
+        row["store_name"] = row.pop("store__name")
+    return sorted(rows, key=lambda row: (-row["total_amount"], row["store_id"]))
+
+
+def purchases_by_product(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    purchases = _purchases(business=business, period=period, store=store)
+    rows = (
+        PurchaseLine.objects.filter(business=business, purchase__in=purchases)
+        .values("sku", "product_name", "unit")
+        .annotate(
+            purchase_amount=Sum("line_total"),
+            quantity_ordered=Sum("quantity_ordered"),
+            quantity_received=Sum("quantity_received"),
+        )
+        .order_by("product_name", "sku", "unit")
+    )
+    result = list(rows)
+    for row in result:
+        row["quantity_pending"] = row["quantity_ordered"] - row["quantity_received"]
+    return result
+
+
+def purchase_receipts_summary(*, business, period, store=None):
+    _validate_scope(business=business, period=period, store=store)
+    receipts = PurchaseReceipt.objects.filter(
+        business=business,
+        received_at__gte=period.start,
+        received_at__lt=period.end,
+        **_store_filter(store),
+    )
+    lines = PurchaseReceiptLine.objects.filter(business=business, receipt__in=receipts)
+    return {
+        "receipt_count": receipts.count(),
+        "receipt_line_count": lines.count(),
+        "by_product": list(
+            lines.values(
+                sku=F("purchase_line__sku"),
+                product_name=F("purchase_line__product_name"),
+                unit=F("purchase_line__unit"),
+            )
+            .annotate(quantity_received=Sum("quantity_received"))
+            .order_by("product_name", "sku", "unit")
+        ),
+    }
 
 
 def sales_summary(*, business, period, store=None):

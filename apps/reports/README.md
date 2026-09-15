@@ -131,13 +131,37 @@ periodo (`opened_at < end` y cierre nulo o `closed_at >= start`), pero también
 describe los movimientos completos de cada sesión, no solo la fracción que cae
 en el periodo. La consulta de sesiones y la agregación de movimientos son bulk.
 
+## Implementado en PR 3
+
+`selectors.py` implementa `billing_documents_summary`, `tax_summary`,
+`tax_by_rate`, `inventory_summary`, `inventory_movements_summary`,
+`purchase_summary`, `purchases_by_supplier`, `purchases_by_store`,
+`purchases_by_product` y `purchase_receipts_summary`.
+
+Los informes fiscales usan exclusivamente documentos emitidos y los snapshots
+autoritativos de `BillingTaxBreakdown`. Los importes efectivos excluyen el target
+de una relación `SUBSTITUTES` cuando el documento source está emitido; el source
+permanece. `RECTIFIES` no elimina el original y sus importes se agregan con el
+signo ya almacenado. Los conteos emitidos conservan la historia documental. La
+realidad fiscal efectiva es dinámica respecto al estado actual de las relaciones,
+sin snapshots históricos «as of».
+
+`inventory_summary` lee la foto actual de los `InventoryItem` activos. El
+histórico procede de `StockMovement.occurred_at` y se agrupa por producto, tipo y
+dirección; no se suman globalmente unidades heterogéneas. Los nombres y SKU de
+los movimientos son labels actuales de `Product`, no snapshots históricos;
+`product_id` es su identidad operacional estable.
+
+Las compras confirmadas se fechan por `Purchase.ordered_at`, mientras que las
+recepciones se fechan independientemente por `PurchaseReceipt.received_at`.
+`purchases_by_product` usa los snapshots de la línea y muestra el fulfillment
+acumulado actual del pedido, incluso si una recepción fue posterior al periodo
+del pedido. `purchase_receipts_summary` representa, en cambio, los eventos de
+recepción ocurridos dentro del periodo.
+
 ## API prevista para PR posteriores
 
 - Dashboard: `dashboard_summary`.
-- Fiscalidad: `tax_summary`, `tax_by_rate`, `billing_documents_summary`.
-- Inventario: `inventory_summary`, `inventory_movements_summary`.
-- Compras: `purchase_summary`, `purchases_by_supplier`, `purchases_by_store`,
-  `purchases_by_product`, `purchase_receipts_summary`.
 
 Esta lista documenta nombres y alcance; no se reservan con stubs. VeriFactu no
 existe en este contrato y no se crean modelos, DTOs, selectors ni placeholders.
