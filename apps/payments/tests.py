@@ -9,7 +9,10 @@ from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
 
-from apps.cash_register.models import CashRegister, CashSession
+from apps.audit.constants import AuditEventType
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
+from apps.cash_register.models import CashMovement, CashRegister, CashSession
 from apps.customers.models import (
     CustomerAccount,
     CustomerAccountEntry,
@@ -168,6 +171,95 @@ class PaymentsTests(TestCase):
             cash_session_id=current.pk,
         )
         self.assertEqual(payment.cash_session, current)
+
+    def test_sale_payment_audit_payload_is_allowlisted_and_idempotent(self):
+        key = uuid.uuid4()
+        payment = register_sale_payment(
+            business=self.business,
+            sale_id=self.sale.pk,
+            method_id=self.card.pk,
+            amount=Decimal("10"),
+            user=self.user,
+            idempotency_key=key,
+            cash_session_id=self.session.pk,
+            external_reference="secret-reference",
+            notes="secret-notes",
+        )
+        register_sale_payment(
+            business=self.business,
+            sale_id=self.sale.pk,
+            method_id=self.card.pk,
+            amount=Decimal("10"),
+            user=self.user,
+            idempotency_key=key,
+            cash_session_id=self.session.pk,
+            external_reference="secret-reference",
+            notes="secret-notes",
+        )
+
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.PAYMENT_COMPLETED,
+            entity_id=str(payment.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.entity_type, "payments.payment")
+        self.assertIsNone(event.old_payload)
+        self.assertEqual(
+            set(event.new_payload),
+            {"status", "payment_type", "amount", "method_id", "cash_session_id"},
+        )
+        self.assertEqual(
+            event.metadata, {"sale_id": self.sale.pk, "method_code": "card"}
+        )
+        serialized = str(
+            [event.message, event.old_payload, event.new_payload, event.metadata]
+        )
+        self.assertNotIn(str(key), serialized)
+        self.assertNotIn("secret-reference", serialized)
+        self.assertNotIn("secret-notes", serialized)
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=[AuditEventType.CASH_IN, AuditEventType.CASH_OUT]
+            ).exists()
+        )
+
+    def test_sale_payment_audit_failure_rolls_back_all_effects(self):
+        customer = create_sales_customer(business=self.business)
+        account = CustomerAccount.objects.create(
+            business=self.business, customer=customer, credit_limit=Decimal("100")
+        )
+        self.sale.customer = customer
+        self.sale.save(update_fields=["customer"])
+        CustomerAccountService.create_charge(
+            business=self.business,
+            account=account,
+            amount=Decimal("100"),
+            user=self.user,
+            sale=self.sale,
+        )
+        original_pending = self.sale.pending_amount
+        original_status = self.sale.payment_status
+        with patch(
+            "apps.payments.services.log_event",
+            side_effect=AuditValidationError("audit failed"),
+        ):
+            with self.assertRaises(AuditValidationError):
+                self.pay("10", method=self.cash)
+
+        self.sale.refresh_from_db()
+        self.assertFalse(Payment.objects.filter(sale=self.sale).exists())
+        self.assertFalse(CashMovement.objects.filter(sale=self.sale).exists())
+        self.assertEqual(self.sale.pending_amount, original_pending)
+        self.assertEqual(self.sale.payment_status, original_status)
+        self.assertFalse(
+            CustomerAccountEntry.objects.filter(
+                sale=self.sale, entry_type=EntryTypeChoices.PAYMENT
+            ).exists()
+        )
 
     def test_partial_payment_return_has_no_refundable_money(self):
         # Caso A: Sale 100, paid 30, return 50 -> no hay dinero reembolsable
@@ -428,6 +520,28 @@ class PaymentsTests(TestCase):
             cash_session_id=self.session.pk,
         )
         self.assertEqual(refund.pk, same.pk)
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.PAYMENT_REFUNDED,
+            entity_id=str(refund.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.entity_type, "payments.payment")
+        self.assertEqual(
+            set(event.new_payload),
+            {"status", "payment_type", "amount", "method_id", "cash_session_id"},
+        )
+        self.assertEqual(
+            event.metadata,
+            {
+                "sale_id": self.sale.pk,
+                "sale_return_id": returned.pk,
+                "method_code": "card",
+            },
+        )
+        self.assertNotIn(
+            str(key), str([event.message, event.new_payload, event.metadata])
+        )
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.pending_amount, 0)
         self.assertEqual(self.sale.payment_status, SalePaymentStatus.REFUNDED)
@@ -441,6 +555,45 @@ class PaymentsTests(TestCase):
                 idempotency_key=uuid.uuid4(),
                 cash_session_id=self.session.pk,
             )
+
+    def test_refund_audit_failure_rolls_back_payment_cash_and_sale_state(self):
+        self.pay("100")
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("100"),
+        )
+        payment_count = Payment.objects.count()
+        movement_count = CashMovement.objects.count()
+        self.sale.refresh_from_db()
+        original_status = self.sale.payment_status
+        original_pending = self.sale.pending_amount
+
+        with patch(
+            "apps.payments.services.log_event",
+            side_effect=AuditValidationError("audit failed"),
+        ):
+            with self.assertRaises(AuditValidationError):
+                register_refund(
+                    business=self.business,
+                    sale_return_id=returned.pk,
+                    method_id=self.card.pk,
+                    amount=Decimal("100"),
+                    user=self.user,
+                    idempotency_key=uuid.uuid4(),
+                    cash_session_id=self.session.pk,
+                    pin="1234",
+                    external_reference="secret-reference",
+                )
+
+        self.sale.refresh_from_db()
+        self.assertEqual(Payment.objects.count(), payment_count)
+        self.assertEqual(CashMovement.objects.count(), movement_count)
+        self.assertEqual(self.sale.payment_status, original_status)
+        self.assertEqual(self.sale.pending_amount, original_pending)
 
     def test_refund_requires_completed_return_refundable_method_and_real_money(self):
         returned = create_sale_return(
@@ -544,6 +697,18 @@ class PaymentsTests(TestCase):
             PaymentStatusChoices.CANCELLED,
         )
         cancel_payment(business=self.business, payment_id=pending.pk, user=self.user)
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.PAYMENT_CANCELLED,
+            entity_id=str(pending.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.old_payload, {"status": PaymentStatusChoices.PENDING})
+        self.assertEqual(event.new_payload, {"status": PaymentStatusChoices.CANCELLED})
+        self.assertEqual(
+            set(event.metadata),
+            {"sale_id", "payment_type", "amount", "method_id", "cash_session_id"},
+        )
         completed = self.pay("10")
         with self.assertRaises(ValidationError):
             cancel_payment(
@@ -651,6 +816,19 @@ class PaymentsTests(TestCase):
             business=self.business, sale_id=self.sale.pk, user=self.user
         )
         self.assertEqual(charge.pk, replay.pk)
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.SALE_ON_ACCOUNT_REGISTERED,
+            entity_id=str(self.sale.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.entity_type, "sales.sale")
+        self.assertIsNone(event.old_payload)
+        self.assertEqual(
+            set(event.new_payload),
+            {"customer_account_entry_id", "account_id", "amount", "balance_after"},
+        )
+        self.assertEqual(event.metadata, {"customer_id": customer.pk})
         self.pay("40")
         account.refresh_from_db()
         self.assertEqual(account.balance, Decimal("60"))

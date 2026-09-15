@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.services import register_payment_cash_movement
@@ -314,6 +316,7 @@ def register_sale_payment(
         raise ValidationError(
             {"method": "La configuración no permite dividir entre métodos."}
         )
+    created_here = False
     try:
         with transaction.atomic():
             payment = Payment.objects.create(
@@ -331,6 +334,7 @@ def register_sale_payment(
                 notes=notes,
             )
             register_payment_cash_movement(payment=payment, locked_session=session)
+        created_here = True
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -347,6 +351,25 @@ def register_sale_payment(
     _apply_customer_debt_payment(
         business=business, sale=sale, payment=payment, user=user
     )
+    if created_here:
+        log_event(
+            business=business,
+            event_type=AuditEventType.PAYMENT_COMPLETED,
+            module=AuditModule.PAYMENTS,
+            message=f"Pago #{payment.pk} completado.",
+            store=payment.store,
+            user=payment.processed_by,
+            entity=payment,
+            old_payload=None,
+            new_payload={
+                "status": payment.status,
+                "payment_type": payment.payment_type,
+                "amount": payment.amount,
+                "method_id": payment.method_id,
+                "cash_session_id": payment.cash_session_id,
+            },
+            metadata={"sale_id": payment.sale_id, "method_code": method.code},
+        )
     return payment
 
 
@@ -452,6 +475,7 @@ def register_refund(
         raise ValidationError(
             {"amount": "No se puede devolver más dinero del cobrado."}
         )
+    created_here = False
     try:
         with transaction.atomic():
             payment = Payment.objects.create(
@@ -470,6 +494,7 @@ def register_refund(
                 notes=notes,
             )
             register_payment_cash_movement(payment=payment, locked_session=session)
+        created_here = True
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -484,6 +509,29 @@ def register_refund(
         if payment is None:
             raise
     recalculate_sale_payment_state(sale)
+    if created_here:
+        log_event(
+            business=business,
+            event_type=AuditEventType.PAYMENT_REFUNDED,
+            module=AuditModule.PAYMENTS,
+            message=f"Reembolso #{payment.pk} completado.",
+            store=payment.store,
+            user=payment.processed_by,
+            entity=payment,
+            old_payload=None,
+            new_payload={
+                "status": payment.status,
+                "payment_type": payment.payment_type,
+                "amount": payment.amount,
+                "method_id": payment.method_id,
+                "cash_session_id": payment.cash_session_id,
+            },
+            metadata={
+                "sale_id": payment.sale_id,
+                "sale_return_id": payment.sale_return_id,
+                "method_code": method.code,
+            },
+        )
     return payment
 
 
@@ -524,14 +572,32 @@ def register_sale_on_account(*, business, sale_id, user):
     recalculate_sale_payment_state(sale)
     if sale.pending_amount <= ZERO:
         raise ValidationError({"sale": "La venta no tiene importe pendiente."})
-    return CustomerAccountService.create_charge(
+    account, entry = CustomerAccountService.create_charge(
         business=business,
         account=account,
         amount=sale.pending_amount,
         user=user,
         sale=sale,
         notes=f"Venta #{sale.pk} pasada a cuenta",
-    )[1]
+    )
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_ON_ACCOUNT_REGISTERED,
+        module=AuditModule.PAYMENTS,
+        message=f"Venta #{sale.pk} registrada en cuenta.",
+        store=sale.store,
+        user=user,
+        entity=sale,
+        old_payload=None,
+        new_payload={
+            "customer_account_entry_id": entry.pk,
+            "account_id": entry.account_id,
+            "amount": entry.amount,
+            "balance_after": entry.balance_after,
+        },
+        metadata={"customer_id": sale.customer_id},
+    )
+    return entry
 
 
 @transaction.atomic
@@ -558,6 +624,25 @@ def cancel_payment(*, business, payment_id, user, pin=None):
         return payment
     if payment.status != PaymentStatusChoices.PENDING:
         raise ValidationError({"payment": "Solo se pueden cancelar pagos pendientes."})
+    previous_status = payment.status
     payment.status = PaymentStatusChoices.CANCELLED
     payment.save(update_fields=["status", "updated_at"])
+    log_event(
+        business=business,
+        event_type=AuditEventType.PAYMENT_CANCELLED,
+        module=AuditModule.PAYMENTS,
+        message=f"Pago #{payment.pk} cancelado.",
+        store=payment.store,
+        user=user,
+        entity=payment,
+        old_payload={"status": previous_status},
+        new_payload={"status": payment.status},
+        metadata={
+            "sale_id": payment.sale_id,
+            "payment_type": payment.payment_type,
+            "amount": payment.amount,
+            "method_id": payment.method_id,
+            "cash_session_id": payment.cash_session_id,
+        },
+    )
     return payment
