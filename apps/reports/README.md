@@ -116,12 +116,24 @@ La cantidad recibida procede de `PurchaseReceiptLine`/`quantity_received` y la
 pendiente es `quantity_ordered - quantity_received`. No se modelan devoluciones
 a proveedor hasta que el dominio tenga ese flujo.
 
-## API prevista (no implementada en esta PR)
+## Implementado en PR 2
 
-- Dashboard y ventas: `dashboard_summary`, `sales_summary`,
-  `sales_timeseries`, `sales_by_store`, `sales_by_product`, `sales_by_category`.
-- Pagos: `payment_summary`, `payments_by_method`.
-- Caja: `cash_summary`, `cash_sessions_summary`, `cash_session_summary`.
+`selectors.py` implementa `sales_summary`, `sales_timeseries`,
+`sales_by_store`, `sales_by_product`, `sales_by_category`, `payment_summary`,
+`payments_by_method`, `cash_summary`, `cash_sessions_summary` y
+`cash_session_summary`.
+
+`cash_summary` agrega únicamente movimientos, aperturas y cierres ocurridos en
+el periodo solicitado; sus totales de cierres históricos no representan el
+efectivo actual. `cash_session_summary` describe la sesión completa.
+`cash_sessions_summary` selecciona sesiones cuya vida operativa intersecta el
+periodo (`opened_at < end` y cierre nulo o `closed_at >= start`), pero también
+describe los movimientos completos de cada sesión, no solo la fracción que cae
+en el periodo. La consulta de sesiones y la agregación de movimientos son bulk.
+
+## API prevista para PR posteriores
+
+- Dashboard: `dashboard_summary`.
 - Fiscalidad: `tax_summary`, `tax_by_rate`, `billing_documents_summary`.
 - Inventario: `inventory_summary`, `inventory_movements_summary`.
 - Compras: `purchase_summary`, `purchases_by_supplier`, `purchases_by_store`,
