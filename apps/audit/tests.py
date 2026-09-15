@@ -11,7 +11,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 
 from apps.audit.admin import AuditEventAdmin, BusinessFilter, StoreFilter, UserFilter
-from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.constants import EVENT_MODULES, AuditEventType, AuditModule
 from apps.audit.exceptions import (
     AuditImmutableError,
     AuditPayloadError,
@@ -76,6 +76,38 @@ class AuditTestMixin:
 
 
 class AuditServiceTests(AuditTestMixin, TestCase):
+    def test_event_module_mapping_matches_pre_verifactu_contract(self):
+        expected = {
+            AuditEventType.SALE_COMPLETED: AuditModule.SALES,
+            AuditEventType.SALE_CANCELLED: AuditModule.SALES,
+            AuditEventType.SALE_RETURN_COMPLETED: AuditModule.SALES,
+            AuditEventType.SALE_RETURN_CANCELLED: AuditModule.SALES,
+            AuditEventType.PAYMENT_COMPLETED: AuditModule.PAYMENTS,
+            AuditEventType.PAYMENT_REFUNDED: AuditModule.PAYMENTS,
+            AuditEventType.PAYMENT_CANCELLED: AuditModule.PAYMENTS,
+            AuditEventType.SALE_ON_ACCOUNT_REGISTERED: AuditModule.PAYMENTS,
+            AuditEventType.CASH_SESSION_OPENED: AuditModule.CASH_REGISTER,
+            AuditEventType.CASH_IN: AuditModule.CASH_REGISTER,
+            AuditEventType.CASH_OUT: AuditModule.CASH_REGISTER,
+            AuditEventType.CASH_ADJUSTED: AuditModule.CASH_REGISTER,
+            AuditEventType.CASH_COUNTED: AuditModule.CASH_REGISTER,
+            AuditEventType.CASH_SESSION_CLOSED: AuditModule.CASH_REGISTER,
+            AuditEventType.STOCK_INITIALIZED: AuditModule.INVENTORY,
+            AuditEventType.STOCK_ADJUSTED: AuditModule.INVENTORY,
+            AuditEventType.STOCK_ADJUSTMENT_CANCELLED: AuditModule.INVENTORY,
+            AuditEventType.PURCHASE_CREATED: AuditModule.PURCHASES,
+            AuditEventType.PURCHASE_ORDERED: AuditModule.PURCHASES,
+            AuditEventType.PURCHASE_RECEIVED: AuditModule.PURCHASES,
+            AuditEventType.PURCHASE_CANCELLED: AuditModule.PURCHASES,
+            AuditEventType.BILLING_DOCUMENT_ISSUED: AuditModule.BILLING,
+            AuditEventType.BILLING_DOCUMENT_SUBSTITUTED: AuditModule.BILLING,
+            AuditEventType.BILLING_DOCUMENT_RECTIFIED: AuditModule.BILLING,
+            AuditEventType.BUSINESS_CONFIG_CHANGED: AuditModule.BUSINESS_CONFIG,
+        }
+
+        self.assertEqual(EVENT_MODULES, expected)
+        self.assertEqual(len(EVENT_MODULES), 25)
+
     def test_creates_complete_event_and_allows_system_user(self):
         event = self.event(ip_address="2001:db8::1", user=None)
 
@@ -198,6 +230,26 @@ class AuditServiceTests(AuditTestMixin, TestCase):
 
 
 class AuditSanitizerTests(AuditTestMixin, TestCase):
+    def test_nested_payload_redacts_secrets_and_preserves_cash_session_id(self):
+        self.assertEqual(
+            sanitize_payload(
+                {
+                    "safe": {
+                        "token": "token-value",
+                        "pin": "1234",
+                        "cash_session_id": 1,
+                    }
+                }
+            ),
+            {
+                "safe": {
+                    "token": REDACTED,
+                    "pin": REDACTED,
+                    "cash_session_id": 1,
+                }
+            },
+        )
+
     def test_preserves_pin_configuration_boolean_but_redacts_real_pins(self):
         self.assertEqual(
             sanitize_payload(
@@ -339,6 +391,8 @@ class AuditImmutabilityTests(AuditTestMixin, TestCase):
         event.message = "Changed"
         with self.assertRaises(AuditImmutableError):
             AuditEvent.objects.bulk_update([event], ["message"])
+        with self.assertRaises(AuditImmutableError):
+            AuditEvent.objects.all().bulk_update([event], ["message"])
 
     def test_bulk_create_cannot_upsert_or_ignore_conflicts(self):
         event = self.event()
@@ -376,6 +430,17 @@ class AuditImmutabilityTests(AuditTestMixin, TestCase):
         with self.assertRaises(ProtectedError):
             self.store.delete()
 
+    def test_deactivating_user_and_store_preserves_history(self):
+        event = self.event()
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        self.store.is_active = False
+        self.store.save(update_fields=["is_active"])
+
+        event.refresh_from_db()
+        self.assertEqual(event.user_id, self.user.pk)
+        self.assertEqual(event.store_id, self.store.pk)
+
 
 class AuditSelectorTests(AuditTestMixin, TestCase):
     def test_selector_and_manager_are_business_scoped(self):
@@ -400,8 +465,8 @@ class AuditAdminTests(AuditTestMixin, TestCase):
             user=self.other_user,
         )
 
-    def _request(self, user):
-        request = self.factory.get("/admin/audit/auditevent/")
+    def _request(self, user, query=None):
+        request = self.factory.get("/admin/audit/auditevent/", query or {})
         request.user = user
         return request
 
@@ -423,6 +488,29 @@ class AuditAdminTests(AuditTestMixin, TestCase):
         request = self._request(self.user)
         self.assertTrue(self.model_admin.has_view_permission(request))
         self.assertEqual(list(self.model_admin.get_queryset(request)), [self.own_event])
+
+    def test_cashier_without_view_permission_cannot_view_audit(self):
+        self.user.role = RoleChoices.CASHIER
+        self.user.is_staff = True
+        self.user.save(update_fields=["role", "is_staff"])
+
+        self.assertFalse(self.model_admin.has_view_permission(self._request(self.user)))
+
+    def test_manipulated_business_filter_cannot_escape_tenant_queryset(self):
+        self.user.is_staff = True
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="view_auditevent")
+        )
+        request = self._request(self.user, {"business": self.other_business.pk})
+        base_queryset = self.model_admin.get_queryset(request)
+        filter_instance = BusinessFilter(
+            request,
+            {"business": [str(self.other_business.pk)]},
+            AuditEvent,
+            self.model_admin,
+        )
+
+        self.assertFalse(filter_instance.queryset(request, base_queryset).exists())
 
     def test_superuser_sees_all_businesses(self):
         superuser = CustomUser.objects.create_superuser(
