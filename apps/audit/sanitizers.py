@@ -37,6 +37,9 @@ _SECRET_MARKERS = {
     "csrfmiddlewaretoken",
     "webhooksecret",
 }
+_SAFE_NON_SECRET_KEYS = {
+    "cashsessionid",
+}
 
 
 def _normalized_key(key):
@@ -45,6 +48,8 @@ def _normalized_key(key):
 
 def _is_secret_key(key):
     normalized = _normalized_key(key)
+    if normalized in _SAFE_NON_SECRET_KEYS:
+        return False
     words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
     words = {word.lower() for word in re.split(r"[^a-zA-Z0-9]+", words) if word}
     return (

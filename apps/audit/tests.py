@@ -18,7 +18,13 @@ from apps.audit.exceptions import (
     AuditValidationError,
 )
 from apps.audit.models import AuditEvent
-from apps.audit.sanitizers import MAX_DEPTH, MAX_ITEMS, MAX_STRING_LENGTH, REDACTED
+from apps.audit.sanitizers import (
+    MAX_DEPTH,
+    MAX_ITEMS,
+    MAX_STRING_LENGTH,
+    REDACTED,
+    sanitize_payload,
+)
 from apps.audit.selectors import get_audit_events
 from apps.audit.services import log_event
 from apps.core.models import Business
@@ -192,6 +198,24 @@ class AuditServiceTests(AuditTestMixin, TestCase):
 
 
 class AuditSanitizerTests(AuditTestMixin, TestCase):
+    def test_preserves_cash_session_id_and_redacts_sensitive_session_keys(self):
+        self.assertEqual(
+            sanitize_payload(
+                {
+                    "cash_session_id": 123,
+                    "session_id": "django-session",
+                    "auth_session_id": "auth-session",
+                    "session_token": "session-token",
+                }
+            ),
+            {
+                "cash_session_id": 123,
+                "session_id": REDACTED,
+                "auth_session_id": REDACTED,
+                "session_token": REDACTED,
+            },
+        )
+
     def test_recursively_redacts_normalized_secret_keys(self):
         payload = {
             "password": "one",

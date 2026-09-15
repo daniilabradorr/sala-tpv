@@ -2,11 +2,12 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-
-from apps.cash_register.helpers import business_exists
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
+from apps.cash_register.helpers import business_exists
 from apps.cash_register.models import CashCount, CashMovement, CashRegister, CashSession
 from apps.cash_register.repositories import CashRegisterRepository
 from apps.core.models import Business
@@ -254,6 +255,26 @@ class CashRegisterService:
                     {"cash_register": "La caja ya tiene una sesión abierta."}
                 ) from exc
 
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_SESSION_OPENED,
+                module=AuditModule.CASH_REGISTER,
+                entity=session,
+                message=f"Sesión de caja #{session.pk} abierta.",
+                old_payload=None,
+                new_payload={
+                    "status": session.status,
+                    "opening_amount": session.opening_amount,
+                    "expected_cash_amount": session.expected_cash_amount,
+                    "opened_at": session.opened_at,
+                },
+                metadata={
+                    "cash_register_id": session.cash_register_id,
+                    "cash_register_code": cash_register.code,
+                },
+            )
             return session
 
     @staticmethod
@@ -327,6 +348,7 @@ class CashRegisterService:
                 )
             if not session.is_open:
                 raise ValidationError({"cash_session": "La sesión está cerrada."})
+            previous_expected_cash_amount = session.expected_cash_amount
             direction = Decimal("1")
             if movement_type == CashMovement.MovementType.CASH_OUT or (
                 movement_type == CashMovement.MovementType.ADJUSTMENT
@@ -354,6 +376,35 @@ class CashRegisterService:
             )
             session.expected_cash_amount = balance
             session.save(update_fields=["expected_cash_amount", "updated_at"])
+            event_type = {
+                CashMovement.MovementType.CASH_IN: AuditEventType.CASH_IN,
+                CashMovement.MovementType.CASH_OUT: AuditEventType.CASH_OUT,
+                CashMovement.MovementType.ADJUSTMENT: AuditEventType.CASH_ADJUSTED,
+            }[movement_type]
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=event_type,
+                module=AuditModule.CASH_REGISTER,
+                entity=movement,
+                message=f"Movimiento de caja #{movement.pk} registrado.",
+                old_payload={
+                    "expected_cash_amount": previous_expected_cash_amount,
+                },
+                new_payload={
+                    "expected_cash_amount": session.expected_cash_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                    "movement_type": movement.movement_type,
+                    "adjustment_direction": movement.adjustment_direction,
+                    "amount": movement.amount,
+                    "balance_after": movement.balance_after,
+                    "reason": movement.reason,
+                },
+            )
             return movement
 
     def register_cash_in(self, **kwargs):
@@ -418,7 +469,7 @@ class CashRegisterService:
                 raise ValidationError(
                     {"cash_session": "La sesión no está abierta en la caja."}
                 )
-            return self.repository.create_cash_count(
+            count = self.repository.create_cash_count(
                 count_type=CashCount.CountType.REVIEW,
                 business=business,
                 store=store,
@@ -429,6 +480,27 @@ class CashRegisterService:
                 counted_by=user,
                 notes=notes,
             )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_COUNTED,
+                module=AuditModule.CASH_REGISTER,
+                entity=count,
+                message=f"Arqueo de caja #{count.pk} registrado.",
+                old_payload=None,
+                new_payload={
+                    "count_type": count.count_type,
+                    "counted_amount": count.counted_amount,
+                    "expected_amount": count.expected_amount,
+                    "difference_amount": count.difference_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                },
+            )
+            return count
 
     def close_cash_session(
         self,
@@ -482,6 +554,7 @@ class CashRegisterService:
                 raise ValidationError(
                     {"cash_session": "La sesión ya está cerrada o no es válida."}
                 )
+            previous_status = session.status
             difference = counted - session.expected_cash_amount
             count = self.repository.create_cash_count(
                 count_type=CashCount.CountType.CLOSING,
@@ -508,6 +581,47 @@ class CashRegisterService:
                     "closed_at",
                     "updated_at",
                 ]
+            )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_COUNTED,
+                module=AuditModule.CASH_REGISTER,
+                entity=count,
+                message=f"Arqueo de caja #{count.pk} registrado.",
+                old_payload=None,
+                new_payload={
+                    "count_type": count.count_type,
+                    "counted_amount": count.counted_amount,
+                    "expected_amount": count.expected_amount,
+                    "difference_amount": count.difference_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                },
+            )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_SESSION_CLOSED,
+                module=AuditModule.CASH_REGISTER,
+                entity=session,
+                message=f"Sesión de caja #{session.pk} cerrada.",
+                old_payload={"status": previous_status},
+                new_payload={
+                    "status": session.status,
+                    "counted_cash_amount": session.counted_cash_amount,
+                    "difference_amount": session.difference_amount,
+                    "closed_at": session.closed_at,
+                },
+                metadata={
+                    "cash_register_id": session.cash_register_id,
+                    "closing_count_id": count.pk,
+                    "expected_cash_amount": session.expected_cash_amount,
+                },
             )
             return session, count
 
