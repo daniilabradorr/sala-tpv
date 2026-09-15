@@ -1,10 +1,14 @@
 """Tests unitarios de services del módulo sales."""
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from apps.audit.constants import AuditEventType
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.inventory.models import StockMovement
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
@@ -302,6 +306,7 @@ class SaleServicesTests(TestCase):
     def test_complete_sale_is_idempotent(self):
         sale = self.open_basic_sale()
         self.add_basic_line(sale)
+        self.assertFalse(AuditEvent.objects.exists())
 
         complete_sale(
             business=self.business,
@@ -327,6 +332,54 @@ class SaleServicesTests(TestCase):
             ).count(),
             first_count,
         )
+
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.SALE_COMPLETED, entity_id=str(sale.pk)
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.user, self.owner)
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.entity_type, "sales.sale")
+        self.assertEqual(event.old_payload, {"status": SaleStatusChoices.OPEN})
+        self.assertEqual(
+            set(event.new_payload),
+            {
+                "status",
+                "total_amount",
+                "payment_status",
+                "pending_amount",
+                "completed_at",
+            },
+        )
+        self.assertEqual(
+            set(event.metadata),
+            {
+                "customer_id",
+                "cash_register_id",
+                "cash_session_id",
+                "document_type_requested",
+            },
+        )
+
+    def test_complete_sale_rolls_back_domain_when_audit_fails(self):
+        sale = self.open_basic_sale()
+        self.add_basic_line(sale)
+
+        with patch(
+            "apps.sales.services.log_event",
+            side_effect=AuditValidationError("audit failed"),
+        ):
+            with self.assertRaises(AuditValidationError):
+                complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+
+        sale.refresh_from_db()
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(sale.status, SaleStatusChoices.OPEN)
+        self.assertEqual(self.inventory_item.current_stock, Decimal("20.000"))
+        self.assertFalse(StockMovement.objects.filter(sale=sale).exists())
+        self.assertFalse(AuditEvent.objects.filter(entity_id=str(sale.pk)).exists())
 
     def test_complete_sale_rolls_back_everything_when_one_stock_line_fails(self):
         second_product = create_sales_product(
@@ -384,6 +437,23 @@ class SaleServicesTests(TestCase):
         )
 
         self.assertEqual(cancelled.status, SaleStatusChoices.CANCELLED)
+        cancel_sale(
+            business=self.business,
+            sale=sale,
+            cancelled_by=self.owner,
+            pin="1234",
+        )
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.SALE_CANCELLED, entity_id=str(sale.pk)
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.old_payload, {"status": SaleStatusChoices.OPEN})
+        self.assertEqual(event.new_payload, {"status": SaleStatusChoices.CANCELLED})
+        self.assertNotIn(
+            "1234",
+            str([event.message, event.old_payload, event.new_payload, event.metadata]),
+        )
 
     def test_cancel_sale_rejects_completed_sale(self):
         sale = self.open_basic_sale()
@@ -569,6 +639,26 @@ class SaleReturnServicesTests(TestCase):
                 sale_return=return_doc,
             ).count(),
             first_movement_count,
+        )
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.SALE_RETURN_COMPLETED,
+            entity_id=str(return_doc.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.entity_type, "sales.salereturn")
+        self.assertEqual(event.user, self.owner)
+        self.assertEqual(event.old_payload, {"status": SaleReturnStatusChoices.DRAFT})
+        self.assertEqual(
+            set(event.new_payload), {"status", "total_amount", "completed_at"}
+        )
+        self.assertEqual(
+            set(event.metadata),
+            {
+                "original_sale_id",
+                "original_sale_status_before",
+                "original_sale_status_after",
+            },
         )
 
     def test_full_return_marks_sale_as_returned(self):
@@ -775,3 +865,23 @@ class SaleReturnServicesTests(TestCase):
 
         self.assertEqual(cancelled.status, SaleReturnStatusChoices.CANCELLED)
         self.assertEqual(self.inventory_item.current_stock, stock_before)
+        cancel_sale_return(
+            business=self.business,
+            return_doc=return_doc,
+            cancelled_by=self.owner,
+            pin="1234",
+        )
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.SALE_RETURN_CANCELLED,
+            entity_id=str(return_doc.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.old_payload, {"status": SaleReturnStatusChoices.DRAFT})
+        self.assertEqual(
+            event.new_payload, {"status": SaleReturnStatusChoices.CANCELLED}
+        )
+        self.assertNotIn(
+            "1234",
+            str([event.message, event.old_payload, event.new_payload, event.metadata]),
+        )

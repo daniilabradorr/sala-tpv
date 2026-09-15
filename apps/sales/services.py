@@ -17,6 +17,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
@@ -932,6 +934,8 @@ def complete_sale(*, business, sale, closed_by):
     if locked_sale.status != SaleStatusChoices.OPEN:
         raise ValidationError("Solo se puede completar una venta abierta.")
 
+    previous_status = locked_sale.status
+
     _validate_can_sell(
         business=business,
         store=locked_sale.store,
@@ -1031,6 +1035,30 @@ def complete_sale(*, business, sale, closed_by):
         ]
     )
 
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_COMPLETED,
+        module=AuditModule.SALES,
+        message=f"Venta #{locked_sale.pk} completada.",
+        store=locked_sale.store,
+        user=closed_by,
+        entity=locked_sale,
+        old_payload={"status": previous_status},
+        new_payload={
+            "status": locked_sale.status,
+            "total_amount": locked_sale.total_amount,
+            "payment_status": locked_sale.payment_status,
+            "pending_amount": locked_sale.pending_amount,
+            "completed_at": locked_sale.completed_at,
+        },
+        metadata={
+            "customer_id": locked_sale.customer_id,
+            "cash_register_id": locked_sale.cash_register_id,
+            "cash_session_id": locked_sale.cash_session_id,
+            "document_type_requested": locked_sale.document_type_requested,
+        },
+    )
+
     return locked_sale
 
 
@@ -1065,6 +1093,7 @@ def cancel_sale(*, business, sale, cancelled_by, pin=None):
         pos_settings=pos_settings,
     )
 
+    previous_status = locked_sale.status
     locked_sale.status = SaleStatusChoices.CANCELLED
     locked_sale.closed_by = cancelled_by
     locked_sale.completed_at = None
@@ -1075,6 +1104,23 @@ def cancel_sale(*, business, sale, cancelled_by, pin=None):
             "completed_at",
             "updated_at",
         ]
+    )
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_CANCELLED,
+        module=AuditModule.SALES,
+        message=f"Venta #{locked_sale.pk} cancelada.",
+        store=locked_sale.store,
+        user=cancelled_by,
+        entity=locked_sale,
+        old_payload={"status": previous_status},
+        new_payload={"status": locked_sale.status},
+        metadata={
+            "total_amount": locked_sale.total_amount,
+            "customer_id": locked_sale.customer_id,
+            "cash_register_id": locked_sale.cash_register_id,
+            "cash_session_id": locked_sale.cash_session_id,
+        },
     )
     return locked_sale
 
@@ -1420,6 +1466,8 @@ def complete_sale_return(
     if locked_return.status == SaleReturnStatusChoices.CANCELLED:
         raise ValidationError("Una devolución cancelada no puede completarse.")
 
+    previous_return_status = locked_return.status
+
     _validate_return_editable(locked_return)
 
     _validate_can_sell(
@@ -1452,6 +1500,8 @@ def complete_sale_return(
         SaleStatusChoices.RETURNED,
     }:
         raise ValidationError("La venta original no admite devoluciones.")
+
+    previous_sale_status = locked_sale.status
 
     return_lines = list(
         SaleReturnLine.objects.select_for_update(of=("self",))
@@ -1607,6 +1657,27 @@ def complete_sale_return(
 
     recalculate_sale_payment_state(locked_sale)
 
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_RETURN_COMPLETED,
+        module=AuditModule.SALES,
+        message=f"Devolución #{locked_return.pk} completada.",
+        store=locked_return.store,
+        user=completed_by,
+        entity=locked_return,
+        old_payload={"status": previous_return_status},
+        new_payload={
+            "status": locked_return.status,
+            "total_amount": locked_return.total_amount,
+            "completed_at": locked_return.completed_at,
+        },
+        metadata={
+            "original_sale_id": locked_sale.pk,
+            "original_sale_status_before": previous_sale_status,
+            "original_sale_status_after": locked_sale.status,
+        },
+    )
+
     # Payments realizará el reembolso y Billing la rectificativa.
     return locked_return
 
@@ -1648,6 +1719,22 @@ def cancel_sale_return(
         pos_settings=pos_settings,
     )
 
+    previous_status = locked_return.status
     locked_return.status = SaleReturnStatusChoices.CANCELLED
     locked_return.save(update_fields=["status", "updated_at"])
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_RETURN_CANCELLED,
+        module=AuditModule.SALES,
+        message=f"Devolución #{locked_return.pk} cancelada.",
+        store=locked_return.store,
+        user=cancelled_by,
+        entity=locked_return,
+        old_payload={"status": previous_status},
+        new_payload={"status": locked_return.status},
+        metadata={
+            "original_sale_id": locked_return.original_sale_id,
+            "total_amount": locked_return.total_amount,
+        },
+    )
     return locked_return
