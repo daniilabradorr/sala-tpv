@@ -764,12 +764,17 @@ def add_sale_line(
         tax_rate=tax.rate,
     )
 
+    category = current_product.category
+
     line = SaleLine(
         business=business,
         sale=locked_sale,
         product=current_product,
         product_name=current_product.name,
         sku=current_product.sku or "",
+        category_source_id=category.pk if category is not None else None,
+        category_name=category.name if category is not None else "",
+        category_slug=category.slug if category is not None else "",
         quantity=calculated["quantity"],
         unit=current_product.unit,
         unit_base_price=calculated["unit_base_price"],
