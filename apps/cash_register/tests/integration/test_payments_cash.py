@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.cash_register.models import CashMovement, CashSession
 from apps.cash_register.services import CashRegisterService
 from apps.cash_register.test_factories import (
@@ -79,6 +81,22 @@ class PaymentCashIntegrationTests(TestCase):
         self.assertEqual(self.session.expected_cash_amount, Decimal("150.00"))
         self.assertEqual(Payment.objects.filter(idempotency_key=key).count(), 1)
         self.assertEqual(CashMovement.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.PAYMENT_COMPLETED,
+                entity_id=str(payment.pk),
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=(
+                    AuditEventType.CASH_IN,
+                    AuditEventType.CASH_OUT,
+                    AuditEventType.CASH_ADJUSTED,
+                )
+            ).exists()
+        )
 
     def test_card_requires_session_but_has_no_physical_effect(self):
         payment = self.pay(method=self.card)
@@ -150,3 +168,19 @@ class PaymentCashIntegrationTests(TestCase):
         self.assertEqual(current.expected_cash_amount, Decimal("80.00"))
         self.assertEqual(Payment.objects.filter(idempotency_key=key).count(), 1)
         self.assertEqual(CashMovement.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.PAYMENT_REFUNDED,
+                entity_id=str(payment.pk),
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=(
+                    AuditEventType.CASH_IN,
+                    AuditEventType.CASH_OUT,
+                    AuditEventType.CASH_ADJUSTED,
+                )
+            ).exists()
+        )
