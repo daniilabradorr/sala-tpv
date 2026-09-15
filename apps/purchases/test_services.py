@@ -1,10 +1,14 @@
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.core.models import Business
@@ -178,6 +182,19 @@ class PurchasesServiceTests(TestCase):
                 self.make_purchase(user=user)
         with self.assertRaises(ValidationError):
             self.make_purchase(store=self.other_store)
+
+        event = AuditEvent.objects.filter(
+            event_type=AuditEventType.PURCHASE_CREATED,
+            entity_id=str(owner_purchase.pk),
+        ).get()
+        self.assertEqual(event.module, AuditModule.PURCHASES)
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.user, self.owner)
+        self.assertEqual(event.entity_type, "purchases.purchase")
+        self.assertEqual(event.new_payload, {"status": PurchaseStatusChoices.DRAFT})
+        self.assertEqual(event.metadata, {"supplier_id": self.supplier.pk})
+        self.assertNotIn("notes", event.metadata)
         with self.assertRaises(ValidationError):
             self.make_purchase(supplier=self.other_supplier)
 
@@ -357,6 +374,16 @@ class PurchasesServiceTests(TestCase):
         self.assertEqual(retried.status, PurchaseStatusChoices.ORDERED)
         self.assertIsNotNone(retried.ordered_at)
         self.assertEqual(retried.ordered_at, first_ordered_at)
+        events = AuditEvent.objects.filter(
+            event_type=AuditEventType.PURCHASE_ORDERED,
+            entity_id=str(purchase.pk),
+        )
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.old_payload, {"status": PurchaseStatusChoices.DRAFT})
+        self.assertEqual(event.new_payload["status"], PurchaseStatusChoices.ORDERED)
+        self.assertEqual(event.new_payload["ordered_at"], first_ordered_at.isoformat())
+        self.assertEqual(event.metadata["line_count"], 1)
 
     def test_order_rejects_missing_lines_and_inactive_relations(self):
         empty = self.make_purchase()
@@ -422,6 +449,12 @@ class PurchasesServiceTests(TestCase):
         )
         self.assertEqual(cancelled.status, PurchaseStatusChoices.CANCELLED)
         self.assertEqual(cancelled.ordered_at, ordered_at)
+        events = AuditEvent.objects.filter(event_type=AuditEventType.PURCHASE_CANCELLED)
+        self.assertEqual(events.count(), 2)
+        self.assertCountEqual(
+            [event.old_payload["status"] for event in events],
+            [PurchaseStatusChoices.DRAFT, PurchaseStatusChoices.ORDERED],
+        )
 
     def test_cancel_rejects_received_states_receipts_and_received_quantity(self):
         for status in (
@@ -563,6 +596,37 @@ class PurchasesServiceTests(TestCase):
         self.assertEqual(movement.purchase_receipt_line, receipt_line)
         self.assertEqual(self.product.cost_price, Decimal("3.00"))
         self.assertRegex(receipt.idempotency_fingerprint, r"^[0-9a-f]{64}$")
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.PURCHASE_RECEIVED,
+            entity_id=str(receipt.pk),
+        )
+        self.assertEqual(event.entity_type, "purchases.purchasereceipt")
+        self.assertEqual(
+            event.old_payload, {"purchase_status": PurchaseStatusChoices.ORDERED}
+        )
+        self.assertEqual(
+            event.new_payload["purchase_status"], PurchaseStatusChoices.RECEIVED
+        )
+        self.assertEqual(event.metadata["purchase_id"], purchase.pk)
+        self.assertEqual(event.metadata["line_count"], 1)
+        self.assertEqual(event.metadata["stock_movement_count"], 1)
+        self.assertTrue(event.metadata["inventory_effect_applied"])
+        self.assertTrue(event.metadata["stock_control_enabled"])
+        self.assertEqual(event.metadata["operation_id"], str(movement.operation_id))
+        serialized = repr(
+            (event.old_payload, event.new_payload, event.metadata)
+        ).lower()
+        for forbidden in ("idempotency", "fingerprint", "notes"):
+            self.assertNotIn(forbidden, serialized)
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=(
+                    AuditEventType.STOCK_INITIALIZED,
+                    AuditEventType.STOCK_ADJUSTED,
+                    AuditEventType.STOCK_ADJUSTMENT_CANCELLED,
+                )
+            ).exists()
+        )
 
     def test_partial_then_final_receipt_is_idempotent(self):
         purchase = self.make_purchase()
@@ -594,6 +658,20 @@ class PurchasesServiceTests(TestCase):
         self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
         self.assertEqual(PurchaseReceipt.objects.filter(purchase=purchase).count(), 2)
         self.assertEqual(StockMovement.objects.filter(purchase=purchase).count(), 2)
+        receipt_events = AuditEvent.objects.filter(
+            event_type=AuditEventType.PURCHASE_RECEIVED,
+            metadata__purchase_id=purchase.pk,
+        )
+        self.assertEqual(receipt_events.count(), 2)
+        self.assertEqual(
+            set(receipt_events.values_list("entity_id", flat=True)),
+            {
+                str(pk)
+                for pk in PurchaseReceipt.objects.filter(purchase=purchase).values_list(
+                    "pk", flat=True
+                )
+            },
+        )
         self.assertEqual(
             line.quantity_received,
             sum(line.receipt_lines.values_list("quantity_received", flat=True)),
@@ -999,6 +1077,13 @@ class PurchasesServiceTests(TestCase):
         self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
         self.assertFalse(InventoryItem.objects.filter(product=self.product).exists())
         self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.PURCHASE_RECEIVED,
+            entity_id=str(receipt.pk),
+        )
+        self.assertFalse(event.metadata["stock_control_enabled"])
+        self.assertFalse(event.metadata["inventory_effect_applied"])
+        self.assertEqual(event.metadata["stock_movement_count"], 0)
 
     def test_product_without_stock_tracking_still_posts_commercial_receipt(self):
         product = self.make_product(
@@ -1037,3 +1122,79 @@ class PurchasesServiceTests(TestCase):
         self.assertFalse(PurchaseReceipt.objects.filter(purchase=purchase).exists())
         self.assertFalse(PurchaseReceiptLine.objects.exists())
         self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+
+    def test_audit_failure_rolls_back_purchase_transitions(self):
+        with (
+            patch(
+                "apps.purchases.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            self.make_purchase()
+        self.assertFalse(Purchase.objects.exists())
+
+        purchase = self.make_purchase()
+        self.add_line(purchase)
+        with (
+            patch(
+                "apps.purchases.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            order_purchase(
+                business=self.business, purchase=purchase, ordered_by=self.owner
+            )
+        purchase.refresh_from_db()
+        self.assertEqual(purchase.status, PurchaseStatusChoices.DRAFT)
+        self.assertIsNone(purchase.ordered_at)
+
+        with (
+            patch(
+                "apps.purchases.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            cancel_purchase(
+                business=self.business, purchase=purchase, cancelled_by=self.owner
+            )
+        purchase.refresh_from_db()
+        self.assertEqual(purchase.status, PurchaseStatusChoices.DRAFT)
+
+    def test_receipt_audit_failure_rolls_back_all_commercial_and_stock_effects(self):
+        purchase = self.make_purchase()
+        line = self.add_line(purchase, quantity="2")
+        order_purchase(business=self.business, purchase=purchase, ordered_by=self.owner)
+        inventory = InventoryItem.objects.create(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("5.000"),
+        )
+
+        with (
+            patch(
+                "apps.purchases.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            self.receive(purchase, [{"purchase_line": line, "quantity_received": "2"}])
+
+        purchase.refresh_from_db()
+        line.refresh_from_db()
+        inventory.refresh_from_db()
+        self.assertEqual(purchase.status, PurchaseStatusChoices.ORDERED)
+        self.assertEqual(line.quantity_received, Decimal("0.000"))
+        self.assertEqual(inventory.current_stock, Decimal("5.000"))
+        self.assertFalse(PurchaseReceipt.objects.filter(purchase=purchase).exists())
+        self.assertFalse(PurchaseReceiptLine.objects.filter(receipt__purchase=purchase))
+        self.assertFalse(StockMovement.objects.filter(purchase=purchase).exists())
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.PURCHASE_RECEIVED,
+                metadata__purchase_id=purchase.pk,
+            ).exists()
+        )

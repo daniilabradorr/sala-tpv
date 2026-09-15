@@ -15,6 +15,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.catalog.models import Product
 from apps.core.models import Business
 from apps.inventory.models import (
@@ -405,6 +407,26 @@ def create_initial_stock(
             notes=notes,
         )
 
+        log_event(
+            business=locked_item.business,
+            store=locked_item.store,
+            user=user,
+            event_type=AuditEventType.STOCK_INITIALIZED,
+            module=AuditModule.INVENTORY,
+            entity=movement,
+            message=f"Stock inicial registrado para inventario #{locked_item.pk}.",
+            old_payload={"current_stock": stock_before},
+            new_payload={"current_stock": stock_after},
+            metadata={
+                "inventory_item_id": locked_item.pk,
+                "product_id": locked_item.product_id,
+                "movement_type": movement.movement_type,
+                "quantity": movement.quantity,
+                "unit_cost": movement.unit_cost,
+                "reason": movement.reason,
+            },
+        )
+
     return locked_item, movement
 
 
@@ -755,6 +777,8 @@ def confirm_stock_adjustment(
         if not locked_adjustment.is_draft:
             raise ValidationError("Solo se pueden confirmar ajustes en borrador.")
 
+        previous_status = locked_adjustment.status
+
         lines = list(
             locked_adjustment.lines.select_related(
                 "inventory_item",
@@ -766,6 +790,7 @@ def confirm_stock_adjustment(
             raise ValidationError("No puedes confirmar un ajuste sin líneas.")
 
         operation_id = uuid.uuid4()
+        movement_count = 0
 
         for line in lines:
             inventory_item = (
@@ -840,6 +865,7 @@ def confirm_stock_adjustment(
                 notes=locked_adjustment.notes,
                 operation_id=operation_id,
             )
+            movement_count += 1
 
         locked_adjustment.status = StockAdjustment.STATUS_CONFIRMED
         locked_adjustment.confirmed_at = timezone.now()
@@ -851,6 +877,28 @@ def confirm_stock_adjustment(
                 "confirmed_by",
                 "updated_at",
             ]
+        )
+
+        log_event(
+            business=locked_adjustment.business,
+            store=locked_adjustment.store,
+            user=user,
+            event_type=AuditEventType.STOCK_ADJUSTED,
+            module=AuditModule.INVENTORY,
+            entity=locked_adjustment,
+            message=f"Ajuste de stock {locked_adjustment.code} confirmado.",
+            old_payload={"status": previous_status},
+            new_payload={
+                "status": locked_adjustment.status,
+                "confirmed_at": locked_adjustment.confirmed_at,
+            },
+            metadata={
+                "code": locked_adjustment.code,
+                "reason": locked_adjustment.reason,
+                "line_count": len(lines),
+                "movement_count": movement_count,
+                "operation_id": operation_id,
+            },
         )
 
     return locked_adjustment
@@ -866,22 +914,39 @@ def cancel_stock_adjustment(
     Cancelar ajuste NO toca stock.
     """
 
-    _ = user
-
     with transaction.atomic():
-        locked_adjustment = StockAdjustment.objects.select_for_update().get(
-            pk=adjustment.pk
+        locked_adjustment = (
+            StockAdjustment.objects.select_for_update()
+            .select_related("business", "store")
+            .get(pk=adjustment.pk)
         )
 
         if not locked_adjustment.is_draft:
             raise ValidationError("Solo se pueden cancelar ajustes en borrador.")
 
+        previous_status = locked_adjustment.status
         locked_adjustment.status = StockAdjustment.STATUS_CANCELLED
         locked_adjustment.save(
             update_fields=[
                 "status",
                 "updated_at",
             ]
+        )
+
+        log_event(
+            business=locked_adjustment.business,
+            store=locked_adjustment.store,
+            user=user,
+            event_type=AuditEventType.STOCK_ADJUSTMENT_CANCELLED,
+            module=AuditModule.INVENTORY,
+            entity=locked_adjustment,
+            message=f"Ajuste de stock {locked_adjustment.code} cancelado.",
+            old_payload={"status": previous_status},
+            new_payload={"status": locked_adjustment.status},
+            metadata={
+                "code": locked_adjustment.code,
+                "reason": locked_adjustment.reason,
+            },
         )
 
     return locked_adjustment

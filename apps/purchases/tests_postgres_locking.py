@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.db import connections
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.business_config.models import POSSettings
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.purchases.models import PurchaseReceipt, PurchaseReceiptLine, Supplier
@@ -102,6 +104,12 @@ class PurchaseReceiptPostgreSQLLockingTests(TransactionTestCase):
         self.assertEqual(PurchaseReceipt.objects.count(), 1)
         self.assertEqual(PurchaseReceiptLine.objects.count(), 1)
         self.assertEqual(StockMovement.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.PURCHASE_RECEIVED
+            ).count(),
+            1,
+        )
 
     def test_concurrent_same_key_returns_one_receipt(self):
         barrier = Barrier(2)
@@ -122,3 +130,9 @@ class PurchaseReceiptPostgreSQLLockingTests(TransactionTestCase):
         self.assertEqual(PurchaseReceipt.objects.count(), 1)
         self.assertEqual(PurchaseReceiptLine.objects.count(), 1)
         self.assertEqual(StockMovement.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.PURCHASE_RECEIVED
+            ).count(),
+            1,
+        )
