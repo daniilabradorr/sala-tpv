@@ -39,6 +39,7 @@ _SECRET_MARKERS = {
 }
 _SAFE_NON_SECRET_KEYS = {
     "cashsessionid",
+    "requirepinforsensitiveactions",
 }
 
 

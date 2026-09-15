@@ -11,6 +11,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentLine,
@@ -646,7 +648,7 @@ def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_
     if raced is not None:
         return raced
     _create_lines_and_breakdowns(document=document, snapshots=snapshots)
-    return _issue_draft(
+    issued_document = _issue_draft(
         document=document,
         business=business,
         sale=sale,
@@ -654,6 +656,31 @@ def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_
         issued_by=issued_by,
         issue_moment=issue_moment,
     )
+    log_event(
+        business=business,
+        store=issued_document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_ISSUED,
+        module=AuditModule.BILLING,
+        entity=issued_document,
+        message=f"Documento fiscal #{issued_document.pk} emitido.",
+        new_payload={
+            "document_type": issued_document.document_type,
+            "status": issued_document.status,
+            "series_text": issued_document.series_text,
+            "number": issued_document.number,
+            "total_amount": issued_document.total_amount,
+            "issued_at": issued_document.issued_at,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "customer_id": issued_document.customer_id,
+            "series_id": issued_document.series_id,
+            "cash_register_id": issued_document.cash_register_id,
+            "cash_session_id": issued_document.cash_session_id,
+        },
+    )
+    return issued_document
 
 
 @transaction.atomic
@@ -750,7 +777,7 @@ def substitute_simplified_document(
         target_document=original,
         relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
     ).save()
-    return _issue_draft(
+    issued_document = _issue_draft(
         document=document,
         business=business,
         sale=sale,
@@ -758,6 +785,32 @@ def substitute_simplified_document(
         issued_by=issued_by,
         issue_moment=issue_moment,
     )
+    log_event(
+        business=business,
+        store=issued_document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+        module=AuditModule.BILLING,
+        entity=issued_document,
+        message=f"Documento fiscal #{issued_document.pk} emitido como sustitución.",
+        new_payload={
+            "document_type": issued_document.document_type,
+            "status": issued_document.status,
+            "series_text": issued_document.series_text,
+            "number": issued_document.number,
+            "total_amount": issued_document.total_amount,
+            "issued_at": issued_document.issued_at,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "customer_id": issued_document.customer_id,
+            "series_id": issued_document.series_id,
+            "target_document_id": original.pk,
+            "target_document_type": original.document_type,
+            "relation_type": BillingDocumentRelationTypeChoices.SUBSTITUTES,
+        },
+    )
+    return issued_document
 
 
 def _rectification_payload(
@@ -1380,4 +1433,32 @@ def issue_sale_return_rectification(
             issue_moment=issue_moment,
             operation_date=operation_date,
         )
+    log_event(
+        business=business,
+        store=document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED,
+        module=AuditModule.BILLING,
+        entity=document,
+        message=f"Documento fiscal #{document.pk} emitido como rectificativa.",
+        new_payload={
+            "document_type": document.document_type,
+            "status": document.status,
+            "series_text": document.series_text,
+            "number": document.number,
+            "total_amount": document.total_amount,
+            "issued_at": document.issued_at,
+            "rectification_method": document.rectification_method,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "sale_return_id": sale_return.pk,
+            "series_id": document.series_id,
+            "target_document_id": original.pk,
+            "target_document_type": original.document_type,
+            "relation_type": BillingDocumentRelationTypeChoices.RECTIFIES,
+            "companion_f3_document_id": companion.pk if companion else None,
+            "companion_f3_series_id": companion.series_id if companion else None,
+        },
+    )
     return document

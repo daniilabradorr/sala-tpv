@@ -198,6 +198,28 @@ class AuditServiceTests(AuditTestMixin, TestCase):
 
 
 class AuditSanitizerTests(AuditTestMixin, TestCase):
+    def test_preserves_pin_configuration_boolean_but_redacts_real_pins(self):
+        self.assertEqual(
+            sanitize_payload(
+                {
+                    "require_pin_for_sensitive_actions": False,
+                    "pin": "1234",
+                    "pin_hash": "hash",
+                    "employee_pin": "5678",
+                    "auth_pin": "9012",
+                    "cash_session_id": 42,
+                }
+            ),
+            {
+                "require_pin_for_sensitive_actions": False,
+                "pin": REDACTED,
+                "pin_hash": REDACTED,
+                "employee_pin": REDACTED,
+                "auth_pin": REDACTED,
+                "cash_session_id": 42,
+            },
+        )
+
     def test_preserves_cash_session_id_and_redacts_sensitive_session_keys(self):
         self.assertEqual(
             sanitize_payload(
