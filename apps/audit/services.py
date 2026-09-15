@@ -32,6 +32,8 @@ def log_event(
         raise AuditValidationError(
             f"Event {event_type!r} belongs to module {expected_module!r}, not {module!r}."
         )
+    if not isinstance(message, str) or not message.strip():
+        raise AuditValidationError("Audit event message must be a non-blank string.")
     if not isinstance(business, Business) or business.pk is None:
         raise AuditValidationError("A persisted business is required.")
     if entity is not None and (entity_type is not None or entity_id is not None):

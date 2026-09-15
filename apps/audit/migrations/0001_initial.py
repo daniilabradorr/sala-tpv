@@ -51,8 +51,8 @@ class Migration(migrations.Migration):
                     "business",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
-                        related_name="audit_auditevent_set",
-                        related_query_name="audit_auditevent",
+                        related_name="%(app_label)s_%(class)s_set",
+                        related_query_name="%(app_label)s_%(class)s",
                         to="core.business",
                     ),
                 ),

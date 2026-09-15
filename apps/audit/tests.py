@@ -89,6 +89,15 @@ class AuditServiceTests(AuditTestMixin, TestCase):
                     message="No business",
                 )
 
+    def test_message_must_be_a_non_blank_string(self):
+        for message in ("", "   ", None):
+            with self.subTest(message=message):
+                with self.assertRaises(AuditValidationError):
+                    self.event(message=message)
+
+        event = self.event(message="Sale completed")
+        self.assertEqual(event.message, "Sale completed")
+
     def test_rejects_cross_business_store_and_user(self):
         with self.assertRaises(AuditValidationError):
             self.event(store=self.other_store)
