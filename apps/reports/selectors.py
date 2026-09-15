@@ -100,6 +100,7 @@ def sales_timeseries(*, business, period, store=None, interval="day"):
         sales.annotate(bucket=TruncDay("completed_at", tzinfo=tz))
         .values("bucket")
         .annotate(gross_sales=Sum("total_amount"), ticket_count=Count("pk"))
+        .order_by()
     ):
         day = row["bucket"].date()
         buckets[day] = {
@@ -115,12 +116,14 @@ def sales_timeseries(*, business, period, store=None, interval="day"):
         .annotate(bucket=TruncDay("sale__completed_at", tzinfo=tz))
         .values("bucket")
         .annotate(total=Sum("quantity"))
+        .order_by()
     ):
         buckets[row["bucket"].date()]["units_sold"] = row["total"]
     for row in (
         returns.annotate(bucket=TruncDay("completed_at", tzinfo=tz))
         .values("bucket")
         .annotate(returns_amount=Sum("total_amount"))
+        .order_by()
     ):
         day = row["bucket"].date()
         buckets.setdefault(day, _empty_sales_bucket(day))["returns_amount"] = row[
@@ -131,6 +134,7 @@ def sales_timeseries(*, business, period, store=None, interval="day"):
         .annotate(bucket=TruncDay("return_doc__completed_at", tzinfo=tz))
         .values("bucket")
         .annotate(total=Sum("quantity"))
+        .order_by()
     ):
         buckets.setdefault(
             row["bucket"].date(), _empty_sales_bucket(row["bucket"].date())
@@ -159,22 +163,27 @@ def sales_by_store(*, business, period, store=None):
     sales = _sales(business=business, period=period, store=store)
     returns = _returns(business=business, period=period, store=store)
     rows = {}
-    for row in sales.values("store_id", "store__name").annotate(
-        gross_sales=Sum("total_amount"), ticket_count=Count("pk")
+    for row in (
+        sales.values("store_id", "store__name")
+        .annotate(gross_sales=Sum("total_amount"), ticket_count=Count("pk"))
+        .order_by()
     ):
         rows[row["store_id"]] = _store_row(row)
         rows[row["store_id"]]["gross_sales"] = row["gross_sales"]
         rows[row["store_id"]]["ticket_count"] = row["ticket_count"]
     _merge_store(
         rows,
-        returns.values("store_id", "store__name").annotate(total=Sum("total_amount")),
+        returns.values("store_id", "store__name")
+        .annotate(total=Sum("total_amount"))
+        .order_by(),
         "returns_amount",
     )
     _merge_store(
         rows,
         SaleLine.objects.filter(sale__in=sales)
         .values("sale__store_id", "sale__store__name")
-        .annotate(total=Sum("quantity")),
+        .annotate(total=Sum("quantity"))
+        .order_by(),
         "units_sold",
         sale=True,
     )
@@ -182,7 +191,8 @@ def sales_by_store(*, business, period, store=None):
         rows,
         SaleReturnLine.objects.filter(return_doc__in=returns)
         .values("return_doc__store_id", "return_doc__store__name")
-        .annotate(total=Sum("quantity")),
+        .annotate(total=Sum("quantity"))
+        .order_by(),
         "units_returned",
         returned=True,
     )
@@ -221,6 +231,7 @@ def _sales_line_breakdown(*, business, period, store, dimensions):
         SaleLine.objects.filter(sale__in=sales)
         .values(*dimensions)
         .annotate(gross_sales=Sum("line_total"), units_sold=Sum("quantity"))
+        .order_by()
     ):
         key = tuple(item[field] for field in dimensions)
         rows[key] = {
@@ -235,6 +246,7 @@ def _sales_line_breakdown(*, business, period, store, dimensions):
         SaleReturnLine.objects.filter(return_doc__in=returns)
         .values(*return_dimensions)
         .annotate(returns_amount=Sum("amount"), units_returned=Sum("quantity"))
+        .order_by()
     ):
         key = tuple(item[field] for field in return_dimensions)
         row = rows.setdefault(
@@ -508,6 +520,7 @@ def cash_sessions_summary(*, business, period, store=None):
             CashMovement.objects.filter(business=business, cash_session_id__in=totals)
             .values("cash_session_id")
             .annotate(**annotations)
+            .order_by()
         ):
             totals[row["cash_session_id"]].update(
                 {key: row[key] or ZERO_MONEY for key in annotations}
