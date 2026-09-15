@@ -41,15 +41,17 @@ class AuditTestMixin:
         cls.other_store = Store.objects.create(
             business=cls.other_business, name="Store Two", code="TWO"
         )
-        cls.user = CustomUser.objects.create(
+        cls.user = CustomUser.objects.create_user(
             business=cls.business,
             email="owner-one@example.com",
+            password="audit-test-password",
             role=RoleChoices.OWNER,
             first_name="Owner",
         )
-        cls.other_user = CustomUser.objects.create(
+        cls.other_user = CustomUser.objects.create_user(
             business=cls.other_business,
             email="owner-two@example.com",
+            password="audit-test-password",
             role=RoleChoices.OWNER,
             first_name="Other",
         )
