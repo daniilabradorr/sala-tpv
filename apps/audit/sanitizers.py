@@ -11,13 +11,11 @@ MAX_DEPTH = 5
 MAX_ITEMS = 50
 MAX_STRING_LENGTH = 2000
 
-_SECRET_KEYS = {
+_SECRET_MARKERS = {
     "password",
     "passwordhash",
     "rawpassword",
     "passwd",
-    "pin",
-    "pinhash",
     "token",
     "accesstoken",
     "refreshtoken",
@@ -43,6 +41,17 @@ _SECRET_KEYS = {
 
 def _normalized_key(key):
     return re.sub(r"[^a-z0-9]", "", key.lower())
+
+
+def _is_secret_key(key):
+    normalized = _normalized_key(key)
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    words = {word.lower() for word in re.split(r"[^a-zA-Z0-9]+", words) if word}
+    return (
+        any(marker in normalized for marker in _SECRET_MARKERS)
+        or "pin" in words
+        or "pinhash" in normalized
+    )
 
 
 def sanitize_payload(payload):
@@ -81,13 +90,13 @@ def _sanitize(value, *, depth):
         for key, item in value.items():
             if not isinstance(key, str):
                 raise AuditPayloadError("Audit object keys must be strings.")
-            if _normalized_key(key) in _SECRET_KEYS:
+            if _is_secret_key(key):
                 result[key] = REDACTED
             else:
                 result[key] = _sanitize(item, depth=depth + 1)
         return result
 
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set)):
         if len(value) > MAX_ITEMS:
             raise AuditPayloadError(
                 f"Audit list exceeds maximum item count {MAX_ITEMS}."

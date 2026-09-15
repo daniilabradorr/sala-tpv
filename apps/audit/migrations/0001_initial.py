@@ -101,7 +101,12 @@ class Migration(migrations.Migration):
                         name="audit_biz_user_idx",
                     ),
                     models.Index(
-                        fields=["business", "entity_type", "entity_id"],
+                        fields=[
+                            "business",
+                            "entity_type",
+                            "entity_id",
+                            "created_at",
+                        ],
                         name="audit_biz_entity_idx",
                     ),
                 ],
@@ -114,6 +119,8 @@ class Migration(migrations.Migration):
                         | models.Q(
                             ("entity_id__isnull", False),
                             ("entity_type__isnull", False),
+                            ~models.Q(("entity_type", "")),
+                            ~models.Q(("entity_id", "")),
                         ),
                         name="audit_entity_reference_pair",
                     )

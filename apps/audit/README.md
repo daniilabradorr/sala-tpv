@@ -13,6 +13,8 @@ Application reads must use `get_audit_events(business=...)` or the
 `AuditEvent.objects.for_business(...)` manager scope. Audit records cannot be
 updated or deleted through the model, queryset, manager or admin. `Business`,
 `Store` and `User` references are protected; a null user denotes a system event.
+Conflict-ignoring and upsert variants of `bulk_create()` are rejected as they can
+silently lose or overwrite history.
 
 Never pass model dictionaries, form data or request payloads wholesale. Build an
 explicit allowlist containing only the relevant change and never include

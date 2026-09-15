@@ -15,6 +15,28 @@ class AuditEventQuerySet(BusinessScopedQuerySet):
     def delete(self):
         raise AuditImmutableError("Audit events are append-only.")
 
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        if ignore_conflicts or update_conflicts:
+            raise AuditImmutableError(
+                "Audit bulk creation cannot ignore or update conflicting rows."
+            )
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
 
 class AuditEventManager(models.Manager.from_queryset(AuditEventQuerySet)):
     def bulk_update(self, objs, fields, batch_size=None):
@@ -54,7 +76,11 @@ class AuditEvent(BusinessOwnedModel):
             models.CheckConstraint(
                 condition=(
                     Q(entity_type__isnull=True, entity_id__isnull=True)
-                    | Q(entity_type__isnull=False, entity_id__isnull=False)
+                    | (
+                        Q(entity_type__isnull=False, entity_id__isnull=False)
+                        & ~Q(entity_type="")
+                        & ~Q(entity_id="")
+                    )
                 ),
                 name="audit_entity_reference_pair",
             )
@@ -80,7 +106,7 @@ class AuditEvent(BusinessOwnedModel):
                 name="audit_biz_user_idx",
             ),
             models.Index(
-                fields=["business", "entity_type", "entity_id"],
+                fields=["business", "entity_type", "entity_id", "created_at"],
                 name="audit_biz_entity_idx",
             ),
         ]
@@ -88,10 +114,16 @@ class AuditEvent(BusinessOwnedModel):
     def clean(self):
         super().clean()
         errors = {}
-        if bool(self.entity_type) != bool(self.entity_id):
+        entity_type_missing = self.entity_type is None
+        entity_id_missing = self.entity_id is None
+        if entity_type_missing != entity_id_missing:
             errors["entity_type"] = (
                 "Entity type and entity ID must be provided together."
             )
+        elif not entity_type_missing and (
+            not self.entity_type.strip() or not self.entity_id.strip()
+        ):
+            errors["entity_type"] = "Entity type and entity ID cannot be blank."
         if self.store_id and self.business_id:
             if self.store.business_id != self.business_id:
                 errors["store"] = "The store does not belong to the audit business."

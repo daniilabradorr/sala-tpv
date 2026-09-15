@@ -54,8 +54,12 @@ def log_event(
             "Entity type and entity ID must be provided together."
         )
     elif entity_type is not None:
-        entity_type = str(entity_type)
-        entity_id = str(entity_id)
+        entity_type = str(entity_type).strip()
+        entity_id = str(entity_id).strip()
+        if not entity_type or not entity_id:
+            raise AuditValidationError(
+                "Entity type and entity ID must be non-blank values."
+            )
 
     event = AuditEvent(
         business=business,

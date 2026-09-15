@@ -5,8 +5,9 @@ from uuid import uuid4
 
 from django.contrib import admin
 from django.contrib.auth.models import Permission
-from django.core.exceptions import ProtectedError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 
 from apps.audit.admin import AuditEventAdmin, BusinessFilter, StoreFilter, UserFilter
@@ -124,6 +125,28 @@ class AuditServiceTests(AuditTestMixin, TestCase):
         with self.assertRaises(AuditValidationError):
             self.event(entity=self.store, entity_type="stores.store", entity_id="1")
 
+    def test_rejects_blank_manual_entity_references(self):
+        for entity_type, entity_id in (
+            ("", ""),
+            ("   ", "123"),
+            ("sales.sale", "   "),
+        ):
+            with self.subTest(entity_type=entity_type, entity_id=entity_id):
+                with self.assertRaises(AuditValidationError):
+                    self.event(entity_type=entity_type, entity_id=entity_id)
+
+    def test_model_clean_rejects_blank_manual_entity_references(self):
+        event = AuditEvent(
+            business=self.business,
+            event_type=AuditEventType.SALE_COMPLETED,
+            module=AuditModule.SALES,
+            message="Invalid reference",
+            entity_type=" ",
+            entity_id="123",
+        )
+        with self.assertRaises(ValidationError):
+            event.clean()
+
     def test_database_enforces_entity_reference_pair(self):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
@@ -172,6 +195,21 @@ class AuditSanitizerTests(AuditTestMixin, TestCase):
         self.assertEqual(event.metadata["nested"]["API Key"], REDACTED)
         self.assertEqual(event.metadata["items"][1]["refreshToken"], REDACTED)
 
+    def test_redacts_prefixed_and_suffixed_secret_keys(self):
+        keys = (
+            "db_password",
+            "password_confirmation",
+            "user_password",
+            "payment_api_key",
+            "stripe_api_key",
+            "oauth_refresh_token",
+            "client_secret_value",
+            "authorization_header",
+            "session_token",
+        )
+        event = self.event(metadata={key: "sensitive" for key in keys})
+        self.assertEqual(event.metadata, {key: REDACTED for key in keys})
+
     def test_preserves_fiscal_hashes(self):
         event = self.event(metadata={"current_hash": "abc", "previous_hash": "def"})
         self.assertEqual(
@@ -192,6 +230,15 @@ class AuditSanitizerTests(AuditTestMixin, TestCase):
         self.assertEqual(event.metadata["moment"], moment.isoformat())
         self.assertEqual(event.metadata["enum"], "serializable")
         self.assertEqual(event.metadata["tuple"], [1, 2])
+
+    def test_converts_and_sanitizes_nested_sets(self):
+        event = self.event(metadata={"values": {"visible", "another"}})
+        self.assertCountEqual(event.metadata["values"], ["visible", "another"])
+
+        with self.assertRaises(AuditPayloadError):
+            self.event(metadata={"values": set(range(MAX_ITEMS + 1))})
+        with self.assertRaises(AuditPayloadError):
+            self.event(metadata={"values": {object()}})
 
     def test_none_payloads_remain_null(self):
         event = self.event()
@@ -235,6 +282,35 @@ class AuditImmutabilityTests(AuditTestMixin, TestCase):
         event.message = "Changed"
         with self.assertRaises(AuditImmutableError):
             AuditEvent.objects.bulk_update([event], ["message"])
+
+    def test_bulk_create_cannot_upsert_or_ignore_conflicts(self):
+        event = self.event()
+        replacement = AuditEvent(
+            pk=event.pk,
+            business=self.business,
+            event_type=event.event_type,
+            module=event.module,
+            message="Changed by upsert",
+        )
+        with self.assertRaises(AuditImmutableError):
+            AuditEvent.objects.bulk_create(
+                [replacement],
+                update_conflicts=True,
+                update_fields=["message"],
+                unique_fields=["pk"],
+            )
+        event.refresh_from_db()
+        self.assertEqual(event.message, "Sale completed")
+
+        with self.assertRaises(AuditImmutableError):
+            AuditEvent.objects.bulk_create([replacement], ignore_conflicts=True)
+        with self.assertRaises(AuditImmutableError):
+            AuditEvent.objects.all().bulk_create(
+                [replacement],
+                update_conflicts=True,
+                update_fields=["message"],
+                unique_fields=["pk"],
+            )
 
     def test_user_and_store_are_protected(self):
         self.event()
