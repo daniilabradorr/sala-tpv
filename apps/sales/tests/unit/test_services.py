@@ -9,6 +9,7 @@ from django.test import TestCase
 from apps.audit.constants import AuditEventType
 from apps.audit.exceptions import AuditValidationError
 from apps.audit.models import AuditEvent
+from apps.catalog.models import Category
 from apps.inventory.models import StockMovement
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
@@ -165,6 +166,64 @@ class SaleServicesTests(TestCase):
         self.assertEqual(sale.tax_amount, Decimal("3.78"))
         self.assertEqual(sale.total_amount, Decimal("21.78"))
         self.assertEqual(sale.pending_amount, Decimal("21.78"))
+
+    def test_add_line_freezes_category_snapshot(self):
+        category = Category.objects.create(
+            business=self.business,
+            name="Cafés",
+            slug="cafes",
+        )
+        self.product.category = category
+        self.product.save()
+
+        line = self.add_basic_line(self.open_basic_sale())
+
+        self.assertEqual(line.category_source_id, category.pk)
+        self.assertEqual(line.category_name, "Cafés")
+        self.assertEqual(line.category_slug, "cafes")
+
+    def test_category_edits_and_product_move_do_not_rewrite_snapshot(self):
+        original = Category.objects.create(
+            business=self.business,
+            name="Cafés",
+            slug="cafes",
+        )
+        replacement = Category.objects.create(
+            business=self.business,
+            name="Desayunos",
+            slug="desayunos",
+        )
+        self.product.category = original
+        self.product.save()
+        sale = self.open_basic_sale()
+        first_line = self.add_basic_line(sale)
+
+        original.name = "Café renombrado"
+        original.slug = "cafe-renombrado"
+        original.save()
+        self.product.category = replacement
+        self.product.save()
+        first_line.refresh_from_db()
+
+        self.assertEqual(first_line.category_source_id, original.pk)
+        self.assertEqual(first_line.category_name, "Cafés")
+        self.assertEqual(first_line.category_slug, "cafes")
+
+        second_line = self.add_basic_line(sale)
+        self.assertEqual(second_line.category_source_id, replacement.pk)
+        self.assertEqual(second_line.category_name, "Desayunos")
+        self.assertEqual(second_line.category_slug, "desayunos")
+        first_line.refresh_from_db()
+        self.assertEqual(first_line.category_name, "Cafés")
+
+    def test_add_line_without_category_stores_empty_snapshot(self):
+        self.assertIsNone(self.product.category)
+
+        line = self.add_basic_line(self.open_basic_sale())
+
+        self.assertIsNone(line.category_source_id)
+        self.assertEqual(line.category_name, "")
+        self.assertEqual(line.category_slug, "")
 
     def test_tax_and_product_changes_do_not_rewrite_line_snapshot(self):
         sale = self.open_basic_sale()
