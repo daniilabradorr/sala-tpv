@@ -133,7 +133,7 @@ class CashRegisterServiceTests(TestCase):
                 {
                     "cash_session_id": self.session.pk,
                     "cash_register_id": self.register.pk,
-                    "movement_type": movement.movement_type,
+                    "movement_type": movement.movement_type.value,
                     "adjustment_direction": adjustment_direction,
                     "amount": str(movement.amount),
                     "balance_after": str(movement.balance_after),
