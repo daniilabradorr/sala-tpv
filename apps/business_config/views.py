@@ -30,7 +30,9 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
         profile = get_object_or_404(BusinessProfile, business=business)
         form = BusinessProfileForm(data=request.POST, instance=profile)
         if form.is_valid():
-            update_business_profile(business=business, **form.cleaned_data)
+            update_business_profile(
+                business=business, updated_by=request.user, **form.cleaned_data
+            )
             messages.success(request, "Datos de empresa actualizados correctamente.")
             return redirect("business_config:profile")
         return render(request, self.template_name, {"form": form})
@@ -59,7 +61,9 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
         settings = get_object_or_404(POSSettings, business=business)
         form = POSSettingsForm(data=request.POST, instance=settings)
         if form.is_valid():
-            update_pos_settings(business=business, **form.cleaned_data)
+            update_pos_settings(
+                business=business, updated_by=request.user, **form.cleaned_data
+            )
             messages.success(
                 request, "Configuración del TPV actualizada correctamente."
             )

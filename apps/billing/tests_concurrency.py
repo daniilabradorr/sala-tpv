@@ -7,6 +7,8 @@ from django.db import connections
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentRelation,
@@ -112,6 +114,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         failure = next(value for success, value in results if not success)
         self.assertIsInstance(failure, BillingAlreadyIssued)
         self.assertEqual(BillingDocument.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
 
@@ -128,6 +136,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             set(BillingDocument.objects.values_list("number", flat=True)), {1, 2}
         )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            2,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 2)
 
@@ -141,6 +155,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertTrue(all(success for success, _ in results))
         self.assertEqual(
             {result for _, result in results}, {BillingDocument.objects.get().pk}
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
         )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
@@ -158,6 +178,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(len(failures), 1)
         self.assertIsInstance(failures[0], BillingIdempotencyConflict)
         self.assertEqual(BillingDocument.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
 
@@ -222,6 +248,12 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             BillingDocument.objects.filter(sale_return=return_doc).count(), 1
         )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
         self.rectification_series.refresh_from_db()
         self.assertEqual(self.rectification_series.current_number, 1)
 
@@ -237,6 +269,12 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertEqual(sum(success for success, _ in results), 1)
         failure = next(value for success, value in results if not success)
         self.assertIsInstance(failure, BillingAlreadyIssued)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
         self.rectification_series.refresh_from_db()
         self.assertEqual(self.rectification_series.current_number, 1)
 
@@ -371,6 +409,21 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertFalse(
             BillingDocument.objects.filter(
                 status=BillingDocumentStatusChoices.DRAFT
+            ).exists()
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                entity_id=str(companion.pk),
+                event_type__in=[
+                    AuditEventType.BILLING_DOCUMENT_ISSUED,
+                    AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+                ],
             ).exists()
         )
 

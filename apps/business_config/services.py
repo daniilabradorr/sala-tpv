@@ -1,7 +1,10 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.core.exceptions import PermissionDenied
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import BusinessProfile, POSSettings
 
 
@@ -36,6 +39,22 @@ POS_SETTINGS_EDITABLE_FIELDS = (
     "allow_split_payments",
     "require_pin_for_sensitive_actions",
 )
+BUSINESS_PROFILE_AUDIT_VALUE_FIELDS = (
+    "trade_name",
+    "country_code",
+    "currency_code",
+    "brand_name",
+)
+
+
+def _validate_actor(*, business, updated_by):
+    if (
+        updated_by is None
+        or not updated_by.is_authenticated
+        or not updated_by.is_active
+        or (not updated_by.is_superuser and updated_by.business_id != business.pk)
+    ):
+        raise PermissionDenied("El actor no puede actualizar este negocio.")
 
 
 @transaction.atomic
@@ -102,8 +121,9 @@ def create_business_configuration(
 
 
 @transaction.atomic
-def update_business_profile(*, business, **profile_data):
+def update_business_profile(*, business, updated_by, **profile_data):
     """Update the editable profile fields for one explicitly supplied business."""
+    _validate_actor(business=business, updated_by=updated_by)
     for field_name in ("country_code", "tax_identifier"):
         if field_name in profile_data:
             profile_data[field_name] = profile_data[field_name].strip().upper()
@@ -111,23 +131,84 @@ def update_business_profile(*, business, **profile_data):
     profile = (
         BusinessProfile.objects.select_for_update().filter(business=business).get()
     )
+    old_values = {
+        field_name: getattr(profile, field_name)
+        for field_name in BUSINESS_PROFILE_EDITABLE_FIELDS
+    }
 
     for field_name in BUSINESS_PROFILE_EDITABLE_FIELDS:
         if field_name in profile_data:
             setattr(profile, field_name, profile_data[field_name])
 
     profile.save(update_fields=(*BUSINESS_PROFILE_EDITABLE_FIELDS, "updated_at"))
+    new_values = {
+        field_name: getattr(profile, field_name)
+        for field_name in BUSINESS_PROFILE_EDITABLE_FIELDS
+    }
+    changed_fields = [
+        field_name
+        for field_name in BUSINESS_PROFILE_EDITABLE_FIELDS
+        if old_values[field_name] != new_values[field_name]
+    ]
+    if changed_fields:
+        value_fields = [
+            field_name
+            for field_name in changed_fields
+            if field_name in BUSINESS_PROFILE_AUDIT_VALUE_FIELDS
+        ]
+        log_event(
+            business=business,
+            store=None,
+            user=updated_by,
+            entity=profile,
+            event_type=AuditEventType.BUSINESS_CONFIG_CHANGED,
+            module=AuditModule.BUSINESS_CONFIG,
+            message="Perfil del negocio actualizado.",
+            old_payload={field: old_values[field] for field in value_fields} or None,
+            new_payload={field: new_values[field] for field in value_fields} or None,
+            metadata={
+                "config_type": "business_profile",
+                "changed_fields": changed_fields,
+            },
+        )
     return profile
 
 
 @transaction.atomic
-def update_pos_settings(*, business, **settings_data):
+def update_pos_settings(*, business, updated_by, **settings_data):
     """Update only editable POS settings for the explicitly supplied business."""
+    _validate_actor(business=business, updated_by=updated_by)
     settings = POSSettings.objects.select_for_update().get(business=business)
+    old_values = {
+        field_name: getattr(settings, field_name)
+        for field_name in POS_SETTINGS_EDITABLE_FIELDS
+    }
 
     for field_name in POS_SETTINGS_EDITABLE_FIELDS:
         if field_name in settings_data:
             setattr(settings, field_name, settings_data[field_name])
 
     settings.save(update_fields=(*POS_SETTINGS_EDITABLE_FIELDS, "updated_at"))
+    new_values = {
+        field_name: getattr(settings, field_name)
+        for field_name in POS_SETTINGS_EDITABLE_FIELDS
+    }
+    changed_fields = [
+        field_name
+        for field_name in POS_SETTINGS_EDITABLE_FIELDS
+        if old_values[field_name] != new_values[field_name]
+    ]
+    if changed_fields:
+        log_event(
+            business=business,
+            store=None,
+            user=updated_by,
+            entity=settings,
+            event_type=AuditEventType.BUSINESS_CONFIG_CHANGED,
+            module=AuditModule.BUSINESS_CONFIG,
+            message="Configuración del TPV actualizada.",
+            old_payload={field: old_values[field] for field in changed_fields},
+            new_payload={field: new_values[field] for field in changed_fields},
+            metadata={"config_type": "pos_settings", "changed_fields": changed_fields},
+        )
     return settings

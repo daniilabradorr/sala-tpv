@@ -6,6 +6,9 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentLine,
@@ -126,6 +129,48 @@ class BillingEmissionServiceTests(TestCase):
         )
         series.refresh_from_db()
         self.assertEqual(series.current_number, 26)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+        )
+        self.assertEqual(event.module, AuditModule.BILLING)
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.entity_type, "billing.billingdocument")
+        self.assertEqual(event.entity_id, str(document.pk))
+        self.assertIsNone(event.old_payload)
+        self.assertEqual(
+            event.new_payload,
+            {
+                "document_type": document.document_type,
+                "status": document.status,
+                "series_text": document.series_text,
+                "number": document.number,
+                "total_amount": str(document.total_amount),
+                "issued_at": document.issued_at.isoformat(),
+            },
+        )
+        self.assertEqual(
+            event.metadata,
+            {
+                "sale_id": sale.pk,
+                "customer_id": None,
+                "series_id": series.pk,
+                "cash_register_id": sale.cash_register_id,
+                "cash_session_id": sale.cash_session_id,
+            },
+        )
+        serialized = f"{event.new_payload!r}{event.metadata!r}"
+        for forbidden in (
+            "idempotency_key",
+            "idempotency_fingerprint",
+            "issuer_tax_identifier",
+            "recipient_tax_identifier",
+            "address",
+            "lines",
+            "tax_breakdowns",
+        ):
+            self.assertNotIn(forbidden, serialized)
 
     def test_none_maps_to_f2_and_invoice_maps_to_f1_customer_snapshot(self):
         none_sale = self.make_sale(RequestedDocumentTypeChoices.NONE)
@@ -167,6 +212,13 @@ class BillingEmissionServiceTests(TestCase):
         first = self.issue(sale, series, key)
         retry = self.issue(sale, series, key)
         self.assertEqual(retry.pk, first.pk)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED,
+                entity_id=str(first.pk),
+            ).count(),
+            1,
+        )
         series.refresh_from_db()
         self.assertEqual(series.current_number, 1)
         other_series = self.make_series(BillingDocumentTypeChoices.F2, prefix="TCK-ALT")
@@ -371,6 +423,29 @@ class BillingEmissionServiceTests(TestCase):
             idempotency_key=key,
         )
         self.assertEqual(historical_retry.pk, f3.pk)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+            entity_id=str(f3.pk),
+        )
+        self.assertEqual(event.entity_type, "billing.billingdocument")
+        self.assertEqual(event.metadata["target_document_id"], f2.pk)
+        self.assertEqual(
+            event.metadata["relation_type"],
+            BillingDocumentRelationTypeChoices.SUBSTITUTES,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED,
+                entity_id=str(f3.pk),
+            ).exists()
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+                entity_id=str(f3.pk),
+            ).count(),
+            1,
+        )
 
     def test_f3_invalid_customer_references_are_controlled(self):
         sale = self.make_sale()
@@ -639,6 +714,23 @@ class BillingEmissionServiceTests(TestCase):
         self.assertFalse(BillingDocumentLine.objects.exists())
         self.assertFalse(BillingTaxBreakdown.objects.exists())
 
+    def test_audit_failure_rolls_back_document_children_and_series(self):
+        sale = self.make_sale()
+        series = self.make_series(BillingDocumentTypeChoices.F2, current_number=7)
+        with (
+            patch(
+                "apps.billing.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            self.issue(sale, series)
+        series.refresh_from_db()
+        self.assertEqual(series.current_number, 7)
+        self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
+        self.assertFalse(BillingDocumentLine.objects.exists())
+        self.assertFalse(BillingTaxBreakdown.objects.exists())
+
     def test_f3_failure_after_numbering_rolls_back_new_history_only(self):
         sale = self.make_sale()
         f2 = self.issue(sale, self.make_series(BillingDocumentTypeChoices.F2))
@@ -676,6 +768,36 @@ class BillingEmissionServiceTests(TestCase):
         self.assertTrue(BillingDocument.objects.filter(pk=f2.pk).exists())
         self.assertEqual(BillingDocumentLine.objects.count(), baseline_lines)
         self.assertEqual(BillingTaxBreakdown.objects.count(), baseline_taxes)
+        self.assertFalse(BillingDocumentRelation.objects.exists())
+
+    def test_substitution_audit_failure_rolls_back_f3_relation_and_series(self):
+        sale = self.make_sale()
+        f2 = self.issue(sale, self.make_series(BillingDocumentTypeChoices.F2))
+        customer = create_sales_customer(
+            business=self.business, tax_identifier="B55555555"
+        )
+        series = self.make_series(
+            BillingDocumentTypeChoices.F3, current_number=4, prefix="SUSAUD"
+        )
+        with (
+            patch(
+                "apps.billing.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            substitute_simplified_document(
+                business=self.business,
+                sale_id=sale.pk,
+                customer=customer,
+                series_id=series.pk,
+                issued_by=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+        series.refresh_from_db()
+        self.assertEqual(series.current_number, 4)
+        self.assertEqual(BillingDocument.objects.filter(sale=sale).count(), 1)
+        self.assertTrue(BillingDocument.objects.filter(pk=f2.pk).exists())
         self.assertFalse(BillingDocumentRelation.objects.exists())
 
     def test_issued_history_is_immutable(self):

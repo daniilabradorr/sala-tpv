@@ -6,6 +6,9 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentRelationTypeChoices,
@@ -191,6 +194,15 @@ class SaleReturnRectificationTests(TestCase):
         self.assertEqual(line.product_name, original.lines.get().product_name)
         self.assert_fiscal_invariants(line)
         self.assertLess(rectification.tax_breakdowns.get().taxable_base_amount, 0)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+        )
+        self.assertEqual(event.entity_type, "billing.billingdocument")
+        self.assertEqual(event.entity_id, str(rectification.pk))
+        self.assertEqual(event.metadata["sale_id"], sale.pk)
+        self.assertEqual(event.metadata["sale_return_id"], return_doc.pk)
+        self.assertEqual(event.metadata["target_document_id"], original.pk)
+        self.assertEqual(event.metadata["relation_type"], "rectifies")
 
     def test_f2_return_issues_r5_and_retry_does_not_consume_number(self):
         sale, sale_line = self.completed_sale()
@@ -225,6 +237,13 @@ class SaleReturnRectificationTests(TestCase):
         self.assertEqual(first.outgoing_relations.get().target_document_id, original.pk)
         series.refresh_from_db()
         self.assertEqual(series.current_number, 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED,
+                entity_id=str(first.pk),
+            ).count(),
+            1,
+        )
 
     def test_f2_f3_return_issues_and_validates_companion_f3_on_retry(self):
         sale, sale_line = self.completed_sale()
@@ -286,6 +305,54 @@ class SaleReturnRectificationTests(TestCase):
             (r5_series.current_number, companion_series.current_number), (1, 1)
         )
         self.assertEqual(r5.outgoing_relations.get().target_document_id, original.pk)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED,
+            entity_id=str(r5.pk),
+        )
+        self.assertEqual(event.metadata["companion_f3_document_id"], companion.pk)
+        self.assertEqual(event.metadata["companion_f3_series_id"], companion_series.pk)
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                entity_id=str(companion.pk),
+                event_type__in=[
+                    AuditEventType.BILLING_DOCUMENT_ISSUED,
+                    AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+                ],
+            ).exists()
+        )
+
+    def test_rectification_audit_failure_rolls_back_document_and_relation(self):
+        sale, sale_line = self.completed_sale()
+        self.issue_original(sale, BillingDocumentTypeChoices.F2)
+        return_doc = self.completed_return(sale, sale_line)
+        series = self.series(BillingDocumentTypeChoices.R5, "R5AUD")
+        with (
+            patch(
+                "apps.billing.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            issue_sale_return_rectification(
+                business=self.business,
+                sale_return_id=return_doc.pk,
+                series_id=series.pk,
+                issued_by=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+        series.refresh_from_db()
+        return_doc.refresh_from_db()
+        self.assertEqual(series.current_number, 0)
+        self.assertIsNone(return_doc.original_billing_document_id)
+        self.assertFalse(
+            BillingDocument.objects.filter(sale_return=return_doc).exists()
+        )
+        self.assertFalse(
+            BillingDocument.objects.filter(
+                outgoing_relations__relation_type="rectifies",
+                sale_return=return_doc,
+            ).exists()
+        )
 
     def test_partial_allocation_finds_tax_consistent_base_for_review_case(self):
         sale, sale_line = self.completed_sale(quantity=Decimal("2.000"))
@@ -361,24 +428,12 @@ class SaleReturnRectificationTests(TestCase):
         return_doc = self.completed_return(sale, sale_line)
         r5_series = self.series(BillingDocumentTypeChoices.R5, "R5ROLL")
         f3_series = self.series(BillingDocumentTypeChoices.F3, "F3ROLL")
-        from apps.billing import services
-
-        real_finalize = services._finalize_return_document
-        calls = 0
-
-        def fail_after_companion_numbering(**kwargs):
-            nonlocal calls
-            calls += 1
-            real_finalize(**kwargs)
-            if calls == 2:
-                raise BillingUnsupportedFiscalCase("Fallo inyectado tras numeración.")
-
         with (
             patch(
-                "apps.billing.services._finalize_return_document",
-                side_effect=fail_after_companion_numbering,
+                "apps.billing.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
             ),
-            self.assertRaises(BillingUnsupportedFiscalCase),
+            self.assertRaises(AuditValidationError),
         ):
             issue_sale_return_rectification(
                 business=self.business,
@@ -395,6 +450,12 @@ class SaleReturnRectificationTests(TestCase):
         self.assertIsNone(return_doc.original_billing_document_id)
         self.assertFalse(
             BillingDocument.objects.filter(sale_return=return_doc).exists()
+        )
+        self.assertFalse(
+            BillingDocument.objects.filter(
+                outgoing_relations__relation_type__in=["rectifies", "substitutes"],
+                sale_return=return_doc,
+            ).exists()
         )
 
     def test_impossible_amount_fails_closed_and_rolls_back_anchor(self):
