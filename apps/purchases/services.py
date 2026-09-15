@@ -18,6 +18,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.core.models import Business
@@ -430,6 +432,18 @@ def create_purchase(*, business, store, supplier, created_by, reference="", note
         total_amount=ZERO_MONEY,
     )
     purchase.save()
+    log_event(
+        business=business,
+        store=current_store,
+        user=created_by,
+        event_type=AuditEventType.PURCHASE_CREATED,
+        module=AuditModule.PURCHASES,
+        entity=purchase,
+        message=f"Compra #{purchase.pk} creada.",
+        old_payload=None,
+        new_payload={"status": purchase.status},
+        metadata={"supplier_id": purchase.supplier_id},
+    )
     return purchase
 
 
@@ -558,6 +572,7 @@ def order_purchase(*, business, purchase, ordered_by):
         return locked
     if locked.status != PurchaseStatusChoices.DRAFT:
         raise ValidationError("La compra no puede pasar al estado ordered.")
+    previous_status = locked.status
     if not locked.supplier.is_active:
         raise ValidationError({"supplier": "El proveedor debe estar activo."})
 
@@ -581,6 +596,24 @@ def order_purchase(*, business, purchase, ordered_by):
     locked.status = PurchaseStatusChoices.ORDERED
     locked.ordered_at = timezone.now()
     locked.save(update_fields=["status", "ordered_at", "updated_at"])
+    log_event(
+        business=business,
+        store=locked.store,
+        user=ordered_by,
+        event_type=AuditEventType.PURCHASE_ORDERED,
+        module=AuditModule.PURCHASES,
+        entity=locked,
+        message=f"Compra #{locked.pk} pedida.",
+        old_payload={"status": previous_status},
+        new_payload={
+            "status": locked.status,
+            "ordered_at": locked.ordered_at,
+            "subtotal_amount": locked.subtotal_amount,
+            "tax_amount": locked.tax_amount,
+            "total_amount": locked.total_amount,
+        },
+        metadata={"supplier_id": locked.supplier_id, "line_count": len(lines)},
+    )
     return locked
 
 
@@ -604,8 +637,24 @@ def cancel_purchase(*, business, purchase, cancelled_by):
         raise ValidationError("Una compra con recepciones no se puede cancelar.")
     if locked.lines.filter(quantity_received__gt=ZERO_QUANTITY).exists():
         raise ValidationError("Una compra con mercancía recibida no se puede cancelar.")
+    previous_status = locked.status
     locked.status = PurchaseStatusChoices.CANCELLED
     locked.save(update_fields=["status", "updated_at"])
+    log_event(
+        business=business,
+        store=locked.store,
+        user=cancelled_by,
+        event_type=AuditEventType.PURCHASE_CANCELLED,
+        module=AuditModule.PURCHASES,
+        entity=locked,
+        message=f"Compra #{locked.pk} cancelada.",
+        old_payload={"status": previous_status},
+        new_payload={"status": locked.status},
+        metadata={
+            "supplier_id": locked.supplier_id,
+            "total_amount": locked.total_amount,
+        },
+    )
     return locked
 
 
@@ -645,6 +694,8 @@ def register_purchase_receipt(
     )
     if existing is not None:
         return existing
+
+    previous_purchase_status = locked_purchase.status
 
     if locked_purchase.status not in {
         PurchaseStatusChoices.ORDERED,
@@ -743,6 +794,7 @@ def register_purchase_receipt(
     operation_id = _purchase_receipt_operation_id(
         business_id=business.pk, receipt_id=receipt.pk
     )
+    stock_movement_count = 0
     for locked_line, quantity in requested:
         receipt_line = PurchaseReceiptLine.objects.create(
             business=business,
@@ -752,7 +804,7 @@ def register_purchase_receipt(
         )
         inventory_item = inventory_by_product_id.get(locked_line.product_id)
         if inventory_item is not None:
-            increase_stock(
+            _inventory_item, _movement = increase_stock(
                 inventory_item=inventory_item,
                 quantity=receipt_line.quantity_received,
                 movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
@@ -767,6 +819,7 @@ def register_purchase_receipt(
                 purchase_receipt_line=receipt_line,
                 occurred_at=receipt.received_at,
             )
+            stock_movement_count += 1
         locked_line.quantity_received = _quantity(
             locked_line.quantity_received + quantity
         )
@@ -778,4 +831,27 @@ def register_purchase_receipt(
         else PurchaseStatusChoices.PARTIALLY_RECEIVED
     )
     locked_purchase.save(update_fields=["status", "updated_at"])
+    log_event(
+        business=business,
+        store=current_store,
+        user=received_by,
+        event_type=AuditEventType.PURCHASE_RECEIVED,
+        module=AuditModule.PURCHASES,
+        entity=receipt,
+        message=f"Recepción de compra #{receipt.pk} registrada.",
+        old_payload={"purchase_status": previous_purchase_status},
+        new_payload={
+            "purchase_status": locked_purchase.status,
+            "received_at": receipt.received_at,
+        },
+        metadata={
+            "purchase_id": locked_purchase.pk,
+            "supplier_id": locked_purchase.supplier_id,
+            "line_count": len(requested),
+            "stock_control_enabled": pos_settings.enable_stock_control,
+            "inventory_effect_applied": stock_movement_count > 0,
+            "stock_movement_count": stock_movement_count,
+            "operation_id": operation_id,
+        },
+    )
     return receipt

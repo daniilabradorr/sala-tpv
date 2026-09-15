@@ -8,6 +8,9 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.inventory.models import StockAdjustment, StockAdjustmentLine, StockMovement
 from apps.inventory.services import (
     add_stock_adjustment_line,
@@ -78,6 +81,20 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(updated_item.current_stock, Decimal("10.000"))
         self.assertEqual(movement.movement_type, StockMovement.TYPE_INITIAL)
         self.assertEqual(movement.quantity, Decimal("10.000"))
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_INITIALIZED)
+        self.assertEqual(event.module, AuditModule.INVENTORY)
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.entity_type, "inventory.stockmovement")
+        self.assertEqual(event.entity_id, str(movement.pk))
+        self.assertEqual(event.old_payload, {"current_stock": "0.000"})
+        self.assertEqual(event.new_payload, {"current_stock": "10.000"})
+        self.assertEqual(event.metadata["inventory_item_id"], self.item.pk)
+        self.assertEqual(event.metadata["product_id"], self.product.pk)
+        self.assertEqual(event.metadata["movement_type"], movement.movement_type)
+        self.assertEqual(event.metadata["quantity"], "10.000")
+        self.assertNotIn("notes", event.metadata)
 
     def test_confirm_stock_adjustment_applies_counted_stock_and_creates_movement(self):
         """Confirmar ajuste debe aplicar stock contado y crear movimiento."""
@@ -115,6 +132,18 @@ class InventoryServicesTests(TestCase):
                 quantity=Decimal("3.000"),
             ).exists()
         )
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_ADJUSTED)
+        self.assertEqual(event.entity_type, "inventory.stockadjustment")
+        self.assertEqual(event.entity_id, str(adjustment.pk))
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.old_payload, {"status": StockAdjustment.STATUS_DRAFT})
+        self.assertEqual(event.new_payload["status"], StockAdjustment.STATUS_CONFIRMED)
+        self.assertIsNotNone(event.new_payload["confirmed_at"])
+        self.assertEqual(event.metadata["line_count"], 1)
+        self.assertEqual(event.metadata["movement_count"], 1)
+        self.assertTrue(event.metadata["operation_id"])
+        self.assertNotIn("lines", event.metadata)
+        self.assertNotIn("notes", event.metadata)
 
     def test_cancel_stock_adjustment_changes_status_to_cancelled(self):
         """Cancelar ajuste en borrador debe pasar a estado cancelado."""
@@ -131,6 +160,15 @@ class InventoryServicesTests(TestCase):
         )
 
         self.assertEqual(cancelled.status, StockAdjustment.STATUS_CANCELLED)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.STOCK_ADJUSTMENT_CANCELLED
+        )
+        self.assertEqual(event.old_payload, {"status": StockAdjustment.STATUS_DRAFT})
+        self.assertEqual(
+            event.new_payload, {"status": StockAdjustment.STATUS_CANCELLED}
+        )
+        self.assertEqual(event.metadata["code"], adjustment.code)
+        self.assertNotIn("notes", event.metadata)
 
     def test_cancel_stock_adjustment_rejects_non_draft_adjustment(self):
         """Cancelar un ajuste no borrador debe lanzar ValidationError."""
@@ -881,3 +919,104 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(movement.stock_after, Decimal("2.000"))
         self.assertEqual(line.system_stock, Decimal("-3.000"))
         self.assertEqual(line.difference, Decimal("5.000"))
+
+    def test_zero_difference_adjustment_audits_without_movement(self):
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            notes="no auditar",
+            user=self.user,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("0.000"),
+        )
+
+        confirm_stock_adjustment(adjustment=adjustment, user=self.user)
+
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_ADJUSTED)
+        self.assertEqual(event.metadata["movement_count"], 0)
+        self.assertFalse(
+            StockMovement.objects.filter(
+                stock_adjustment_line__adjustment=adjustment
+            ).exists()
+        )
+
+    def test_stock_audit_failures_roll_back_each_operation(self):
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            create_initial_stock(
+                inventory_item=self.item, quantity=Decimal("2.000"), user=self.user
+            )
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.current_stock, Decimal("0.000"))
+        self.assertFalse(StockMovement.objects.exists())
+
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.user,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("3.000"),
+        )
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            confirm_stock_adjustment(adjustment=adjustment, user=self.user)
+        adjustment.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertIsNone(adjustment.confirmed_at)
+        self.assertIsNone(adjustment.confirmed_by)
+        self.assertEqual(self.item.current_stock, Decimal("0.000"))
+        self.assertFalse(StockMovement.objects.exists())
+
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            cancel_stock_adjustment(adjustment=adjustment, user=self.user)
+        adjustment.refresh_from_db()
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(AuditEvent.objects.exists())
+
+    def test_generic_stock_mutations_do_not_create_inventory_audit(self):
+        increase_stock(
+            inventory_item=self.item,
+            quantity=Decimal("2.000"),
+            movement_type=StockMovement.TYPE_ADJUSTMENT_IN,
+            user=self.user,
+        )
+        decrease_stock(
+            inventory_item=self.item,
+            quantity=Decimal("1.000"),
+            movement_type=StockMovement.TYPE_ADJUSTMENT_OUT,
+            user=self.user,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=(
+                    AuditEventType.STOCK_INITIALIZED,
+                    AuditEventType.STOCK_ADJUSTED,
+                    AuditEventType.STOCK_ADJUSTMENT_CANCELLED,
+                )
+            ).exists()
+        )
