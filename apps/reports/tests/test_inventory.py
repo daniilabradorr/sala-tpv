@@ -12,6 +12,13 @@ from apps.inventory.tests.factories import (
     create_inventory_product,
     create_inventory_store,
 )
+from apps.purchases.models import (
+    Purchase,
+    PurchaseLine,
+    PurchaseReceipt,
+    PurchaseReceiptLine,
+    Supplier,
+)
 from apps.reports.periods import ReportPeriod
 from apps.reports.selectors import inventory_movements_summary, inventory_summary
 
@@ -34,7 +41,15 @@ class InventoryReportTests(TestCase):
         )
 
     def _movement(
-        self, item, movement_type, *, when=None, before="0", after=None, quantity="1"
+        self,
+        item,
+        movement_type,
+        *,
+        when=None,
+        before="0",
+        after=None,
+        quantity="1",
+        **relations,
     ):
         before = Decimal(before)
         quantity = Decimal(quantity)
@@ -57,6 +72,7 @@ class InventoryReportTests(TestCase):
                     stock_after=Decimal(after),
                     occurred_at=when or datetime(2026, 9, 10, tzinfo=UTC),
                     created_by=self.user,
+                    **relations,
                 )
             ]
         )
@@ -114,7 +130,9 @@ class InventoryReportTests(TestCase):
 
     def test_current_summary_scope(self):
         self._item("Centro", current_stock=Decimal("1"))
-        other_store = create_inventory_store(business=self.business)
+        other_store = create_inventory_store(
+            business=self.business, name="Tienda Inventario Norte"
+        )
         product = create_inventory_product(business=self.business, name="Norte")
         create_inventory_item(
             business=self.business, store=other_store, product=product
@@ -142,7 +160,6 @@ class InventoryReportTests(TestCase):
         second = self._item("Té")
         expected = {
             "initial": "incoming",
-            "purchase_receipt": "incoming",
             "sale_return": "incoming",
             "adjustment_in": "incoming",
             "transfer_in": "incoming",
@@ -154,9 +171,52 @@ class InventoryReportTests(TestCase):
         }
         for movement_type in expected:
             self._movement(first, movement_type)
+        supplier = Supplier.objects.create(business=self.business, name="Proveedor")
+        purchase = Purchase.objects.create(
+            business=self.business,
+            store=self.store,
+            supplier=supplier,
+            created_by=self.user,
+            status="ordered",
+            ordered_at=self.period.start,
+        )
+        purchase_line = PurchaseLine.objects.create(
+            business=self.business,
+            purchase=purchase,
+            product=first.product,
+            product_name=first.product.name,
+            sku=first.product.sku,
+            unit=first.product.unit,
+            quantity_ordered=Decimal("1"),
+            unit_cost=Decimal("1"),
+        )
+        receipt = PurchaseReceipt.objects.create(
+            business=self.business,
+            store=self.store,
+            purchase=purchase,
+            received_by=self.user,
+            received_at=self.period.start,
+            idempotency_key="781525fd-1c9d-470d-ad70-c8330081ba7a",
+            idempotency_fingerprint="a" * 64,
+        )
+        receipt_line = PurchaseReceiptLine.objects.create(
+            business=self.business,
+            receipt=receipt,
+            purchase_line=purchase_line,
+            quantity_received=Decimal("1"),
+        )
+        self._movement(
+            first,
+            "purchase_receipt",
+            purchase=purchase,
+            purchase_line=purchase_line,
+            purchase_receipt=receipt,
+            purchase_receipt_line=receipt_line,
+        )
+        expected["purchase_receipt"] = "incoming"
         self._movement(first, "sale", quantity="2")
         self._movement(first, "stocktake", before="2", after="3")
-        self._movement(first, "stocktake", before="3", after="1")
+        self._movement(first, "stocktake", before="3", after="1", quantity="2")
         self._movement(second, "sale", quantity="7")
         self._movement(first, "initial", when=self.period.start)
         self._movement(first, "initial", when=self.period.end)
