@@ -193,11 +193,13 @@ def tax_summary(*, business, period, store=None):
     totals["net_tax_amount"] = (
         totals["output_tax_amount"] + totals["rectified_tax_amount"]
     )
-    return {
-        "effective_document_count": documents.count(),
-        **totals,
-        "effective_total_amount": _sum(documents, "total_amount", ZERO_MONEY),
-    }
+    document_totals = documents.aggregate(
+        effective_document_count=Count("pk"), effective_total_amount=Sum("total_amount")
+    )
+    document_totals["effective_total_amount"] = (
+        document_totals["effective_total_amount"] or ZERO_MONEY
+    )
+    return {**document_totals, **totals}
 
 
 def tax_by_rate(*, business, period, store=None):
@@ -255,11 +257,7 @@ def tax_by_rate(*, business, period, store=None):
 def inventory_summary(*, business, store=None):
     _validate_scope(business=business, store=store, temporal=False)
     rows = list(
-        InventoryItem.objects.filter(
-            business=business, is_active=True, **_store_filter(store)
-        )
-        .annotate(available_stock=F("current_stock") - F("reserved_stock"))
-        .values(
+        _inventory_status_queryset(business=business, store=store).values(
             "id",
             "store_id",
             "store__name",
@@ -271,19 +269,14 @@ def inventory_summary(*, business, store=None):
             "available_stock",
             "minimum_stock",
             "maximum_stock",
+            "stock_status",
         )
     )
-    counts = {"out_of_stock": 0, "low_stock": 0, "healthy": 0}
     result = []
+    counts = {"out_of_stock": 0, "low_stock": 0, "healthy": 0}
     for row in rows:
         available = row["available_stock"]
-        status = (
-            "out_of_stock"
-            if available <= 0
-            else "low_stock"
-            if available <= row["minimum_stock"]
-            else "healthy"
-        )
+        status = row["stock_status"]
         counts[status] += 1
         result.append(
             {
@@ -317,6 +310,31 @@ def inventory_summary(*, business, store=None):
         "healthy_stock_count": counts["healthy"],
         "items": result,
     }
+
+
+def _inventory_status_queryset(*, business, store):
+    available = F("current_stock") - F("reserved_stock")
+    return InventoryItem.objects.filter(
+        business=business, is_active=True, **_store_filter(store)
+    ).annotate(
+        available_stock=available,
+        stock_status=Case(
+            When(available_stock__lte=0, then=Value("out_of_stock")),
+            When(available_stock__lte=F("minimum_stock"), then=Value("low_stock")),
+            default=Value("healthy"),
+            output_field=CharField(),
+        ),
+    )
+
+
+def _inventory_status_counts(*, business, store):
+    """Aggregate the mutually-exclusive current stock states in one query."""
+    return _inventory_status_queryset(business=business, store=store).aggregate(
+        tracked_items_count=Count("pk"),
+        out_of_stock_count=Count("pk", filter=Q(stock_status="out_of_stock")),
+        low_stock_count=Count("pk", filter=Q(stock_status="low_stock")),
+        healthy_stock_count=Count("pk", filter=Q(stock_status="healthy")),
+    )
 
 
 def inventory_movements_summary(*, business, period, store=None):
@@ -859,15 +877,28 @@ def cash_summary(*, business, period, store=None):
             **scope, created_at__gte=period.start, created_at__lt=period.end
         )
     )
+    opened_totals = opened.aggregate(
+        sessions_opened_count=Count("pk"), opening_amount=Sum("opening_amount")
+    )
+    closed_totals = closed.aggregate(
+        sessions_closed_count=Count("pk"),
+        closed_expected_cash=Sum("expected_cash_amount"),
+        closed_counted_cash=Sum("counted_cash_amount"),
+        closed_difference=Sum("difference_amount"),
+    )
+    for key in ("opening_amount",):
+        opened_totals[key] = opened_totals[key] or ZERO_MONEY
+    for key in (
+        "closed_expected_cash",
+        "closed_counted_cash",
+        "closed_difference",
+    ):
+        closed_totals[key] = closed_totals[key] or ZERO_MONEY
     result = {
-        "sessions_opened_count": opened.count(),
-        "sessions_closed_count": closed.count(),
-        "opening_amount": _sum(opened, "opening_amount", ZERO_MONEY),
+        **opened_totals,
         **totals,
         "net_physical_movement": _net(totals),
-        "closed_expected_cash": _sum(closed, "expected_cash_amount", ZERO_MONEY),
-        "closed_counted_cash": _sum(closed, "counted_cash_amount", ZERO_MONEY),
-        "closed_difference": _sum(closed, "difference_amount", ZERO_MONEY),
+        **closed_totals,
     }
     return result
 
@@ -879,7 +910,7 @@ def cash_sessions_summary(*, business, period, store=None):
         CashSession.objects.filter(
             business=business, opened_at__lt=period.end, **_store_filter(store)
         )
-        .filter(Q(closed_at__isnull=True) | Q(closed_at__gte=period.start))
+        .filter(Q(closed_at__isnull=True) | Q(closed_at__gt=period.start))
         .select_related("cash_register", "store")
         .order_by("-opened_at", "-pk")
     )
@@ -933,3 +964,36 @@ def cash_sessions_summary(*, business, period, store=None):
                 {key: row[key] or ZERO_MONEY for key in annotations}
             )
     return [_session_row(session, totals[session.pk]) for session in sessions]
+
+
+def dashboard_summary(
+    *,
+    business,
+    period,
+    store=None,
+    trend_period=None,
+):
+    """Compose the lightweight dashboard from the authoritative selectors."""
+    _validate_scope(business=business, period=period, store=store)
+    trend_period = trend_period or period
+    # Validate independently: both periods retain the ReportPeriod contract.
+    _validate_scope(business=business, period=trend_period, store=store)
+    arguments = {"business": business, "period": period, "store": store}
+    return {
+        "scope": {
+            "business_id": business.pk,
+            "store_id": store.pk if store is not None else None,
+        },
+        "period": {"start": period.start, "end": period.end},
+        "trend_period": {"start": trend_period.start, "end": trend_period.end},
+        "sales": sales_summary(**arguments),
+        "sales_timeseries": sales_timeseries(
+            business=business, period=trend_period, store=store
+        ),
+        "payments": payment_summary(**arguments),
+        "payments_by_method": payments_by_method(**arguments),
+        "cash": cash_summary(**arguments),
+        "tax": tax_summary(**arguments),
+        "inventory": _inventory_status_counts(business=business, store=store),
+        "purchases": purchase_summary(**arguments),
+    }
