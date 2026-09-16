@@ -338,6 +338,13 @@ class CashReportTests(TestCase):
             cash_sessions_summary(business=foreign_business, period=self.period), []
         )
 
+    def test_session_closed_at_start_does_not_intersect_half_open_period(self):
+        session = self._session(opened=datetime(2026, 8, 31, tzinfo=UTC))
+        self._close(session, closed=self.period.start)
+        self.assertEqual(
+            cash_sessions_summary(business=self.business, period=self.period), []
+        )
+
     def test_sessions_summary_query_count_is_constant_without_duplicate_open_register(
         self,
     ):

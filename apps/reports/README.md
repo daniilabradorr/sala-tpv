@@ -127,7 +127,7 @@ a proveedor hasta que el dominio tenga ese flujo.
 el periodo solicitado; sus totales de cierres históricos no representan el
 efectivo actual. `cash_session_summary` describe la sesión completa.
 `cash_sessions_summary` selecciona sesiones cuya vida operativa intersecta el
-periodo (`opened_at < end` y cierre nulo o `closed_at >= start`), pero también
+periodo (`opened_at < end` y cierre nulo o `closed_at > start`), pero también
 describe los movimientos completos de cada sesión, no solo la fracción que cae
 en el periodo. La consulta de sesiones y la agregación de movimientos son bulk.
 
@@ -159,9 +159,54 @@ acumulado actual del pedido, incluso si una recepción fue posterior al periodo
 del pedido. `purchase_receipts_summary` representa, en cambio, los eventos de
 recepción ocurridos dentro del periodo.
 
-## API prevista para PR posteriores
+## Implementado en PR 4
 
-- Dashboard: `dashboard_summary`.
+`dashboard_summary` compone los contratos públicos de ventas, pagos, caja,
+fiscalidad y compras. `period` gobierna las tarjetas/KPIs; `trend_period` se usa
+únicamente en `sales_timeseries` y, si se omite, es exactamente `period` (Reports
+no inventa un rango de tendencia). Ambos mantienen el contrato aware `[start,
+end)`. Inventario es una foto **actual**, independiente de esos periodos.
 
-Esta lista documenta nombres y alcance; no se reservan con stubs. VeriFactu no
-existe en este contrato y no se crean modelos, DTOs, selectors ni placeholders.
+El dashboard conserva separadas la operación económica de `Payment` y el
+movimiento físico de `CashMovement`; nunca presenta los pagos como efectivo en
+caja. La fiscalidad efectiva procede de Billing, excluye targets sustituidos y
+conserva el signo de las rectificativas. Las compras se seleccionan por
+`Purchase.ordered_at`, no por la fecha de sus recepciones.
+
+El contrato de rendimiento exige consultas SQL agregadas y un número de queries
+constante respecto al número de hechos. La serie y los métodos de pago son las
+únicas colecciones del dashboard: los cuatro estados de inventario se calculan
+con una agregación SQL y no materializan `inventory.items`. Los índices actuales
+de los dominios se revisaron; no se añade una migración preventiva sin planes de
+ejecución y volumen real que demuestren su beneficio frente al coste de escritura.
+
+La revisión encontró índices compuestos útiles ya presentes para los scopes más
+frecuentes: tenant/store/status en Sale, SaleReturn, Payment, CashSession y
+Purchase; tenant/store/fecha en BillingDocument, StockMovement y
+PurchaseReceipt; tenant/store/activo en InventoryItem; sesión/tipo en
+CashMovement; y documento en BillingTaxBreakdown. También existen índices de FK
+y unicidad aprovechables para las relaciones de sustitución. `completed_at` de
+ventas/devoluciones, `created_at` de pagos y `ordered_at` tienen índices de campo.
+Los posibles compuestos adicionales de estado+fecha para ventas, pagos y compras,
+y fecha para caja, quedan como candidatos a medir con PostgreSQL y datos reales:
+sin `EXPLAIN (ANALYZE, BUFFERS)` representativo no se justifica su coste ni una
+migración en esta PR.
+
+Una sesión de caja se interpreta como `[opened_at, closed_at)`: si cierra
+exactamente en `period.start`, no intersecta el periodo.
+
+## Estado del módulo
+
+**REPORTS BACKEND: CLOSED PRE-VERIFACTU**
+
+Reports pre-VeriFactu queda cerrado sobre las fuentes actuales: Sales, Payments,
+Cash Register, Billing, Inventory y Purchases. Sigue siendo read-only, dinámico y
+sin modelos propios, `ReportRun`, snapshots, cache ni jobs.
+
+Solo se reabrirá ante: (1) una integración VeriFactu real disponible; (2) exports
+o informes programados que necesiten artefactos persistentes; (3) volumen medido
+que demuestre la necesidad de cache o snapshots; o (4) requisitos históricos
+«as-of» imposibles de recalcular dinámicamente. Cuando exista
+`integrations/verifacti`, una PR independiente diseñará `accepted`, `rejected`,
+`pending`, `cancelled` y estados reales de retry/error. No se crean ahora
+submissions, snapshots, selectors ni estados VeriFactu ficticios.
