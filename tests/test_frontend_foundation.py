@@ -14,6 +14,7 @@ class HtmxMiddlewareTests(SimpleTestCase):
 
     def test_middleware_is_configured(self):
         self.assertIn("django_htmx.middleware.HtmxMiddleware", settings.MIDDLEWARE)
+        self.assertIn("django_htmx", settings.INSTALLED_APPS)
 
     def test_hx_request_is_recognized(self):
         request = self.factory.get("/", HTTP_HX_REQUEST="true")
