@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <link rel="stylesheet" href="{% static 'css/erp_admin.css' %}">
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="{% static 'vendor/htmx/1.9.12/htmx.min.js' %}"></script>
     {% block extra_head %}{% endblock %}
 </head>
 <body{% if request.user.is_authenticated %} class="has-app-shell"{% endif %}>
@@ -40,7 +40,7 @@
             <footer class="site-footer"><div class="public-container"><small>Netxodo · TPV para pequeños negocios</small></div></footer>
         </div>
     {% endif %}
-    <script src="{% static 'js/app.js' %}"></script>
+    <script type="module" src="{% static 'js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

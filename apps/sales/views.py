@@ -190,10 +190,6 @@ def _ensure_sale_editable(sale):
         raise PermissionDenied("Esta venta ya no puede modificarse.")
 
 
-def _is_htmx(request):
-    return request.headers.get("HX-Request") == "true"
-
-
 def _workspace_cart_response(request, *, business, store, sale, form=None):
     sale = get_sale_detail(business=business, pk=sale.pk)
     pos_settings = POSSettings.objects.filter(business=business).first()
@@ -412,7 +408,7 @@ class SaleDetailView(
             }
             template = (
                 "sales/partials/_product_grid.html"
-                if _is_htmx(request)
+                if request.htmx
                 else "sales/sale_workspace.html"
             )
             return render(request, template, context)
@@ -671,7 +667,7 @@ class SaleHeaderUpdateView(
                 request,
                 (
                     "sales/partials/_workspace_header.html"
-                    if _is_htmx(request)
+                    if request.htmx
                     else self.template_name
                 ),
                 {
@@ -697,7 +693,7 @@ class SaleHeaderUpdateView(
                 request,
                 (
                     "sales/partials/_workspace_header.html"
-                    if _is_htmx(request)
+                    if request.htmx
                     else self.template_name
                 ),
                 {
@@ -708,7 +704,7 @@ class SaleHeaderUpdateView(
                 },
             )
 
-        if _is_htmx(request):
+        if request.htmx:
             sale = get_sale_detail(business=business, pk=sale.pk)
             form = SaleHeaderUpdateForm(
                 business=business,
@@ -794,7 +790,7 @@ class SaleLineAddView(
         if not form.is_valid():
             _add_invalid_form_messages(request, form)
 
-            if _is_htmx(request):
+            if request.htmx:
                 return _workspace_cart_response(
                     request, business=business, store=store, sale=sale, form=form
                 )
@@ -823,7 +819,7 @@ class SaleLineAddView(
         except ValidationError as error:
             _add_service_errors_to_form(form, error)
 
-            if _is_htmx(request):
+            if request.htmx:
                 return _workspace_cart_response(
                     request, business=business, store=store, sale=sale, form=form
                 )
@@ -839,7 +835,7 @@ class SaleLineAddView(
                 },
             )
 
-        if _is_htmx(request):
+        if request.htmx:
             return _workspace_cart_response(
                 request, business=business, store=store, sale=sale
             )
@@ -1026,7 +1022,7 @@ class SaleLineDeleteView(
                 "Línea retirada de la venta.",
             )
 
-        if _is_htmx(request):
+        if request.htmx:
             return _workspace_cart_response(
                 request, business=business, store=store, sale=sale
             )
@@ -1069,9 +1065,9 @@ class SaleLineQuantityUpdateView(
             except ValidationError as error:
                 _add_service_errors_to_form(form, error)
 
-        if form.errors and not _is_htmx(request):
+        if form.errors and not request.htmx:
             _add_invalid_form_messages(request, form)
-        if _is_htmx(request):
+        if request.htmx:
             return _workspace_cart_response(
                 request, business=business, store=store, sale=sale, form=form
             )
@@ -1188,7 +1184,7 @@ class SaleCheckoutView(
         }
         return render(
             request,
-            self.partial_name if _is_htmx(request) else self.template_name,
+            self.partial_name if request.htmx else self.template_name,
             context,
         )
 
