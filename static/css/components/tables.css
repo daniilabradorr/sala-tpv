@@ -1,0 +1,12 @@
+.table-scroll { max-width: 100%; overflow-x: auto; border-radius: var(--nx-radius-md); overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
+.table-scroll:focus-within { outline: 2px solid var(--nx-focus); outline-offset: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: var(--nx-space-3); border-bottom: 1px solid var(--nx-border); color: var(--nx-text); text-align: left; vertical-align: middle; }
+th { background: var(--nx-surface-muted); color: var(--nx-text-muted); font-size: var(--nx-font-size-xs); font-weight: var(--nx-weight-extra-bold); letter-spacing: .04em; text-transform: uppercase; }
+tbody tr:hover { background: var(--nx-info-bg); }
+.number-cell { text-align: right !important; font-variant-numeric: tabular-nums; }
+.actions-cell { text-align: right !important; }
+.table-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--nx-space-3); white-space: nowrap; }
+.table-actions a, .link-button { color: var(--nx-primary); }
+.table-actions .danger { color: var(--nx-danger); }
+.pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--nx-space-4); margin-top: var(--nx-space-6); }

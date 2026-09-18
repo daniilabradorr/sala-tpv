@@ -1,0 +1,6 @@
+.badge, .erp-status { display: inline-flex; align-items: center; padding: var(--nx-space-1) var(--nx-space-2); border: 1px solid transparent; border-radius: var(--nx-radius-pill); font-size: var(--nx-font-size-xs); font-weight: var(--nx-weight-bold); line-height: 1.35; white-space: nowrap; }
+.badge-success, .badge-active, .stock-normal, .adjustment-confirmed, .status-issued { border-color: var(--nx-success); background: var(--nx-success-bg); color: var(--nx-success); }
+.badge-warning, .stock-low, .adjustment-draft, .status-draft { border-color: var(--nx-warning); background: var(--nx-warning-bg); color: var(--nx-warning); }
+.badge-danger, .badge-inactive, .stock-out, .adjustment-cancelled, .status-cancelled { border-color: var(--nx-danger); background: var(--nx-danger-bg); color: var(--nx-danger); }
+.badge-info, .badge-default { border-color: var(--nx-info); background: var(--nx-info-bg); color: var(--nx-info); }
+.badge-neutral { border-color: var(--nx-neutral); background: var(--nx-neutral-bg); color: var(--nx-neutral); }
