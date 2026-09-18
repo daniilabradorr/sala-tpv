@@ -1,0 +1,5 @@
+.tabs { display: flex; max-width: 100%; gap: var(--nx-space-1); overflow-x: auto; border-bottom: 1px solid var(--nx-border); }
+.tab { display: inline-flex; min-height: var(--nx-control-height); align-items: center; padding: var(--nx-space-2) var(--nx-space-3); border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--nx-text-muted); cursor: pointer; font: inherit; font-weight: var(--nx-weight-bold); white-space: nowrap; }
+.tab:hover { color: var(--nx-primary); background: var(--nx-info-bg); }
+.tab.is-active, .tab[aria-current="page"], .tab[aria-selected="true"] { border-bottom-color: var(--nx-primary); color: var(--nx-primary-active); }
+.tab:disabled, .tab[aria-disabled="true"] { color: var(--nx-disabled-text); cursor: not-allowed; }

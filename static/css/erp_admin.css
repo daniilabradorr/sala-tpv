@@ -1,43 +1,24 @@
-/* Shared management language for the authenticated Netxodo ERP. */
-.erp-page, .site-main .content-container > .card { display:grid; gap:1.5rem; min-width:0; padding:clamp(1rem,2.5vw,2rem); background:var(--nx-surface,#07182b); border:1px solid rgba(255,255,255,.1); border-radius:.8rem; }
-.erp-header, .page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+/* Current ERP page/layout language. Shared controls live in components/*.css. */
+.erp-page, .site-main .content-container > .card { display:grid; gap:var(--nx-space-6); min-width:0; padding:clamp(var(--nx-space-4),2.5vw,var(--nx-space-8)); background:var(--nx-surface); border:1px solid var(--nx-border); border-radius:var(--nx-radius-lg); }
+.erp-header, .page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--nx-space-4); }
 .erp-header h1, .page-heading h1, .erp-page>h1, .card-form>h1 { margin:0; }
-.erp-eyebrow { margin:0 0 .35rem; color:var(--nx-blue-bright,#0794f2); font-size:.75rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
-.erp-subtitle, .intro { margin:.4rem 0 0; color:var(--nx-text-muted,#a9b8c8); }
-.erp-context { display:flex; flex-wrap:wrap; gap:.5rem 1.25rem; padding:.75rem 1rem; color:var(--nx-text-muted,#a9b8c8); background:rgba(0,97,193,.12); border-left:3px solid var(--nx-blue,#0061c1); }
-.erp-toolbar, .filter-grid { display:flex; align-items:end; flex-wrap:wrap; gap:.85rem; padding:1rem; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08); border-radius:.65rem; }
+.erp-eyebrow { margin:0 0 var(--nx-space-1); color:var(--nx-primary); font-size:var(--nx-font-size-xs); font-weight:var(--nx-weight-extra-bold); letter-spacing:.12em; text-transform:uppercase; }
+.erp-subtitle, .intro { margin:var(--nx-space-1) 0 0; color:var(--nx-text-muted); }
+.erp-context { display:flex; flex-wrap:wrap; gap:var(--nx-space-2) var(--nx-space-5); padding:var(--nx-space-3) var(--nx-space-4); color:var(--nx-text-muted); background:var(--nx-info-bg); border-left:3px solid var(--nx-primary); }
+.erp-toolbar, .filter-grid { display:flex; align-items:end; flex-wrap:wrap; gap:var(--nx-space-3); padding:var(--nx-space-4); background:var(--nx-surface-muted); border:1px solid var(--nx-border); border-radius:var(--nx-radius-md); }
 .erp-toolbar .form-field, .filter-grid .form-field { min-width:0; flex:1 1 12rem; margin:0; }
-.table-scroll { border-radius:.6rem; }
-.table-scroll table { width:100%; min-width:42rem; border-collapse:collapse; }
-.table-scroll th { color:var(--nx-text-muted,#a9b8c8); font-size:.76rem; font-weight:800; letter-spacing:.05em; text-align:left; text-transform:uppercase; background:rgba(255,255,255,.04); }
-.table-scroll th, .table-scroll td { padding:.8rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:middle; }
-.table-scroll tbody tr:hover { background:rgba(7,148,242,.055); }
-.number-cell { text-align:right!important; font-variant-numeric:tabular-nums; }
-.actions-cell { text-align:right!important; }
-.erp-empty { display:grid; justify-items:center; gap:.45rem; padding:2rem 1rem; color:var(--nx-text-muted,#a9b8c8); text-align:center; }
-.erp-empty strong { color:var(--nx-text,#f7f9fc); font-size:1rem; }
+.erp-empty { display:grid; justify-items:center; gap:var(--nx-space-2); padding:var(--nx-space-8) var(--nx-space-4); color:var(--nx-text-muted); text-align:center; }
+.erp-empty strong { color:var(--nx-text); }
 .erp-empty p { max-width:34rem; margin:0; }
-.erp-section { display:grid; gap:1rem; }
-.erp-section+.erp-section { padding-top:1.25rem; border-top:1px solid rgba(255,255,255,.09); }
-.erp-section h2 { margin:0; font-size:1.05rem; }
-.erp-form, .stacked-form { display:grid; gap:1.15rem; }
-.form-section { min-width:0; margin:0; padding:1.15rem; border:1px solid rgba(255,255,255,.09); border-radius:.65rem; }
-.form-section legend { padding:0 .4rem; font-weight:800; }
-.form-field label { display:block; margin-bottom:.35rem; font-weight:700; }
-.form-field input:not([type=checkbox]):not([type=radio]), .form-field select, .form-field textarea { width:100%; }
-.help-text { margin-top:.35rem; color:var(--nx-text-muted,#a9b8c8); font-size:.82rem; }
-.field-errors, .form-errors { color:#ff9b9b; }
-.form-field-error input, .form-field-error select, .form-field-error textarea { border-color:#e45454; }
-.erp-status, .badge { white-space:nowrap; }
-.badge-active, .adjustment-confirmed, .status-issued { color:#9ce4ba; background:rgba(31,154,83,.17); }
-.badge-inactive, .adjustment-cancelled, .status-cancelled { color:#ffabab; background:rgba(211,66,66,.16); }
-.adjustment-draft, .status-draft { color:#ffe18a; background:rgba(241,185,2,.15); }
-.erp-actions, .actions, .table-actions { display:flex; align-items:center; flex-wrap:wrap; gap:.65rem; }
-.table-actions { white-space:nowrap; }
+.erp-section { display:grid; gap:var(--nx-space-4); }
+.erp-section+.erp-section { padding-top:var(--nx-space-5); border-top:1px solid var(--nx-border); }
+.erp-section h2 { margin:0; }
+.form-section { min-width:0; margin:0; padding:var(--nx-space-5); border:1px solid var(--nx-border); border-radius:var(--nx-radius-md); }
+.form-section legend { padding:0 var(--nx-space-2); font-weight:var(--nx-weight-extra-bold); }
+.erp-actions, .actions { display:flex; align-items:center; flex-wrap:wrap; gap:var(--nx-space-3); }
 .table-actions form, .actions form { display:inline-flex; margin:0; }
-.erp-danger, .delete-warning { padding:1rem; border:1px solid rgba(228,84,84,.45); border-radius:.65rem; background:rgba(228,84,84,.08); }
+.erp-danger, .delete-warning { padding:var(--nx-space-4); border:1px solid var(--nx-danger); border-radius:var(--nx-radius-md); background:var(--nx-danger-bg); color:var(--nx-danger); }
 .details-grid { margin:0; }
-.details-grid dt { color:var(--nx-text-muted,#a9b8c8); }
+.details-grid dt { color:var(--nx-text-muted); }
 .details-grid dd { overflow-wrap:anywhere; }
-.pagination { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:.75rem; }
 @media (max-width:700px) { .erp-header,.page-heading { align-items:stretch; flex-direction:column; } .erp-header>.button,.page-heading>.button { width:100%; } .erp-toolbar,.filter-grid { align-items:stretch; flex-direction:column; } .erp-toolbar .form-field,.filter-grid .form-field { width:100%; flex-basis:auto; } .erp-actions,.actions { align-items:stretch; flex-direction:column; } .erp-actions>*,.actions>*,.actions form>button { width:100%; } }
