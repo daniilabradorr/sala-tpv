@@ -9,16 +9,20 @@ de cada endpoint siguen siendo la autoridad de seguridad.
 
 ## Tienda activa
 
-La tienda activa es estado de interfaz almacenado en la sesión bajo
+La resolución compartida vive en `apps/core/shell.py`. La tienda activa es
+estado de interfaz almacenado en la sesión bajo
 `netxodo_active_store_id`. Se resuelve exclusivamente dentro de las tiendas
-activas devueltas por `get_stores_available_for_user()`: se conserva la sesión
-válida y, si no, se usa la tienda predeterminada accesible o la primera tienda
-operativa. Un superusuario sin negocio explícito permanece sin contexto.
+activas autorizadas por el resolver compartido: se conserva la sesión válida y,
+si no, se usa la tienda predeterminada accesible o la primera tienda operativa.
+Las rutas autorizadas con `store_id` sincronizan el contexto. Un
+superusuario sin negocio explícito permanece sin contexto y uno con Business
+solo puede resolver Stores de ese Business.
 
 El selector realiza un POST con CSRF a `stores:store_set_active`. Valida de
 nuevo acceso, actividad y tenant, y limita la redirección a destinos locales;
 las rutas con Store de Ventas, Caja o Facturación se reconstruyen para la nueva
-tienda. Cambiar esta preferencia **no** llama a `set_default_store`, no cambia
+tienda; Payments vuelve al listado seguro de Ventas. Cambiar esta preferencia
+**no** llama a `set_default_store`, no cambia
 `Store.is_default` y no modifica relaciones de acceso ni datos de dominio.
 
 ## Superficies y responsive

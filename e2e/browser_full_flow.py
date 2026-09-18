@@ -338,7 +338,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_role("button", name="Iniciar sesión").click()
         self.page.wait_for_url(self._url("/"))
         expect(self.page.get_by_role("heading", name="Netxodo E2E")).to_be_visible()
-        expect(self.page.get_by_text("Tienda E2E", exact=True)).to_be_visible()
+        expect(
+            self.page.locator("#main-content").get_by_role("heading", name="Tienda E2E")
+        ).to_be_visible()
 
         session_id = self._open_cash_session()
 

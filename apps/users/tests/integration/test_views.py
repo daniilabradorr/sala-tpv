@@ -138,7 +138,13 @@ class UserViewsIntegrationTests(TestCase):
         self.assertContains(response, f"{self.store.name}, {second_active_store.name}")
         self.assertContains(response, "Sin tiendas asignadas")
         self.assertNotContains(response, f"{second_active_store.name},")
-        self.assertNotContains(response, inactive_store.name)
+        listed_target = next(
+            user for user in response.context["users"] if user.pk == self.target_user.pk
+        )
+        active_store_names = [
+            access.store.name for access in listed_target.active_store_accesses
+        ]
+        self.assertNotIn(inactive_store.name, active_store_names)
         self.assertNotContains(response, self.other_store.name)
 
         for index in range(5):

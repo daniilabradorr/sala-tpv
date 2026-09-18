@@ -1,6 +1,9 @@
+from urllib.parse import urlsplit
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import Resolver404, resolve, reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -14,7 +17,7 @@ from django.views.generic import (
     UpdateView,
 )
 
-from apps.core.context_processors import ACTIVE_STORE_SESSION_KEY
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY, get_shell_stores_for_user
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 from apps.stores.models import Store
 from apps.stores.selectors import (
@@ -43,9 +46,16 @@ def set_active_store(request, pk):
     user = request.user
     if user.is_superuser and not user.business_id:
         raise PermissionDenied("Se requiere un contexto de negocio explícito.")
-    store = get_object_or_404(
-        get_stores_available_for_user(user=user, only_active=True), pk=pk
+    store = next(
+        (
+            shell_store
+            for shell_store in get_shell_stores_for_user(user)
+            if shell_store.pk == pk
+        ),
+        None,
     )
+    if store is None:
+        raise Http404
     request.session[ACTIVE_STORE_SESSION_KEY] = store.pk
 
     next_url = request.POST.get("next", "")
@@ -54,13 +64,15 @@ def set_active_store(request, pk):
     ):
         return redirect("core:home")
     try:
-        match = resolve(next_url)
+        parsed_next = urlsplit(next_url)
+        match = resolve(parsed_next.path)
     except Resolver404:
         return redirect("core:home")
     scoped_roots = {
         "sales": ("sales:sale_list", {"store_id": store.pk}),
         "cash_register": ("cash_register:register_list", {"store_id": store.pk}),
         "billing": ("billing:document_list", {"store_id": store.pk}),
+        "payments": ("sales:sale_list", {"store_id": store.pk}),
     }
     if match.namespace in scoped_roots:
         route, kwargs = scoped_roots[match.namespace]

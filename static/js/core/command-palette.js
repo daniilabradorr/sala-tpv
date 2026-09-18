@@ -57,7 +57,11 @@ export const initCommandPalette = () => {
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      highlight(highlighted + (event.key === "ArrowDown" ? 1 : -1));
+      if (highlighted < 0) {
+        highlight(event.key === "ArrowDown" ? 0 : visibleItems().length - 1);
+      } else {
+        highlight(highlighted + (event.key === "ArrowDown" ? 1 : -1));
+      }
     } else if (event.key === "Enter" && highlighted >= 0) {
       event.preventDefault();
       visibleItems()[highlighted].click();

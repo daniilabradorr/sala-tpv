@@ -96,7 +96,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 toggle.click()
                 catalog_link.click()
-                page.wait_for_url(f"{self.live_server_url}/catalog/")
+                page.wait_for_url(f"{self.live_server_url}/catalog/products/")
                 expect(page.locator('[aria-current="page"]')).to_have_text("Productos")
                 page.keyboard.press("Control+k")
                 palette = page.locator("[data-command-dialog]")
@@ -120,7 +120,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
     def test_desktop_and_tablet_sidebar_breakpoint(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1200, "height": 800})
+            context = browser.new_context(viewport={"width": 1440, "height": 800})
             page = context.new_page()
             try:
                 page.goto(f"{self.live_server_url}/users/login/")
@@ -132,6 +132,13 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 expect(sidebar).to_be_visible()
                 expect(sidebar).not_to_have_attribute("inert", "")
                 expect(page.locator("[data-sidebar-toggle]")).to_be_hidden()
+                self.assertTrue(
+                    page.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth"
+                    )
+                )
+                page.set_viewport_size({"width": 1200, "height": 800})
+                expect(page.locator("[data-sidebar-toggle]")).to_be_hidden()
                 page.set_viewport_size({"width": 1199, "height": 800})
                 expect(page.locator("[data-sidebar-toggle]")).to_be_visible()
                 expect(sidebar).to_have_attribute("inert", "")
@@ -139,6 +146,15 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 page.locator("[data-sidebar-toggle]").click()
                 expect(sidebar).not_to_have_attribute("inert", "")
                 expect(page.locator("[data-sidebar-overlay]")).to_be_visible()
+                page.keyboard.press("Escape")
+                page.set_viewport_size({"width": 767, "height": 800})
+                expect(sidebar).to_have_attribute("inert", "")
+                expect(page.locator("[data-sidebar-toggle]")).to_be_visible()
+                self.assertTrue(
+                    page.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth"
+                    )
+                )
             finally:
                 context.close()
                 browser.close()

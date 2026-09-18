@@ -53,7 +53,7 @@ class AppShellIntegrationTests(TestCase):
         for label in (
             "Inicio",
             "Tiendas",
-            "Catálogo",
+            "Productos",
             "Inventario",
             "Clientes",
             "Usuarios",
@@ -109,7 +109,13 @@ class AppShellIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="app-sidebar"')
-        self.assertContains(response, 'aria-current="page">Catálogo</a>')
+        active_items = [
+            item
+            for group in response.context["shell_navigation"]
+            for item in group["items"]
+            if item["active"]
+        ]
+        self.assertEqual([item["id"] for item in active_items], ["products"])
 
     def test_authenticated_shell_has_one_main_and_skip_link(self):
         self.client.force_login(self.owner)
@@ -118,7 +124,14 @@ class AppShellIntegrationTests(TestCase):
 
         self.assertContains(response, '<main id="main-content"', count=1)
         self.assertContains(response, 'class="skip-link" href="#main-content"')
-        self.assertContains(response, 'aria-current="page">Inicio</a>', count=1)
+        self.assertContains(response, 'aria-current="page"', count=1)
+        active_items = [
+            item
+            for group in response.context["shell_navigation"]
+            for item in group["items"]
+            if item["active"]
+        ]
+        self.assertEqual([item["id"] for item in active_items], ["home"])
 
     def test_messages_expose_appropriate_live_region_roles(self):
         html = render_to_string(
