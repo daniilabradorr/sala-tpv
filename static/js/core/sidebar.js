@@ -14,11 +14,12 @@ export const initSidebar = () => {
   const workspace = shell.querySelector(".erp-workspace");
   const focusableSelector =
     'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-  const isMobile = () => window.innerWidth <= 900;
+  const drawerMedia = window.matchMedia("(max-width: 1199px)");
+  const isDrawer = () => drawerMedia.matches;
 
   const syncClosedState = () => {
     sidebar.inert =
-      isMobile() && !document.body.classList.contains("sidebar-open");
+      isDrawer() && !document.body.classList.contains("sidebar-open");
   };
 
   const closeSidebar = ({ restoreFocus = true } = {}) => {
@@ -26,7 +27,7 @@ export const initSidebar = () => {
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-label", "Abrir menú");
     overlay.hidden = true;
-    sidebar.inert = isMobile();
+    sidebar.inert = isDrawer();
     if (workspace) workspace.inert = false;
     if (restoreFocus) toggle.focus();
   };
@@ -58,7 +59,7 @@ export const initSidebar = () => {
     }
     if (
       event.key === "Tab" &&
-      isMobile() &&
+      isDrawer() &&
       document.body.classList.contains("sidebar-open")
     ) {
       const focusable = [...sidebar.querySelectorAll(focusableSelector)].filter(
@@ -76,15 +77,18 @@ export const initSidebar = () => {
       }
     }
   });
-  window.addEventListener("resize", () => {
-    if (
-      window.innerWidth > 900 &&
-      document.body.classList.contains("sidebar-open")
-    ) {
+  const handleBreakpoint = () => {
+    if (!isDrawer() && document.body.classList.contains("sidebar-open")) {
       closeSidebar({ restoreFocus: false });
     }
     syncClosedState();
-  });
+    if (!isDrawer()) {
+      sidebar.inert = false;
+      if (workspace) workspace.inert = false;
+      overlay.hidden = true;
+    }
+  };
+  drawerMedia.addEventListener("change", handleBreakpoint);
   syncClosedState();
   initialized = true;
 };

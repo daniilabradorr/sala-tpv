@@ -134,7 +134,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _open_cash_session(self):
         self.step = "open cash session"
-        self.page.get_by_role("link", name="Caja").click()
+        self.page.locator("#main-content").get_by_role(
+            "link", name="Caja", exact=True
+        ).click()
         expect(self.page.get_by_text("Caja principal", exact=True)).to_be_visible()
         self.page.get_by_role("link", name="Abrir caja").click()
         self.page.get_by_label("Efectivo inicial").fill("100.00")
@@ -338,7 +340,9 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_role("button", name="Iniciar sesión").click()
         self.page.wait_for_url(self._url("/"))
         expect(self.page.get_by_role("heading", name="Netxodo E2E")).to_be_visible()
-        expect(self.page.get_by_text("Tienda E2E", exact=True)).to_be_visible()
+        expect(
+            self.page.locator("#main-content").get_by_role("heading", name="Tienda E2E")
+        ).to_be_visible()
 
         session_id = self._open_cash_session()
 

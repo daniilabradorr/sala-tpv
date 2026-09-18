@@ -9,6 +9,7 @@ from apps.stores.views import (
     StoreActivateView,
     StoreDeleteView,
     StoreSetDefaultView,
+    set_active_store,
 )
 
 app_name = "stores"
@@ -16,6 +17,7 @@ app_name = "stores"
 urlpatterns = [
     path("", ListStoresView.as_view(), name="store_list"),
     path("create/", StoreCreateView.as_view(), name="store_create"),
+    path("<int:pk>/use/", set_active_store, name="store_set_active"),
     path(
         "<int:pk>/",
         StoreDetailView.as_view(),

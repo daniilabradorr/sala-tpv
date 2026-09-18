@@ -1,0 +1,24 @@
+<button class="store-trigger" type="button" data-store-trigger aria-haspopup="dialog">
+    {% include "components/icon.html" with name="store" %}
+    <span><small>Tienda</small><strong>{{ active_store.name|default:"Sin tienda activa" }}</strong></span>
+    {% include "components/icon.html" with name="chevron-down" %}
+</button>
+<dialog class="shell-dialog store-dialog" data-store-dialog aria-labelledby="store-dialog-title">
+    <div class="dialog-heading">
+        <h2 id="store-dialog-title">Seleccionar tienda</h2>
+        <button type="button" class="icon-button" aria-label="Cerrar selector de tienda" data-store-close>{% include "components/icon.html" with name="close" %}</button>
+    </div>
+    {% if shell_stores %}
+        <div class="store-options">
+            {% for shell_store in shell_stores %}
+                <form method="post" action="{% url 'stores:store_set_active' shell_store.pk %}">
+                    {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit"{% if active_store.pk == shell_store.pk %} class="is-selected" aria-current="true"{% endif %}>
+                        <span class="store-radio" aria-hidden="true"></span><span><strong>{{ shell_store.name }}</strong><small>{{ shell_store.code }}</small></span>
+                    </button>
+                </form>
+            {% endfor %}
+        </div>
+    {% else %}<p>No hay tiendas activas disponibles.</p>{% endif %}
+    {% if shell_capabilities.can_manage_stores %}<a class="dialog-manage-link" href="{% url 'stores:store_list' %}">Gestionar tiendas</a>{% endif %}
+</dialog>

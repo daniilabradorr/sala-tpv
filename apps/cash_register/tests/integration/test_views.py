@@ -367,9 +367,15 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertContains(response, "Caja cerrada")
         self.assertContains(response, "25,00 €", count=3)
         self.assertContains(response, "Vista histórica de solo lectura")
-        self.assertNotContains(response, ">Nueva venta<")
-        self.assertNotContains(response, ">Entrada de efectivo<")
-        self.assertNotContains(response, ">Cerrar caja<")
+        self.assertNotContains(response, 'class="cash-actions"')
+        self.assertNotContains(response, "cash-primary-action")
+        for url in (
+            reverse("cash_register:cash_in", args=[self.store.pk, session.pk]),
+            reverse("cash_register:cash_out", args=[self.store.pk, session.pk]),
+            reverse("cash_register:adjustment", args=[self.store.pk, session.pk]),
+            reverse("cash_register:close", args=[self.store.pk, session.pk]),
+        ):
+            self.assertNotContains(response, f'href="{url}"')
 
     def test_session_operation_cancel_returns_to_session_without_javascript(self):
         register = create_cash_register(business=self.business, store=self.store)
