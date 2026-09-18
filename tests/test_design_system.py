@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.template import Context, Template
+from django.templatetags.static import static
 from django.test import SimpleTestCase
 
 
@@ -81,8 +82,9 @@ class IconComponentTests(SimpleTestCase):
         rendered = Template(
             '{% include "components/icon.html" with name="search" %}'
         ).render(Context())
+        expected_sprite_url = static("icons/netxodo-ui.svg")
 
-        self.assertIn("icons/netxodo-ui.svg#search", rendered)
+        self.assertIn(f"{expected_sprite_url}#search", rendered)
         self.assertIn("<svg", rendered)
         self.assertIn('aria-hidden="true"', rendered)
         self.assertNotIn("aria-label", rendered)
