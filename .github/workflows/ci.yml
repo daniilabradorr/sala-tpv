@@ -355,6 +355,7 @@ jobs:
           uv run python manage.py test
           e2e.browser_full_flow
           e2e.browser_responsive_shell
+          e2e.browser_htmx_global_ux
           --verbosity 2
 
       - name: Upload browser failure artifacts

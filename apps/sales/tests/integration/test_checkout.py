@@ -476,6 +476,31 @@ class CheckoutIntegrationTests(TestCase):
         self.assertContains(response, "La suma de los pagos")
         self.assert_pristine(sale)
 
+    def test_invalid_htmx_checkout_swaps_partial_with_422_and_preserves_intent(self):
+        sale = self.sale()
+        series = self.series()
+        payment_key = uuid.uuid4()
+        billing_key = uuid.uuid4()
+        response = self.client.post(
+            self.checkout_url(sale),
+            {
+                "mode": "single",
+                "method": self.cash.pk,
+                "cash_received": "not-a-number",
+                "series": series.pk,
+                "payment_idempotency_key": payment_key,
+                "billing_idempotency_key": billing_key,
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertTemplateUsed(response, "sales/partials/_checkout.html")
+        self.assertContains(response, "not-a-number", status_code=422)
+        self.assertContains(response, str(payment_key), status_code=422)
+        self.assertContains(response, str(billing_key), status_code=422)
+        self.assertTrue(response.context["form"].errors)
+        self.assert_pristine(sale)
+
     def test_empty_cart_checkout_cta_is_a_disabled_button_not_a_link(self):
         sale = self.sale(lines=False)
         response = self.client.get(

@@ -19,6 +19,8 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 
+from apps.core.htmx import add_hx_trigger
+
 from apps.billing.models import (
     BillingDocumentStatusChoices,
     BillingDocumentTypeChoices,
@@ -676,6 +678,7 @@ class SaleHeaderUpdateView(
                     "form": form,
                     "header_form": form,
                 },
+                status=422 if request.htmx else 200,
             )
 
         try:
@@ -715,7 +718,7 @@ class SaleHeaderUpdateView(
                     "document_type_requested": sale.document_type_requested,
                 },
             )
-            return render(
+            response = render(
                 request,
                 "sales/partials/_workspace_header.html",
                 {
@@ -723,6 +726,10 @@ class SaleHeaderUpdateView(
                     "sale": sale,
                     "header_form": form,
                 },
+            )
+            return add_hx_trigger(
+                response,
+                {"nx:toast": {"message": "Venta actualizada.", "tone": "success"}},
             )
 
         messages.success(request, "Cabecera de la venta actualizada correctamente.")
@@ -791,9 +798,11 @@ class SaleLineAddView(
             _add_invalid_form_messages(request, form)
 
             if request.htmx:
-                return _workspace_cart_response(
+                response = _workspace_cart_response(
                     request, business=business, store=store, sale=sale, form=form
                 )
+                response.status_code = 422
+                return response
 
             return render(
                 request,
@@ -1068,9 +1077,12 @@ class SaleLineQuantityUpdateView(
         if form.errors and not request.htmx:
             _add_invalid_form_messages(request, form)
         if request.htmx:
-            return _workspace_cart_response(
+            response = _workspace_cart_response(
                 request, business=business, store=store, sale=sale, form=form
             )
+            if form.errors:
+                response.status_code = 422
+            return response
         return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
@@ -1199,7 +1211,10 @@ class SaleCheckoutView(
         mode = request.POST.get("mode", "single")
         valid = form.is_valid() and (mode != "split" or formset.is_valid())
         if not valid:
-            return self._render(request, business, store, sale)
+            response = self._render(request, business, store, sale)
+            if request.htmx:
+                response.status_code = 422
+            return response
         pos_settings = POSSettings.objects.filter(business=business).first()
         intents = []
         if sale.pending_amount > 0:

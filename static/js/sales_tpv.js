@@ -12,14 +12,6 @@
     if (event.target.name === "customer_mode") syncCustomer();
   });
   document.addEventListener("click", (event) => {
-    const checkoutOpen = event.target.closest("[data-checkout-open]");
-    if (checkoutOpen && checkoutOpen.getAttribute("aria-disabled") !== "true") {
-      const dialog = document.querySelector("#checkout-dialog");
-      if (dialog?.showModal) dialog.showModal();
-    }
-    if (event.target.closest("[data-checkout-close]")) {
-      document.querySelector("#checkout-dialog")?.close();
-    }
     const button = event.target.closest("[data-quantity-step]");
     if (!button) return;
     const form = button.closest("form");
@@ -47,13 +39,6 @@
   document.addEventListener("input", (event) => {
     const checkout = event.target.closest(".checkout");
     if (checkout) updateCheckoutPreviews(checkout);
-  });
-  document.addEventListener("submit", (event) => {
-    const form = event.target.closest("[data-checkout-form]");
-    if (!form) return;
-    const button = form.querySelector("button[type=submit]");
-    button.disabled = true;
-    button.textContent = button.dataset.loadingText;
   });
   function updateCheckoutPreviews(checkout) {
     const due = Number(checkout.querySelector(".checkout-due strong")?.textContent.replace(",", ".")) || 0;
