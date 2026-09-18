@@ -140,7 +140,12 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 billing_key = page.locator(
                     '[name="billing_idempotency_key"]'
                 ).input_value()
-                page.locator('[name="external_reference"]').fill(invalid_reference)
+                external_reference = page.locator('[name="external_reference"]')
+                external_reference.evaluate(
+                    "element => element.removeAttribute('maxlength')"
+                )
+                external_reference.fill(invalid_reference)
+                self.assertEqual(len(external_reference.input_value()), 151)
                 with page.expect_response(
                     lambda response: (
                         response.request.method == "POST"
