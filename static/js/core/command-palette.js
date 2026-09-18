@@ -18,6 +18,17 @@ export const initCommandPalette = () => {
 
   let returnFocus = triggers[0];
   let highlighted = -1;
+  const getKeyboardReturnTarget = () => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active !== document.documentElement
+    ) {
+      return active;
+    }
+    return triggers[0];
+  };
   const visibleItems = () => items.filter((item) => !item.hidden);
   const highlight = (index) => {
     const visible = visibleItems();
@@ -40,7 +51,7 @@ export const initCommandPalette = () => {
     empty.hidden = visibleItems().length > 0;
     highlighted = -1;
   };
-  const open = (trigger = document.activeElement) => {
+  const open = (trigger) => {
     returnFocus = trigger;
     dialog.showModal();
     input.value = "";
@@ -77,7 +88,7 @@ export const initCommandPalette = () => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       if (dialog.open) dialog.close();
-      else open();
+      else open(getKeyboardReturnTarget());
     }
   });
   dialog.addEventListener("close", () => returnFocus?.focus());
