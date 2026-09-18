@@ -7,6 +7,7 @@ Run with::
 
 import re
 
+from django.conf import settings
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
@@ -64,15 +65,20 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         return browser, context, page, errors
 
     def _open_sale_with_product(self, page):
-        page.get_by_role("link", name="Caja", exact=True).click()
-        page.get_by_role("link", name="Abrir caja").click()
-        page.get_by_label("Efectivo inicial").fill("100.00")
-        page.get_by_role("button", name="Abrir caja").click()
-        page.get_by_role("button", name="Nueva venta").click()
-        expect(page.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
-        page.get_by_label("Buscar producto").fill(self.product.name)
-        page.get_by_role("button", name=re.compile(self.product.name)).click()
-        expect(page.locator("#sale-cart .cart-line")).to_be_visible()
+        page.get_by_label("Operaciones por tienda").get_by_role(
+            "link", name="Caja", exact=True
+        ).click()
+        main = page.locator("#main-content")
+        main.get_by_role("link", name="Abrir caja").click()
+        main.get_by_label("Efectivo inicial").fill("100.00")
+        main.get_by_role("button", name="Abrir caja").click()
+        main.get_by_role("button", name="Nueva venta").click()
+        expect(main.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
+        main.get_by_label("Buscar producto").fill(self.product.name)
+        main.locator("#product-grid").get_by_role(
+            "button", name=re.compile(self.product.name)
+        ).click()
+        expect(main.locator("#sale-cart .cart-line")).to_be_visible()
 
     def test_checkout_processing_422_toast_and_csrf(self):
         with sync_playwright() as playwright:
@@ -219,7 +225,7 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
             browser, context, page, errors = self._browser_page(playwright)
             try:
                 self._open_sale_with_product(page)
-                context.clear_cookies()
+                context.clear_cookies(name=settings.SESSION_COOKIE_NAME)
                 page.locator("#sale-cart .quantity-form").get_by_role(
                     "button", name="Actualizar"
                 ).click()

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -61,8 +62,10 @@ class ExpiredSessionTests(TestCase):
     def test_htmx_login_redirect_is_a_full_navigation(self):
         response = Client().get(reverse("core:home"), HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 204)
-        self.assertIn(reverse("users:login"), response["HX-Redirect"])
-        self.assertIn("next=%2F", response["HX-Redirect"])
+        self.assertIn("HX-Redirect", response)
+        redirect = urlsplit(response["HX-Redirect"])
+        self.assertEqual(redirect.path, reverse("users:login"))
+        self.assertEqual(parse_qs(redirect.query).get("next"), ["/"])
         self.assertEqual(response.content, b"")
 
     def test_normal_request_keeps_django_redirect(self):
