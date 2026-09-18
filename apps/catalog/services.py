@@ -16,6 +16,7 @@ Los services deben contener reglas de negocio.
 
 from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
+from django.db import transaction
 
 from apps.catalog.models import Product, Tax
 
@@ -41,8 +42,14 @@ def _validate_catalog_object_business(*, business, obj):
 def delete_category(*, business, category):
     """Delete a category while preserving SET_NULL product/child relations."""
     _validate_catalog_object_business(business=business, obj=category)
+    old_image = category.image.name
     try:
-        category.delete()
+        with transaction.atomic():
+            category.delete()
+            if old_image:
+                from apps.core.media.services import cleanup_asset
+
+                transaction.on_commit(lambda: cleanup_asset(old_image))
     except ProtectedError as exc:
         raise ValidationError(
             "No se puede eliminar esta categoría porque tiene información "
@@ -53,8 +60,14 @@ def delete_category(*, business, category):
 def delete_product(*, business, product):
     """Delete a product unless a protected commercial relation exists."""
     _validate_catalog_object_business(business=business, obj=product)
+    old_image = product.image.name
     try:
-        product.delete()
+        with transaction.atomic():
+            product.delete()
+            if old_image:
+                from apps.core.media.services import cleanup_asset
+
+                transaction.on_commit(lambda: cleanup_asset(old_image))
     except ProtectedError as exc:
         raise ValidationError(
             "No se puede eliminar este producto porque tiene información "

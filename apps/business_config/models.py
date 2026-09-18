@@ -54,6 +54,7 @@ class BusinessProfile(TimeStampedModel):
     )  # la moneda que se usara
     brand_name = models.CharField("marca", max_length=150, blank=True)
     logo_url = models.URLField("logo", blank=True)
+    logo = models.ImageField("logo gestionado", blank=True, editable=False)
 
     receipt_footer = models.TextField("pie de ticket", blank=True)
     return_policy = models.TextField("política de devoluciones", blank=True)

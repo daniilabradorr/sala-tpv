@@ -1,4 +1,7 @@
 from decimal import Decimal
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
 
 from django.test import TestCase
 
@@ -212,3 +215,51 @@ class ResolveProductTaxServiceTests(TestCase):
             "no tiene negocio asociado",
             str(context.exception),
         )
+
+
+class CatalogMediaDeleteTests(TestCase):
+    def setUp(self):
+        from tempfile import TemporaryDirectory
+
+        from django.core.files.storage import FileSystemStorage
+
+        from apps.core.media.services import replace_media
+        from apps.core.tests.test_media import image_upload
+
+        self.temporary = TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.storage = FileSystemStorage(location=self.temporary.name)
+        self.business = create_business(name="Media delete", slug="media-delete")
+        self.product = create_product(business=self.business)
+        replace_media(
+            business=self.business,
+            entity=self.product,
+            field_name="image",
+            entity_kind="products",
+            upload=image_upload(),
+            storage=self.storage,
+        )
+
+    def test_successful_product_delete_cleans_media_after_commit(self):
+        from apps.catalog.services import delete_product
+
+        old_key = self.product.image.name
+        with patch("apps.core.media.services.cleanup_asset") as cleanup:
+            with self.captureOnCommitCallbacks(execute=True):
+                delete_product(business=self.business, product=self.product)
+        cleanup.assert_called_once_with(old_key)
+
+    def test_protected_delete_keeps_media(self):
+        from django.db.models.deletion import ProtectedError
+
+        from apps.catalog.services import delete_product
+
+        old_key = self.product.image.name
+        with patch.object(
+            self.product,
+            "delete",
+            side_effect=ProtectedError("protected", {self.product}),
+        ):
+            with self.assertRaises(ValidationError):
+                delete_product(business=self.business, product=self.product)
+        self.assertTrue(self.storage.exists(old_key))

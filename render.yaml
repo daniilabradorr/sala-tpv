@@ -32,3 +32,18 @@ services:
 
       - key: LOG_LEVEL
         value: INFO
+
+      - key: MEDIA_STORAGE_ENDPOINT_URL
+        sync: false
+      - key: MEDIA_STORAGE_ACCESS_KEY
+        sync: false
+      - key: MEDIA_STORAGE_SECRET_KEY
+        sync: false
+      - key: MEDIA_STORAGE_BUCKET_NAME
+        sync: false
+      - key: MEDIA_STORAGE_REGION
+        sync: false
+      - key: MEDIA_STORAGE_CUSTOM_DOMAIN
+        sync: false
+      - key: MEDIA_STORAGE_PUBLIC_READ
+        sync: false

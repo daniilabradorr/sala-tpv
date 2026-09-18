@@ -296,6 +296,59 @@ wheels = [
 ]
 
 [[package]]
+name = "boto3"
+version = "1.40.70"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "botocore" }, { name = "jmespath" }, { name = "s3transfer" }]
+
+[[package]]
+name = "botocore"
+version = "1.40.70"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "jmespath" }, { name = "python-dateutil" }, { name = "urllib3" }]
+
+[[package]]
+name = "django-storages"
+version = "1.14.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "boto3", marker = "extra == 's3'" }, { name = "django" }]
+
+[package.optional-dependencies]
+s3 = [{ name = "boto3" }]
+
+[[package]]
+name = "jmespath"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pillow"
+version = "12.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "six" }]
+
+[[package]]
+name = "s3transfer"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "botocore" }]
+
+[[package]]
+name = "six"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "urllib3"
+version = "2.5.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
 name = "sala-tpv"
 version = "0.1.0"
 source = { virtual = "." }
@@ -303,7 +356,9 @@ dependencies = [
     { name = "dj-database-url" },
     { name = "django" },
     { name = "django-htmx" },
+    { name = "django-storages", extra = ["s3"] },
     { name = "gunicorn" },
+    { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "whitenoise" },
@@ -323,7 +378,9 @@ requires-dist = [
     { name = "dj-database-url", specifier = ">=2.2" },
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "django-htmx", specifier = "==1.29.0" },
+    { name = "django-storages", extras = ["s3"], specifier = ">=1.14,<2" },
     { name = "gunicorn", specifier = ">=23.0" },
+    { name = "pillow", specifier = ">=11,<13" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "whitenoise", specifier = ">=6.0" },

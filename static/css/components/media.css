@@ -1,0 +1,2 @@
+.media-preview { display:block; width:min(100%, 32rem); aspect-ratio:4/3; object-fit:contain; border-radius:.5rem; background:#eef1f4; }
+.media-preview--logo { width:12rem; max-height:8rem; }
