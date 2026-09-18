@@ -1,0 +1,18 @@
+<dialog class="shell-dialog command-dialog" data-command-dialog aria-labelledby="command-title">
+    <div class="command-search">
+        {% include "components/icon.html" with name="search" %}
+        <label class="visually-hidden" for="command-input">Buscar módulo o acción</label>
+        <input id="command-input" type="search" autocomplete="off" placeholder="Buscar módulo o acción..." data-command-input>
+        <button type="button" class="icon-button" aria-label="Cerrar búsqueda" data-command-close>{% include "components/icon.html" with name="close" %}</button>
+    </div>
+    <h2 id="command-title" class="visually-hidden">Navegación y acciones rápidas</h2>
+    <div class="command-results" data-command-results>
+        {% if shell_quick_actions %}<section><h3>Acciones rápidas</h3>
+            {% for item in shell_quick_actions %}<a href="{{ item.url }}" data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></a>{% endfor %}
+        </section>{% endif %}
+        {% for group in shell_navigation %}<section><h3>{{ group.label }}</h3>
+            {% for item in group.items %}<a href="{{ item.url }}" data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></a>{% endfor %}
+        </section>{% endfor %}
+        <p class="command-empty" data-command-empty hidden>No hay coincidencias.</p>
+    </div>
+</dialog>

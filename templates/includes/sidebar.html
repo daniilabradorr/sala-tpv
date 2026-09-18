@@ -1,30 +1,28 @@
 {% load static %}
-{% with app=request.resolver_match.app_name url_name=request.resolver_match.url_name %}
 <aside id="app-sidebar" class="app-sidebar" aria-label="Navegación de la aplicación" data-sidebar>
     <div class="sidebar-brand">
         <a href="{% url 'core:home' %}" aria-label="Netxodo, inicio"><img class="brand-logo" src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo"></a>
-        <button class="sidebar-close" type="button" aria-label="Cerrar menú" data-sidebar-close>&times;</button>
+        <button class="sidebar-close" type="button" aria-label="Cerrar menú" data-sidebar-close>{% include "components/icon.html" with name="close" %}</button>
     </div>
     <nav class="sidebar-nav" aria-label="Navegación principal">
-        <a href="{% url 'core:home' %}"{% if app == 'core' %} class="is-active" aria-current="page"{% endif %}>Inicio</a>
-        {% if request.user.business_id %}
-            <a href="{% url 'stores:store_list' %}"{% if app == 'stores' %} class="is-active" aria-current="page"{% endif %}>Tiendas</a>
-            <a href="{% url 'catalog:dashboard' %}"{% if app == 'catalog' %} class="is-active" aria-current="page"{% endif %}>Catálogo</a>
-            <a href="{% url 'inventory:dashboard' %}"{% if app == 'inventory' %} class="is-active" aria-current="page"{% endif %}>Inventario</a>
-            <a href="{% url 'customers:customer_list' %}"{% if app == 'customers' %} class="is-active" aria-current="page"{% endif %}>Clientes</a>
-            {% if request.user.is_superuser or request.user.role == 'owner' or request.user.role == 'manager' %}
-                <a href="{% url 'purchases:purchase_list' %}"{% if app == 'purchases' %} class="is-active" aria-current="page"{% endif %}>Compras</a>
-                <a href="{% url 'users:user_list' %}"{% if app == 'users' and url_name != 'profile' and url_name != 'profile_update' and url_name != 'password_change' and url_name != 'pin_change' %} class="is-active" aria-current="page"{% endif %}>Usuarios</a>
-            {% endif %}
-            {% if request.user.is_superuser or request.user.role == 'owner' %}
-                <a href="{% url 'business_config:profile' %}"{% if app == 'business_config' %} class="is-active" aria-current="page"{% endif %}>Configuración</a>
-            {% endif %}
-        {% endif %}
-        {% if request.user.is_superuser %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+        {% for group in shell_navigation %}
+            <section class="sidebar-group" aria-labelledby="nav-group-{{ group.id }}">
+                <h2 id="nav-group-{{ group.id }}" class="sidebar-group-label">{{ group.label }}</h2>
+                <div class="sidebar-group-links">
+                    {% for item in group.items %}
+                        <a href="{{ item.url }}"{% if item.active %} class="is-active" aria-current="page"{% endif %}>
+                            {% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endfor %}
     </nav>
     <div class="sidebar-footer">
-        <a href="{% url 'users:profile' %}"{% if app == 'users' and url_name == 'profile' or app == 'users' and url_name == 'profile_update' or app == 'users' and url_name == 'password_change' or app == 'users' and url_name == 'pin_change' %} class="is-active" aria-current="page"{% endif %}>Mi perfil</a>
-        <form method="post" action="{% url 'users:logout' %}">{% csrf_token %}<button type="submit">Cerrar sesión</button></form>
+        <div class="sidebar-context">
+            <span>{{ active_store.name|default:"Sin tienda activa" }}</span>
+            {% if shell_business %}<small>{{ shell_business.name }}</small>{% endif %}
+        </div>
+        <a href="{% url 'users:profile' %}">{% include "components/icon.html" with name="user" %}<span>{{ shell_user_name }}</span></a>
     </div>
 </aside>
-{% endwith %}

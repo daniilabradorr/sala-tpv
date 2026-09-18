@@ -64,7 +64,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 toggle = page.locator("[data-sidebar-toggle]")
                 sidebar = page.locator("#app-sidebar")
-                catalog_link = sidebar.get_by_role("link", name="Catálogo")
+                catalog_link = sidebar.get_by_role("link", name="Productos")
                 overlay = page.locator("[data-sidebar-overlay]")
                 expect(toggle).to_be_visible()
                 expect(toggle).to_have_attribute("aria-expanded", "false")
@@ -83,7 +83,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
 
                 page.keyboard.press("Shift+Tab")
                 expect(
-                    sidebar.get_by_role("button", name="Cerrar sesión")
+                    sidebar.get_by_role("link", name="Responsive Owner")
                 ).to_be_focused()
                 page.keyboard.press("Tab")
                 expect(sidebar.locator("a").first).to_be_focused()
@@ -97,7 +97,15 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 toggle.click()
                 catalog_link.click()
                 page.wait_for_url(f"{self.live_server_url}/catalog/")
-                expect(page.locator('[aria-current="page"]')).to_have_text("Catálogo")
+                expect(page.locator('[aria-current="page"]')).to_have_text("Productos")
+                page.keyboard.press("Control+k")
+                palette = page.locator("[data-command-dialog]")
+                expect(palette).to_be_visible()
+                expect(page.locator("[data-command-input]")).to_be_focused()
+                page.locator("[data-command-input]").fill("invent")
+                expect(palette.get_by_role("link", name="Inventario")).to_be_visible()
+                page.keyboard.press("Escape")
+                expect(palette).to_be_hidden()
                 self.assertTrue(
                     page.evaluate(
                         "document.documentElement.scrollWidth <= "
@@ -105,6 +113,32 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                     )
                 )
                 self.assertEqual(javascript_errors, [])
+            finally:
+                context.close()
+                browser.close()
+
+    def test_desktop_and_tablet_sidebar_breakpoint(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1200, "height": 800})
+            page = context.new_page()
+            try:
+                page.goto(f"{self.live_server_url}/users/login/")
+                page.get_by_label("Correo electrónico").fill(self.email)
+                page.get_by_label("Contraseña").fill(self.password)
+                page.get_by_role("button", name="Iniciar sesión").click()
+                page.wait_for_url(f"{self.live_server_url}/")
+                sidebar = page.locator("#app-sidebar")
+                expect(sidebar).to_be_visible()
+                expect(sidebar).not_to_have_attribute("inert", "")
+                expect(page.locator("[data-sidebar-toggle]")).to_be_hidden()
+                page.set_viewport_size({"width": 1199, "height": 800})
+                expect(page.locator("[data-sidebar-toggle]")).to_be_visible()
+                expect(sidebar).to_have_attribute("inert", "")
+                page.set_viewport_size({"width": 768, "height": 800})
+                page.locator("[data-sidebar-toggle]").click()
+                expect(sidebar).not_to_have_attribute("inert", "")
+                expect(page.locator("[data-sidebar-overlay]")).to_be_visible()
             finally:
                 context.close()
                 browser.close()

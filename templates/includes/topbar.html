@@ -1,14 +1,16 @@
 <header class="topbar">
     <button class="sidebar-toggle" type="button" aria-label="Abrir menú" aria-controls="app-sidebar" aria-expanded="false" data-sidebar-toggle>
-        <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+        {% include "components/icon.html" with name="menu" %}
     </button>
-    <div class="topbar-context">
-        {% if store %}<span class="context-label">Tienda</span><strong>{{ store.name }}</strong>
-        {% elif request.user.business_id %}<span class="context-label">Negocio</span><strong>{{ request.user.business.name }}</strong>
-        {% else %}<span class="context-label">Netxodo</span><strong>Administración</strong>{% endif %}
-    </div>
-    <div class="topbar-user">
-        <span class="user-name">{{ request.user.get_full_name|default:request.user.email }}</span>
-        <span class="user-meta">{{ request.user.email }}{% if request.user.role %} · {{ request.user.get_role_display }}{% endif %}</span>
-    </div>
+    {% include "components/store_switcher.html" %}
+    <button class="command-trigger" type="button" aria-label="Buscar módulo o acción" data-command-trigger>
+        {% include "components/icon.html" with name="search" %}
+        <span class="command-trigger-label">Buscar módulo o acción...</span><kbd>Ctrl K</kbd>
+    </button>
+    {% if shell_capabilities.can_sell %}
+        {% for action in shell_quick_actions %}{% if action.id == "new-sale" %}
+            <a class="button button-primary topbar-sale" href="{{ action.url }}">{% include "components/icon.html" with name="plus" %}<span class="sale-label-long">Nueva venta</span><span class="sale-label-short">Venta</span></a>
+        {% endif %}{% endfor %}
+    {% endif %}
+    {% include "components/user_menu.html" %}
 </header>

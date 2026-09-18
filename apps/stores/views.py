@@ -1,8 +1,11 @@
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse, reverse_lazy
+from django.urls import Resolver404, resolve, reverse, reverse_lazy
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
+from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
     DeleteView,
@@ -11,6 +14,7 @@ from django.views.generic import (
     UpdateView,
 )
 
+from apps.core.context_processors import ACTIVE_STORE_SESSION_KEY
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 from apps.stores.models import Store
 from apps.stores.selectors import (
@@ -23,12 +27,45 @@ from apps.stores.services import (
     delete_store,
     set_default_store,
 )
+from apps.users.helpers import can_access_store, is_owner_or_manager
 from apps.users.mixins import (
     BusinessRequiredMixin,
     ManagerOrOwnerRequiredMixin,
     StoreAccessRequiredMixin,
 )
-from apps.users.helpers import can_access_store, is_owner_or_manager
+
+
+@login_required
+@require_POST
+def set_active_store(request, pk):
+    """Persist an authorized operational store as UI context only."""
+
+    user = request.user
+    if user.is_superuser and not user.business_id:
+        raise PermissionDenied("Se requiere un contexto de negocio explícito.")
+    store = get_object_or_404(
+        get_stores_available_for_user(user=user, only_active=True), pk=pk
+    )
+    request.session[ACTIVE_STORE_SESSION_KEY] = store.pk
+
+    next_url = request.POST.get("next", "")
+    if not url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return redirect("core:home")
+    try:
+        match = resolve(next_url)
+    except Resolver404:
+        return redirect("core:home")
+    scoped_roots = {
+        "sales": ("sales:sale_list", {"store_id": store.pk}),
+        "cash_register": ("cash_register:register_list", {"store_id": store.pk}),
+        "billing": ("billing:document_list", {"store_id": store.pk}),
+    }
+    if match.namespace in scoped_roots:
+        route, kwargs = scoped_roots[match.namespace]
+        return redirect(route, **kwargs)
+    return redirect(next_url)
 
 
 class ListStoresView(BusinessRequiredMixin, ListView):

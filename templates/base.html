@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="{% static 'css/components/tables.css' %}">
     <link rel="stylesheet" href="{% static 'css/components/tabs.css' %}">
     <link rel="stylesheet" href="{% static 'css/components/skeleton.css' %}">
+    <link rel="stylesheet" href="{% static 'css/layout.css' %}">
     <link rel="stylesheet" href="{% static 'css/erp_admin.css' %}">
     <script src="{% static 'vendor/htmx/1.9.12/htmx.min.js' %}"></script>
     {% block extra_head %}{% endblock %}
@@ -36,6 +37,7 @@
                     </div>
                 </main>
             </div>
+            {% include "components/command_palette.html" %}
         </div>
     {% else %}
         <div class="public-shell">
