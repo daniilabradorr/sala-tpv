@@ -3,7 +3,7 @@
     <span><small>Tienda</small><strong>{{ active_store.name|default:"Sin tienda activa" }}</strong></span>
     {% include "components/icon.html" with name="chevron-down" %}
 </button>
-<dialog id="store-dialog" class="shell-dialog store-dialog nx-drawer" data-store-dialog data-nx-drawer aria-labelledby="store-dialog-title">
+<dialog id="store-dialog" class="store-dialog nx-drawer" data-store-dialog data-nx-drawer aria-labelledby="store-dialog-title">
     <div class="dialog-heading">
         <h2 id="store-dialog-title">Seleccionar tienda</h2>
         <button type="button" class="icon-button" aria-label="Cerrar selector de tienda" data-store-close data-nx-drawer-close>{% include "components/icon.html" with name="close" %}</button>

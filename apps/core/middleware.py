@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.http import HttpResponse
-from django.urls import resolve_url
+from django.shortcuts import resolve_url
 
 
 class HtmxLoginRedirectMiddleware:
@@ -15,7 +15,13 @@ class HtmxLoginRedirectMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        if not request.htmx or response.status_code not in {301, 302, 303, 307, 308}:
+        if not getattr(request, "htmx", False) or response.status_code not in {
+            301,
+            302,
+            303,
+            307,
+            308,
+        }:
             return response
         location = response.get("Location", "")
         if urlsplit(location).path != urlsplit(resolve_url(settings.LOGIN_URL)).path:

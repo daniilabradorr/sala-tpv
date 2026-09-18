@@ -3,10 +3,12 @@ from pathlib import Path
 
 from django.conf import settings
 from django.http import HttpResponse
-from django.test import Client, SimpleTestCase
+from django.http import HttpResponseRedirect
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from apps.core.htmx import add_hx_trigger
+from apps.core.middleware import HtmxLoginRedirectMiddleware
 
 
 class HxTriggerTests(SimpleTestCase):
@@ -26,6 +28,18 @@ class HxTriggerTests(SimpleTestCase):
             {"existing", "nx:close-modal", "nx:toast"},
         )
 
+    def test_normalizes_legacy_and_unexpected_existing_headers(self):
+        response = HttpResponse(headers={"HX-Trigger": "legacy-one, legacy-two"})
+        add_hx_trigger(response, {"nx:toast": {}})
+        self.assertEqual(
+            set(json.loads(response["HX-Trigger"])),
+            {"legacy-one", "legacy-two", "nx:toast"},
+        )
+
+        response = HttpResponse(headers={"HX-Trigger": "42"})
+        add_hx_trigger(response, {"nx:toast": {}})
+        self.assertEqual(json.loads(response["HX-Trigger"]), {"nx:toast": {}})
+
 
 class HtmxBaseContractTests(SimpleTestCase):
     def test_csrf_contract_remains_enabled(self):
@@ -43,7 +57,7 @@ class HtmxBaseContractTests(SimpleTestCase):
         self.assertIn('aria-live="polite"', feedback)
 
 
-class ExpiredSessionTests(SimpleTestCase):
+class ExpiredSessionTests(TestCase):
     def test_htmx_login_redirect_is_a_full_navigation(self):
         response = Client().get(reverse("core:home"), HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 204)
@@ -56,3 +70,21 @@ class ExpiredSessionTests(SimpleTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("users:login"), response["Location"])
         self.assertNotIn("HX-Redirect", response)
+
+    def test_non_login_redirect_is_never_converted(self):
+        request = RequestFactory().get("/source/", HTTP_HX_REQUEST="true")
+        request.htmx = True
+        middleware = HtmxLoginRedirectMiddleware(
+            lambda _request: HttpResponseRedirect("/sales/")
+        )
+        response = middleware(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/sales/")
+        self.assertNotIn("HX-Redirect", response)
+
+    def test_request_without_htmx_attribute_is_safe(self):
+        request = RequestFactory().get("/source/")
+        response = HtmxLoginRedirectMiddleware(
+            lambda _request: HttpResponseRedirect("/users/login/?next=/source/")
+        )(request)
+        self.assertEqual(response.status_code, 302)

@@ -1,5 +1,7 @@
 """Tests de integración HTTP para las views del módulo sales."""
 
+import json
+
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -325,6 +327,32 @@ class SaleViewsIntegrationTests(TestCase):
             fetch_redirect_response=False,
         )
 
+    def test_quantity_validation_uses_422_only_for_htmx(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        original_quantity = line.quantity
+        url = reverse(
+            "sales:sale_line_quantity_update",
+            kwargs={
+                "store_id": self.store.pk,
+                "sale_pk": sale.pk,
+                "line_pk": line.pk,
+            },
+        )
+
+        response = self.client.post(url, {"quantity": "0"}, HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 422)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertContains(response, "quantity", status_code=422)
+        line.refresh_from_db()
+        self.assertEqual(line.quantity, original_quantity)
+
+        response = self.client.post(url, {"quantity": "2"}, HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(url, {"quantity": "0"})
+        self.assertEqual(response.status_code, 302)
+
     def test_header_customer_mode_is_processed_server_side(self):
         self.login_as(self.owner)
         customer = create_sales_customer(business=self.business)
@@ -404,10 +432,32 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("customer", response.context["form"].errors)
         response = self.client.post(url, data, HTTP_HX_REQUEST="true")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 422)
         self.assertTemplateUsed(response, "sales/partials/_workspace_header.html")
+        self.assertIn("customer", response.context["header_form"].errors)
         sale.refresh_from_db()
         self.assertEqual(sale.document_type_requested, "ticket")
+
+    def test_valid_htmx_header_update_emits_toast_trigger(self):
+        self.login_as(self.owner)
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        response = self.client.post(
+            reverse(
+                "sales:sale_header_update",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {
+                "customer_mode": "counter",
+                "customer": "",
+                "document_type_requested": "ticket",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_workspace_header.html")
+        trigger = json.loads(response["HX-Trigger"])
+        self.assertEqual(trigger["nx:toast"]["message"], "Venta actualizada.")
+        self.assertEqual(trigger["nx:toast"]["tone"], "success")
 
     def test_quick_add_htmx_keeps_cart_on_error_and_success(self):
         self.login_as(self.owner)
@@ -421,13 +471,14 @@ class SaleViewsIntegrationTests(TestCase):
             {"product": self.product.pk, "quantity": "0"},
             HTTP_HX_REQUEST="true",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 422)
         self.assertTemplateUsed(response, "sales/partials/_cart.html")
         self.assertTemplateNotUsed(response, "sales/sale_line_form.html")
-        self.assertContains(response, "sale-cart")
+        self.assertContains(response, "sale-cart", status_code=422)
         form = response.context["cart_form"]
         self.assertIn("quantity", form.errors)
         self.assertEqual(form.errors.as_data()["quantity"][0].code, "min_value")
+        self.assertEqual(sale.lines.count(), 0)
 
         with patch(
             "apps.sales.views.add_sale_line",

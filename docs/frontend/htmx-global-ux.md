@@ -12,7 +12,7 @@ El drawer usa el mismo árbol en todos los tamaños: `data-nx-drawer`, `data-nx-
 
 `nx:toast` acepta `{message, tone, timeout}`. El mensaje siempre se escribe con `textContent`, los tonos válidos son `success`, `info`, `warning` y `error`, y la región es `aria-live="polite"`. Los errores que requieren atención usan feedback persistente, no un toast efímero.
 
-El helper `add_hx_trigger(response, events)` combina eventos JSON en `HX-Trigger`. Eventos globales:
+El helper `add_hx_trigger(response, events)` combina eventos JSON en `HX-Trigger`. El contrato de salida siempre es un objeto JSON; al recibir un objeto existente lo combina y normaliza de forma defensiva los nombres de evento legacy separados por comas (o una lista JSON de nombres), sin convertir un header inesperado en un error 500. Eventos globales:
 
 - `nx:toast`: muestra feedback transitorio.
 - `nx:close-modal` / `nx:close-drawer`: cierran la superficie abierta; opcionalmente aceptan un `id` seguro.
@@ -22,13 +22,13 @@ El helper `add_hx_trigger(response, events)` combina eventos JSON en `HX-Trigger
 
 `htmx:beforeRequest` marca solamente el target con `aria-busy` e `is-loading`; todos los finales de request y errores lo limpian. Los formularios críticos usan `data-nx-critical-form` y `data-loading-text`: se conserva el texto, se evita doble envío y la superficie no se puede cerrar durante el request.
 
-En error de red no se afirma fracaso: se indica que el resultado no puede confirmarse y se recomienda verificar antes de repetir. La clave de idempotencia no se crea, borra ni cambia en JavaScript; bloqueo de UI e idempotencia/transacción del backend son defensas distintas.
+En error de red de una mutación no se afirma fracaso: se indica que el resultado no puede confirmarse y se recomienda verificar antes de repetir. En una lectura GET se informa, en cambio, de que no se pudo cargar la información y se permite reintentar. La clave de idempotencia no se crea, borra ni cambia en JavaScript; bloqueo de UI e idempotencia/transacción del backend son defensas distintas.
 
 - **422:** se permite el swap del mismo formulario, preservando valores y errores inline.
 - **403:** no se swapea; mensaje persistente de permiso.
 - **404:** no se swapea; se informa que el recurso ya no está disponible.
 - **409:** no se swapea; se recomienda actualizar el estado real.
-- **500:** no se swapea ni se filtran detalles internos; mensaje genérico persistente.
+- **5xx:** no se swapea ni se filtran detalles internos; mensaje genérico persistente.
 
 ## CSRF, sesión y foco
 
