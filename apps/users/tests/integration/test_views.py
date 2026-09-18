@@ -128,6 +128,7 @@ class UserViewsIntegrationTests(TestCase):
             is_active=False,
         )
         self.login_as(self.owner)
+        self.client.get(reverse("users:user_list"))
 
         with CaptureQueriesContext(connection) as initial_queries:
             response = self.client.get(reverse("users:user_list"))

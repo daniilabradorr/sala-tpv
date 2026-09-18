@@ -195,15 +195,26 @@ class AppShellTests(TestCase):
 
     def test_unauthorized_store_id_in_url_does_not_synchronize(self):
         self.client.force_login(self.cashier)
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.other_store,
+            is_active=True,
+        )
+        unauthorized_store = Store.objects.create(
+            business=self.business,
+            name="Sin acceso",
+            code="NO-ACCESS",
+        )
         session = self.client.session
-        session[ACTIVE_STORE_SESSION_KEY] = self.default_store.pk
+        session[ACTIVE_STORE_SESSION_KEY] = self.other_store.pk
         session.save()
         response = self.client.get(
-            reverse("sales:sale_list", args=[self.other_store.pk])
+            reverse("sales:sale_list", args=[unauthorized_store.pk])
         )
         self.assertIn(response.status_code, {403, 404})
         self.assertEqual(
-            self.client.session[ACTIVE_STORE_SESSION_KEY], self.default_store.pk
+            self.client.session[ACTIVE_STORE_SESSION_KEY], self.other_store.pk
         )
 
     def test_superuser_with_business_is_tenant_limited_in_shell_and_switch(self):

@@ -99,6 +99,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 page.wait_for_url(f"{self.live_server_url}/catalog/products/")
                 expect(page.locator('[aria-current="page"]')).to_have_text("Productos")
                 page.keyboard.press("Control+k")
+                command_trigger = page.locator("[data-command-trigger]")
                 palette = page.locator("[data-command-dialog]")
                 expect(palette).to_be_visible()
                 expect(page.locator("[data-command-input]")).to_be_focused()
@@ -106,6 +107,7 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 expect(palette.get_by_role("link", name="Inventario")).to_be_visible()
                 page.keyboard.press("Escape")
                 expect(palette).to_be_hidden()
+                expect(command_trigger).to_be_focused()
                 self.assertTrue(
                     page.evaluate(
                         "document.documentElement.scrollWidth <= "

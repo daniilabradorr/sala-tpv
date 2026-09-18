@@ -31,11 +31,10 @@ def resolve_active_store(request, *, user):
     route_store_id = getattr(
         getattr(request, "resolver_match", None), "kwargs", {}
     ).get("store_id")
-    active_store = stores_by_id.get(route_store_id)
-
     stored_id = request.session.get(ACTIVE_STORE_SESSION_KEY)
-    if active_store is None and route_store_id is None:
-        active_store = stores_by_id.get(stored_id)
+    route_store = stores_by_id.get(route_store_id)
+    stored_store = stores_by_id.get(stored_id)
+    active_store = route_store or stored_store
     if active_store is None:
         active_store = next((store for store in stores if store.is_default), None)
         active_store = active_store or (stores[0] if stores else None)
