@@ -8,8 +8,10 @@ dependencies = [
     "dj-database-url>=2.2",
     "django>=5.2,<5.3",
     "django-htmx==1.29.0",
+    "django-storages[s3]>=1.14,<2",
     "gunicorn>=23.0",
     "psycopg[binary]>=3.2",
+    "Pillow>=11,<13",
     "python-dotenv>=1.0",
     "whitenoise>=6.0",
 ]

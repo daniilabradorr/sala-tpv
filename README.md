@@ -698,3 +698,7 @@ DATABASE_URL=postgresql://sala_tpv_user:sala_tpv_password@db:5432/sala_tpv
 ```
 
 Con esto, la tarea queda bien cubierta: **instalación, `.env`, ejecución local, Docker, tests, lint y Render**.
+
+### Media en producción
+
+Los uploads se almacenan mediante object storage S3-compatible configurable; WhiteNoise sirve únicamente archivos estáticos. Consulta `docs/frontend/media-storage.md` para variables y ciclo de vida.

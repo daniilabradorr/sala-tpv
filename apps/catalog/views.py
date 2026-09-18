@@ -22,6 +22,7 @@ from apps.catalog.forms import (
     ProductUpdateForm,
 )
 from apps.catalog.services import delete_category, delete_product, delete_tax
+from apps.core.media.services import remove_media, replace_media
 from apps.users.mixins import (
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -45,6 +46,20 @@ class PageTitleMixin:
         context["page_title"] = self.page_title
         context["can_manage_catalog"] = is_owner_or_manager(self.request.user)
         return context
+
+
+def _apply_media_form(*, business, entity, form, entity_kind):
+    upload = form.cleaned_data.get("image_upload")
+    if upload:
+        replace_media(
+            business=business,
+            entity=entity,
+            field_name="image",
+            entity_kind=entity_kind,
+            upload=upload,
+        )
+    elif form.cleaned_data.get("remove_image"):
+        remove_media(business=business, entity=entity, field_name="image")
 
 
 class CatalogDashboardView(
@@ -154,6 +169,10 @@ class CategoryCreateView(
         form.instance.business = self.request.user.business
 
         response = super().form_valid(form)
+        _apply_media_form(
+            business=self.request.user.business, entity=self.object, form=form,
+            entity_kind="categories",
+        )
 
         messages.success(
             self.request,
@@ -197,6 +216,10 @@ class CategoryUpdateView(
 
     def form_valid(self, form):
         response = super().form_valid(form)
+        _apply_media_form(
+            business=self.request.user.business, entity=self.object, form=form,
+            entity_kind="categories",
+        )
 
         messages.success(
             self.request,
@@ -666,6 +689,10 @@ class ProductCreateView(
         form.instance.business = self.request.user.business
 
         response = super().form_valid(form)
+        _apply_media_form(
+            business=self.request.user.business, entity=self.object, form=form,
+            entity_kind="products",
+        )
 
         messages.success(
             self.request,
@@ -709,6 +736,10 @@ class ProductUpdateView(
 
     def form_valid(self, form):
         response = super().form_valid(form)
+        _apply_media_form(
+            business=self.request.user.business, entity=self.object, form=form,
+            entity_kind="products",
+        )
 
         messages.success(
             self.request,

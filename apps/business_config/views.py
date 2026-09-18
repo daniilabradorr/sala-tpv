@@ -5,7 +5,12 @@ from django.views import View
 
 from apps.business_config.forms import BusinessProfileForm, POSSettingsForm
 from apps.business_config.models import BusinessProfile, POSSettings
-from apps.business_config.services import update_business_profile, update_pos_settings
+from apps.business_config.services import (
+    remove_business_logo,
+    replace_business_logo,
+    update_business_profile,
+    update_pos_settings,
+)
 from apps.users.mixins import CanManageBusinessSettingsMixin
 
 
@@ -28,11 +33,21 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
     def post(self, request):
         business = self.get_business()
         profile = get_object_or_404(BusinessProfile, business=business)
-        form = BusinessProfileForm(data=request.POST, instance=profile)
+        form = BusinessProfileForm(
+            data=request.POST, files=request.FILES, instance=profile
+        )
         if form.is_valid():
+            logo_upload = form.cleaned_data.pop("logo_upload")
+            remove_logo = form.cleaned_data.pop("remove_logo")
             update_business_profile(
                 business=business, updated_by=request.user, **form.cleaned_data
             )
+            if logo_upload:
+                replace_business_logo(
+                    business=business, profile=profile, upload=logo_upload
+                )
+            elif remove_logo:
+                remove_business_logo(business=business, profile=profile)
             messages.success(request, "Datos de empresa actualizados correctamente.")
             return redirect("business_config:profile")
         return render(request, self.template_name, {"form": form})

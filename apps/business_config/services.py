@@ -23,7 +23,6 @@ BUSINESS_PROFILE_EDITABLE_FIELDS = (
     "country_code",
     "currency_code",
     "brand_name",
-    "logo_url",
     "receipt_footer",
     "return_policy",
 )
@@ -172,6 +171,26 @@ def update_business_profile(*, business, updated_by, **profile_data):
             },
         )
     return profile
+
+
+def replace_business_logo(*, business, profile, upload):
+    from apps.core.media.services import replace_media
+
+    return replace_media(
+        business=business,
+        entity=profile,
+        field_name="logo",
+        entity_kind="profile",
+        upload=upload,
+    )
+
+
+def remove_business_logo(*, business, profile):
+    from apps.core.media.services import remove_media
+
+    return remove_media(
+        business=business, entity=profile, field_name="logo"
+    )
 
 
 @transaction.atomic
