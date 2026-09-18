@@ -63,6 +63,18 @@ class DesignSystemAssetTests(SimpleTestCase):
         )
         self.assertNotIn(".sidebar-footer", buttons)
 
+    def test_small_text_on_light_surfaces_uses_accessible_colors(self):
+        base = Path(settings.BASE_DIR, "static", "css", "base.css").read_text()
+        skip_link = base.split(".skip-link {", 1)[1].split("}", 1)[0]
+        skip_link_focus = base.split(".skip-link:focus {", 1)[1].split("}", 1)[0]
+        eyebrow = base.split(".eyebrow {", 1)[1].split("}", 1)[0]
+
+        self.assertIn("background: var(--nx-yellow)", skip_link)
+        self.assertIn("color: var(--nx-brand-night)", skip_link)
+        self.assertNotIn("color: var(--nx-bg)", skip_link)
+        self.assertIn("color: var(--nx-brand-night)", skip_link_focus)
+        self.assertIn("color: var(--nx-primary)", eyebrow)
+
 
 class IconComponentTests(SimpleTestCase):
     def test_icon_helper_references_local_sprite_and_is_decorative(self):

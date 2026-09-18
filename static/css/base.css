@@ -13,10 +13,10 @@ a { color: var(--nx-blue-bright); text-decoration: none; }
 a:hover { color: var(--text); }
 .skip-link {
     position: fixed; z-index: 100; top: .75rem; left: .75rem; padding: .7rem 1rem; border-radius: 8px;
-    background: var(--nx-yellow); color: var(--nx-bg); font-weight: 800;
+    background: var(--nx-yellow); color: var(--nx-brand-night); font-weight: 800;
     transform: translateY(calc(-100% - 1rem));
 }
-.skip-link:focus { color: var(--nx-bg); transform: translateY(0); }
+.skip-link:focus { color: var(--nx-brand-night); transform: translateY(0); }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
     outline: 3px solid var(--nx-blue-bright);
     outline-offset: 3px;
@@ -43,7 +43,7 @@ h3 { font-weight: var(--nx-weight-bold); }
 .site-footer .container { padding-block: 1.15rem; color: var(--muted); }
 
 .section-accent { width: 56px; height: 3px; margin: .75rem 0 1.2rem; border-radius: 999px; background: var(--nx-yellow); }
-.eyebrow { color: var(--nx-yellow); font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.eyebrow { color: var(--nx-primary); font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
 .login-card { max-width: 520px; }
 .login-logo, .error-logo { display: block; width: min(172px, 48vw); height: auto; margin-bottom: 1.25rem; }
 .error-logo { margin-inline: auto; }
