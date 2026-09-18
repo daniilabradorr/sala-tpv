@@ -133,12 +133,14 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                     });
                     """
                 )
-                page.locator('[name="external_reference"]').fill(
-                    "Referencia conservada"
-                )
-                page.locator('[name="payment_idempotency_key"]').evaluate(
-                    "input => { input.value = 'not-a-uuid'; }"
-                )
+                invalid_reference = "X" * 151
+                payment_key = page.locator(
+                    '[name="payment_idempotency_key"]'
+                ).input_value()
+                billing_key = page.locator(
+                    '[name="billing_idempotency_key"]'
+                ).input_value()
+                page.locator('[name="external_reference"]').fill(invalid_reference)
                 with page.expect_response(
                     lambda response: (
                         response.request.method == "POST"
@@ -148,10 +150,19 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                     page.get_by_role("button", name="Confirmar cobro").click()
                 self.assertEqual(response_info.value.status, 422)
                 expect(dialog).to_be_visible()
-                expect(dialog.locator(".errorlist").first).to_be_visible()
+                expect(dialog.locator(".errorlist:visible")).not_to_have_count(0)
                 expect(dialog.locator('[name="external_reference"]')).to_have_value(
-                    "Referencia conservada"
+                    invalid_reference
                 )
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(payment_key)
+                expect(
+                    dialog.locator('[name="billing_idempotency_key"]')
+                ).to_have_value(billing_key)
+                expect(
+                    dialog.get_by_role("heading", name="Venta completada")
+                ).to_have_count(0)
                 snapshots = page.evaluate("window.nxProcessingSnapshots")
                 self.assertEqual(snapshots["before"]["processing"], "true")
                 self.assertTrue(snapshots["before"]["disabled"])
@@ -258,21 +269,37 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 page.route("**/sales/**", abort_checkout)
                 page.get_by_role("button", name="Confirmar cobro").click()
                 feedback = page.locator("#nx-feedback")
+                expect(feedback).to_be_visible()
                 expect(feedback).to_contain_text(
                     "No podemos confirmar el resultado de la operación."
                 )
                 expect(feedback).to_contain_text(
                     "Comprueba el estado antes de repetir."
                 )
+                self.assertTrue(
+                    page.evaluate(
+                        "document.querySelector('#checkout-dialog').contains("
+                        "document.querySelector('#nx-feedback'))"
+                    )
+                )
                 expect(page.locator("#checkout-dialog")).not_to_have_attribute(
                     "data-nx-processing", "true"
                 )
                 close_feedback = feedback.get_by_role("button", name="Cerrar aviso")
                 close_feedback.focus()
+                expect(close_feedback).to_be_focused()
                 page.keyboard.press("Enter")
                 expect(feedback).to_be_hidden()
+                self.assertTrue(page.locator("#checkout-dialog").is_visible())
+                self.assertTrue(
+                    page.evaluate(
+                        "document.querySelector('[data-nx-feedback-host]').contains("
+                        "document.querySelector('#nx-feedback'))"
+                    )
+                )
                 page.unroute("**/sales/**", abort_checkout)
                 page.keyboard.press("Escape")
+                expect(page.locator("#checkout-dialog")).to_be_hidden()
 
                 def abort_search(route):
                     if route.request.method == "GET" and "q=" in route.request.url:
@@ -282,12 +309,23 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
 
                 page.route("**/sales/**", abort_search)
                 page.get_by_label("Buscar producto").fill("sin conexión")
+                expect(feedback).to_be_visible()
                 expect(feedback).to_contain_text(
                     "No se ha podido cargar la información."
                 )
                 expect(feedback).to_contain_text(
                     "Comprueba la conexión e inténtalo de nuevo."
                 )
+                self.assertTrue(
+                    page.evaluate(
+                        "document.querySelector('[data-nx-feedback-host]').contains("
+                        "document.querySelector('#nx-feedback'))"
+                    )
+                )
+                close_feedback.focus()
+                expect(close_feedback).to_be_focused()
+                page.keyboard.press("Enter")
+                expect(feedback).to_be_hidden()
                 self.assertEqual(errors, [])
             finally:
                 context.close()

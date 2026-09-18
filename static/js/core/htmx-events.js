@@ -30,9 +30,26 @@ const setProcessing = (detail, processing) => {
 };
 const feedback = (message, action = "") => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
+  const surface = document.querySelector("[data-nx-modal][open], [data-nx-drawer][open]");
+  const host = document.querySelector("[data-nx-feedback-host]");
+  if (surface) {
+    surface.prepend(region);
+    region.classList.add("nx-feedback--in-surface");
+  } else if (host) {
+    host.append(region);
+    region.classList.remove("nx-feedback--in-surface");
+  }
   region.querySelector("[data-nx-feedback-message]").textContent = message;
   region.querySelector("[data-nx-feedback-action]").textContent = action;
   region.hidden = false;
+};
+const restoreFeedbackHost = ({ hide = false } = {}) => {
+  const region = document.getElementById("nx-feedback");
+  const host = document.querySelector("[data-nx-feedback-host]");
+  if (!region || !host) return;
+  if (hide) region.hidden = true;
+  host.append(region);
+  region.classList.remove("nx-feedback--in-surface");
 };
 const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail, false); };
 export const initHtmxEvents = () => {
@@ -64,6 +81,7 @@ export const initHtmxEvents = () => {
     if (typeof selector !== "string" || !/^#[A-Za-z][\w:.-]*$/.test(selector)) return;
     document.querySelector(selector)?.dispatchEvent(new CustomEvent("nx:refresh", { bubbles: true }));
   });
-  document.addEventListener("click", (event) => { if (event.target.closest("[data-nx-feedback-close]")) document.getElementById("nx-feedback").hidden = true; });
+  document.addEventListener("click", (event) => { if (event.target.closest("[data-nx-feedback-close]")) restoreFeedbackHost({ hide: true }); });
+  document.addEventListener("close", (event) => { if (event.target.matches?.("[data-nx-modal], [data-nx-drawer]")) restoreFeedbackHost(); }, true);
   initialized = true;
 };
