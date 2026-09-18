@@ -28,6 +28,7 @@ class BusinessProfileForm(forms.ModelForm):
                 "No puedes subir y eliminar el logo al mismo tiempo."
             )
         return cleaned
+
     def clean_country_code(self):
         return self.cleaned_data["country_code"].strip().upper()
 

@@ -168,11 +168,14 @@ class CategoryCreateView(
     def form_valid(self, form):
         form.instance.business = self.request.user.business
 
-        response = super().form_valid(form)
-        _apply_media_form(
-            business=self.request.user.business, entity=self.object, form=form,
-            entity_kind="categories",
-        )
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="categories",
+            )
 
         messages.success(
             self.request,
@@ -215,11 +218,14 @@ class CategoryUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        response = super().form_valid(form)
-        _apply_media_form(
-            business=self.request.user.business, entity=self.object, form=form,
-            entity_kind="categories",
-        )
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="categories",
+            )
 
         messages.success(
             self.request,
@@ -688,11 +694,14 @@ class ProductCreateView(
     def form_valid(self, form):
         form.instance.business = self.request.user.business
 
-        response = super().form_valid(form)
-        _apply_media_form(
-            business=self.request.user.business, entity=self.object, form=form,
-            entity_kind="products",
-        )
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="products",
+            )
 
         messages.success(
             self.request,
@@ -735,11 +744,14 @@ class ProductUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        response = super().form_valid(form)
-        _apply_media_form(
-            business=self.request.user.business, entity=self.object, form=form,
-            entity_kind="products",
-        )
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="products",
+            )
 
         messages.success(
             self.request,

@@ -7,5 +7,19 @@ import { initDrawer } from "./core/drawer.js";
 import { initToast } from "./core/toast.js";
 
 document.documentElement.classList.add("js");
-const initApp = () => { initSidebar(); initCommandPalette(); initModal(); initDrawer(); initToast(); initHtmxEvents(); initMediaPreview(); };
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initApp, { once: true }); else initApp();
+
+const initApp = () => {
+  initSidebar();
+  initCommandPalette();
+  initModal();
+  initDrawer();
+  initToast();
+  initHtmxEvents();
+  initMediaPreview();
+};
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp, { once: true });
+} else {
+  initApp();
+}

@@ -188,9 +188,7 @@ def replace_business_logo(*, business, profile, upload):
 def remove_business_logo(*, business, profile):
     from apps.core.media.services import remove_media
 
-    return remove_media(
-        business=business, entity=profile, field_name="logo"
-    )
+    return remove_media(business=business, entity=profile, field_name="logo")
 
 
 @transaction.atomic

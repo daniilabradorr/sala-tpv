@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 
@@ -39,15 +40,16 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
         if form.is_valid():
             logo_upload = form.cleaned_data.pop("logo_upload")
             remove_logo = form.cleaned_data.pop("remove_logo")
-            update_business_profile(
-                business=business, updated_by=request.user, **form.cleaned_data
-            )
-            if logo_upload:
-                replace_business_logo(
-                    business=business, profile=profile, upload=logo_upload
+            with transaction.atomic():
+                update_business_profile(
+                    business=business, updated_by=request.user, **form.cleaned_data
                 )
-            elif remove_logo:
-                remove_business_logo(business=business, profile=profile)
+                if logo_upload:
+                    replace_business_logo(
+                        business=business, profile=profile, upload=logo_upload
+                    )
+                elif remove_logo:
+                    remove_business_logo(business=business, profile=profile)
             messages.success(request, "Datos de empresa actualizados correctamente.")
             return redirect("business_config:profile")
         return render(request, self.template_name, {"form": form})

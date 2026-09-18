@@ -28,20 +28,26 @@ def validate_image_upload(upload):
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(upload) as image:
-                image.load()
                 image_format = image.format
                 width, height = image.size
                 animated = getattr(image, "is_animated", False)
-        if image_format not in ALLOWED_FORMAT_EXTENSIONS:
-            raise ValidationError("El formato de imagen no está permitido.")
-        if extension not in ALLOWED_FORMAT_EXTENSIONS[image_format]:
-            raise ValidationError(
-                "La extensión no coincide con el contenido de la imagen."
-            )
-        if animated:
-            raise ValidationError("Las imágenes animadas no están permitidas.")
-        if width > MAX_WIDTH or height > MAX_HEIGHT or width * height > MAX_PIXELS:
-            raise ValidationError("La imagen tiene unas dimensiones demasiado grandes.")
+                if image_format not in ALLOWED_FORMAT_EXTENSIONS:
+                    raise ValidationError("El formato de imagen no está permitido.")
+                if extension not in ALLOWED_FORMAT_EXTENSIONS[image_format]:
+                    raise ValidationError(
+                        "La extensión no coincide con el contenido de la imagen."
+                    )
+                if animated:
+                    raise ValidationError("Las imágenes animadas no están permitidas.")
+                if (
+                    width > MAX_WIDTH
+                    or height > MAX_HEIGHT
+                    or width * height > MAX_PIXELS
+                ):
+                    raise ValidationError(
+                        "La imagen tiene unas dimensiones demasiado grandes."
+                    )
+                image.verify()
     except ValidationError:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
