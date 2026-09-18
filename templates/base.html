@@ -4,6 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}Netxodo{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,6 +18,10 @@
     <link rel="stylesheet" href="{% static 'css/components/tables.css' %}">
     <link rel="stylesheet" href="{% static 'css/components/tabs.css' %}">
     <link rel="stylesheet" href="{% static 'css/components/skeleton.css' %}">
+    <link rel="stylesheet" href="{% static 'css/components/modal.css' %}">
+    <link rel="stylesheet" href="{% static 'css/components/drawer.css' %}">
+    <link rel="stylesheet" href="{% static 'css/components/toast.css' %}">
+    <link rel="stylesheet" href="{% static 'css/components/feedback.css' %}">
     <link rel="stylesheet" href="{% static 'css/layout.css' %}">
     <link rel="stylesheet" href="{% static 'css/erp_admin.css' %}">
     <script src="{% static 'vendor/htmx/1.9.12/htmx.min.js' %}"></script>
@@ -50,6 +55,7 @@
             <footer class="site-footer"><div class="public-container"><small>Netxodo · TPV para pequeños negocios</small></div></footer>
         </div>
     {% endif %}
+    {% include "components/global_feedback.html" %}
     <script type="module" src="{% static 'js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>

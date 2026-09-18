@@ -1,5 +1,5 @@
 <section class="checkout card" aria-labelledby="checkout-title" aria-live="polite">
-  <header class="checkout-heading"><div><span class="eyebrow">Checkout integrado</span><h2 id="checkout-title">Venta #{{ sale.pk }}</h2></div><button type="button" class="checkout-close" data-checkout-close aria-label="Cerrar">×</button></header>
+  <header class="checkout-heading"><div><span class="eyebrow">Checkout integrado</span><h2 id="checkout-title">Venta #{{ sale.pk }}</h2></div><button type="button" class="checkout-close" data-checkout-close data-nx-modal-close aria-label="Cerrar">×</button></header>
   <ol class="checkout-progress">
     <li class="{% if sale.is_completed %}done{% endif %}">Venta completada</li>
     <li class="{% if sale.payment_status == 'paid' %}done{% endif %}">{% if sale.payment_status == 'paid' %}Cobro registrado{% else %}Cobro pendiente{% endif %}</li>
@@ -13,7 +13,7 @@
     </div>
   {% else %}
     {% if sale.is_completed %}<p class="recovery-note">Venta completada. {% if sale.payment_status == 'paid' %}Cobro completado; reintenta la emisión del documento.{% else %}Cobro pendiente.{% endif %}</p>{% endif %}
-    <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" data-checkout-form>
+    <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" data-checkout-form data-nx-critical-form>
       {% csrf_token %}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
       {% if series|length == 1 %}<p><strong>Serie:</strong> {{ series.0 }}</p><input type="hidden" name="series" value="{{ series.0.pk }}">{% elif series|length > 1 %}<label>Serie {{ form.series }}</label>{% endif %}
       {% if sale.pending_amount > 0 %}<p class="checkout-due">Pendiente <strong>{{ sale.pending_amount|floatformat:2 }} €</strong></p>
