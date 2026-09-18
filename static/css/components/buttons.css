@@ -1,16 +1,24 @@
-.button {
+.button,
+.site-main form:not([class]) button:not([class]),
+.public-main form:not([class]) button:not([class]) {
     display: inline-flex; min-height: var(--nx-control-height); align-items: center; justify-content: center;
     gap: var(--nx-space-2); padding: .625rem var(--nx-space-4); border: 1px solid var(--nx-primary);
     border-radius: var(--nx-radius-md); background: var(--nx-primary); color: var(--nx-primary-contrast);
     cursor: pointer; font: inherit; font-weight: var(--nx-weight-bold); line-height: 1.25; text-align: center;
 }
-.button:hover { border-color: var(--nx-primary-hover); background: var(--nx-primary-hover); color: var(--nx-primary-contrast); }
-.button:active { border-color: var(--nx-primary-active); background: var(--nx-primary-active); }
+.button:hover,
+.site-main form:not([class]) button:not([class]):hover,
+.public-main form:not([class]) button:not([class]):hover { border-color: var(--nx-primary-hover); background: var(--nx-primary-hover); color: var(--nx-primary-contrast); }
+.button:active,
+.site-main form:not([class]) button:not([class]):active,
+.public-main form:not([class]) button:not([class]):active { border-color: var(--nx-primary-active); background: var(--nx-primary-active); }
 .button-secondary { border-color: var(--nx-border); background: var(--nx-surface); color: var(--nx-primary); }
 .button-secondary:hover { border-color: var(--nx-primary); background: var(--nx-info-bg); color: var(--nx-primary-active); }
 .button-danger { border-color: var(--nx-danger); background: var(--nx-danger); color: #fff; }
 .button-danger:hover { border-color: var(--nx-danger-hover); background: var(--nx-danger-hover); color: #fff; }
 .button-ghost { border-color: transparent; background: transparent; color: var(--nx-primary); }
 .button-ghost:hover { background: var(--nx-info-bg); color: var(--nx-primary-active); }
-.button:disabled, .button[aria-disabled="true"] { border-color: var(--nx-border); background: var(--nx-disabled-bg); color: var(--nx-disabled-text); cursor: not-allowed; }
+.button:disabled, .button[aria-disabled="true"],
+.site-main form:not([class]) button:not([class]):disabled,
+.public-main form:not([class]) button:not([class]):disabled { border-color: var(--nx-border); background: var(--nx-disabled-bg); color: var(--nx-disabled-text); cursor: not-allowed; }
 @media (prefers-reduced-motion: no-preference) { .button { transition: background-color .15s ease, border-color .15s ease, color .15s ease; } }

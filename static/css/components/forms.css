@@ -2,7 +2,10 @@
 .form-field { display: grid; gap: var(--nx-space-2); }
 .form-field label { color: var(--nx-text); font-size: var(--nx-font-size-sm); font-weight: var(--nx-weight-bold); }
 .form-field input:not([type="checkbox"]):not([type="radio"]), .form-field select, .form-field textarea,
-form:not([class]) input:not([type="checkbox"]):not([type="radio"]), form:not([class]) select, form:not([class]) textarea {
+.site-main form:not([class]) input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.public-main form:not([class]) input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.site-main form:not([class]) select, .public-main form:not([class]) select,
+.site-main form:not([class]) textarea, .public-main form:not([class]) textarea {
     width: 100%; min-height: var(--nx-control-height); padding: .625rem var(--nx-space-3); border: 1px solid var(--nx-border);
     border-radius: var(--nx-radius-md); background: var(--nx-surface); color: var(--nx-text); font: inherit;
 }

@@ -48,6 +48,21 @@ class DesignSystemAssetTests(SimpleTestCase):
             with self.subTest(color=color):
                 self.assertIn(color, tokens)
 
+    def test_legacy_unclassed_buttons_are_scoped_to_main_content(self):
+        buttons = Path(
+            settings.BASE_DIR, "static", "css", "components", "buttons.css"
+        ).read_text()
+
+        self.assertIn(
+            ".site-main form:not([class]) button:not([class])",
+            buttons,
+        )
+        self.assertIn(
+            ".public-main form:not([class]) button:not([class])",
+            buttons,
+        )
+        self.assertNotIn(".sidebar-footer", buttons)
+
 
 class IconComponentTests(SimpleTestCase):
     def test_icon_helper_references_local_sprite_and_is_decorative(self):
