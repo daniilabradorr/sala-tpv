@@ -134,7 +134,9 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
                         expect(
                             page.locator("[data-dashboard-chart] svg")
                         ).to_be_visible()
-                        expect(page.get_by_role("heading", name="Caja")).to_be_visible()
+                        expect(
+                            page.get_by_role("heading", name="Caja", exact=True)
+                        ).to_be_visible()
                         expect(page.get_by_text("Sesión abierta")).to_be_visible()
                         expect(
                             page.get_by_role("heading", name="Stock crítico")

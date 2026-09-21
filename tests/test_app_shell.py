@@ -74,7 +74,7 @@ class AppShellTests(TestCase):
             second = resolve_active_store(request, user=self.owner)
 
         self.assertIs(first, second)
-        self.assertIs(first[1], self.default_store)
+        self.assertEqual(first[1].pk, self.default_store.pk)
 
     def test_default_fallback_and_valid_session(self):
         response = self.client.get(reverse("core:home"))

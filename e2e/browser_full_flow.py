@@ -134,7 +134,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _open_cash_session(self):
         self.step = "open cash session"
-        self.page.locator("#main-content").get_by_role(
+        self.page.locator("#app-sidebar").get_by_role(
             "link", name="Caja", exact=True
         ).click()
         expect(self.page.get_by_text("Caja principal", exact=True)).to_be_visible()
