@@ -101,7 +101,13 @@ class HttpContractTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTemplateUsed(response, "403.html")
-        self.assertContains(response, "Acceso denegado", status_code=403)
+        self.assertContains(
+            response, "No tienes acceso a esta sección", status_code=403
+        )
+        self.assertContains(response, "Error 403", status_code=403)
+        self.assertContains(response, "Volver al inicio", status_code=403)
+        self.assertNotContains(response, "Iniciar sesión", status_code=403)
+        self.assertNotContains(response, "data-app-shell", status_code=403)
         self.assertNotIn(reverse("users:login"), response.headers.get("Location", ""))
         self.assertNotContains(
             response,
@@ -114,9 +120,10 @@ class HttpContractTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertTemplateUsed(response, "404.html")
-        self.assertContains(
-            response, "No hemos encontrado esta página o recurso.", status_code=404
-        )
+        self.assertContains(response, "No encontramos lo que buscas", status_code=404)
+        self.assertContains(response, "Error 404", status_code=404)
+        self.assertContains(response, "Volver al inicio", status_code=404)
+        self.assertNotContains(response, "data-app-shell", status_code=404)
 
     def test_tenant_hidden_user_uses_generic_404(self):
         self.client.force_login(self.owner)
@@ -128,6 +135,8 @@ class HttpContractTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertTemplateUsed(response, "404.html")
         self.assertNotContains(response, self.other_business.name, status_code=404)
+        self.assertNotContains(response, self.other_user.email, status_code=404)
+        self.assertContains(response, "No encontramos lo que buscas", status_code=404)
 
     def test_csrf_failure_uses_generic_403_without_reason(self):
         csrf_client = Client(enforce_csrf_checks=True)
@@ -148,7 +157,15 @@ class HttpContractTests(TestCase):
             response = bad_request(request, Exception("detalle interno"))
 
         self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response, "No hemos podido procesar esta solicitud", status_code=400
+        )
+        self.assertContains(response, "Error 400", status_code=400)
+        self.assertContains(response, "Volver al inicio", status_code=400)
+        self.assertNotContains(response, "data-app-shell", status_code=400)
         self.assertNotContains(response, "detalle interno", status_code=400)
+        for technical_text in ("Bad Request", "SuspiciousOperation", "Traceback"):
+            self.assertNotContains(response, technical_text, status_code=400)
 
     def test_server_error_handler_uses_safe_generic_500(self):
         request = RequestFactory().get("/")
@@ -158,8 +175,14 @@ class HttpContractTests(TestCase):
 
         self.assertEqual(response.status_code, 500)
         body = response.content.decode()
+        self.assertIn("Algo no ha salido como esperábamos", body)
+        self.assertIn("Error 500", body)
+        self.assertIn("Reintentar", body)
+        self.assertIn("Volver al inicio", body)
+        self.assertNotIn("data-app-shell", body)
         for sensitive_text in (
             "Traceback",
+            "SELECT ",
             "SECRET_KEY",
             "DATABASE_URL",
             "Internal Server Error",

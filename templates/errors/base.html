@@ -13,6 +13,7 @@
   <main id="main-content" class="error-page" tabindex="-1">
     <section class="error-card" aria-labelledby="error-title">
       <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="error-logo">
+      {% block error_icon %}{% endblock %}
       <p class="error-code">Error {% block code %}{% endblock %}</p>
       {% block content %}{% endblock %}
       <div class="error-actions">{% block actions %}<a class="error-button" href="/">Volver al inicio</a>{% endblock %}</div>

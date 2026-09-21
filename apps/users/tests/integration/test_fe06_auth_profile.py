@@ -25,7 +25,7 @@ class LoginProfileContractTests(TestCase):
         self.assertContains(response, 'autocomplete="current-password"')
         self.assertNotContains(response, "data-app-shell")
 
-        messages = []
+        bodies = []
         for email in (self.user.email, "missing@example.com"):
             response = self.client.post(
                 reverse("users:login"),
@@ -34,11 +34,18 @@ class LoginProfileContractTests(TestCase):
             self.assertContains(
                 response, "No hemos podido iniciar sesión con esos datos."
             )
-            messages.append(response.content)
-        self.assertEqual(
-            b"No hemos podido iniciar sesi\xc3\xb3n con esos datos." in messages[0],
-            b"No hemos podido iniciar sesi\xc3\xb3n con esos datos." in messages[1],
-        )
+            bodies.append(response.content.decode())
+        generic_copy = "No hemos podido iniciar sesión con esos datos."
+        self.assertEqual([body.count(generic_copy) for body in bodies], [1, 1])
+        for body in bodies:
+            for leaked_copy in (
+                "usuario inexistente",
+                "cuenta no encontrada",
+                "contraseña incorrecta",
+                "inactive",
+                "email registrado",
+            ):
+                self.assertNotIn(leaked_copy, body.lower())
 
     def test_next_is_honoured_only_for_local_urls(self):
         profile = reverse("users:profile")
@@ -62,15 +69,78 @@ class LoginProfileContractTests(TestCase):
         )
         self.assertNotEqual(urlsplit(response["Location"]).netloc, "evil.example")
 
-    def test_expired_htmx_navigation_has_marker_and_preserves_next(self):
+    def test_anonymous_htmx_navigation_does_not_claim_session_expired(self):
         response = Client().get(reverse("users:profile"), HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 204)
         query = parse_qs(urlsplit(response["HX-Redirect"]).query)
         self.assertEqual(query["next"], [reverse("users:profile")])
-        self.assertEqual(query["expired"], ["1"])
+        self.assertNotIn("expired", query)
         login = self.client.get(response["HX-Redirect"])
-        self.assertContains(login, "Tu sesión ha caducado")
+        self.assertContains(login, "Bienvenido de nuevo")
+        self.assertNotContains(login, "Tu sesión ha caducado")
         self.assertNotContains(self.client.get(reverse("users:login")), "ha caducado")
+
+    def test_expired_shell_navigation_has_marker_and_preserves_next(self):
+        response = Client().get(
+            reverse("users:profile"),
+            HTTP_HX_REQUEST="true",
+            HTTP_X_NETXODO_AUTHENTICATED_SHELL="1",
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")
+        query = parse_qs(urlsplit(response["HX-Redirect"]).query)
+        self.assertEqual(query["next"], [reverse("users:profile")])
+        self.assertEqual(query["expired"], ["1"])
+        self.assertContains(
+            self.client.get(response["HX-Redirect"]), "Tu sesión ha caducado"
+        )
+
+    def test_profile_heading_uses_real_name_and_email(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("users:profile"))
+        self.assertContains(response, "Test User")
+        self.assertContains(response, self.user.email)
+
+        self.user.first_name = ""
+        self.user.last_name = ""
+        self.user.save()
+        response = self.client.get(reverse("users:profile"))
+        self.assertContains(response, f"<h2>{self.user.email}</h2>", html=True)
+
+    def test_invalid_forms_link_controls_to_error_text(self):
+        login = self.client.post(
+            reverse("users:login"),
+            {"username": self.user.email, "password": "wrong"},
+        )
+        self.assertContains(login, 'aria-invalid="true"', count=2)
+
+        self.client.force_login(self.user)
+        profile = self.client.post(
+            reverse("users:profile_update"),
+            {"first_name": "Test", "last_name": "User", "phone": "not-a-phone"},
+        )
+        self.assertContains(profile, 'aria-invalid="true"')
+        self.assertContains(profile, 'aria-describedby="id_phone_error"')
+        self.assertContains(profile, 'id="id_phone_error"')
+
+        password = self.client.post(
+            reverse("users:password_change"),
+            {
+                "old_password": "wrong",
+                "new_password1": "Different-Password-123!",
+                "new_password2": "Different-Password-123!",
+            },
+        )
+        self.assertContains(password, 'aria-invalid="true"')
+        self.assertContains(password, "id_old_password_error")
+
+        pin = self.client.post(
+            reverse("users:pin_change"),
+            {"new_pin": "abc", "new_pin_confirm": "abc"},
+        )
+        self.assertContains(pin, 'aria-invalid="true"')
+        self.assertContains(pin, 'aria-describedby="id_new_pin_error"')
+        self.assertContains(pin, 'id="id_new_pin_error"')
 
     def test_profile_update_ignores_sensitive_fields(self):
         self.client.force_login(self.user)

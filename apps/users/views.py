@@ -16,6 +16,7 @@ from apps.users.forms import (
     UserUpdateForm,
     UserPinChangeForm,
     UserLoginForm,
+    set_accessible_field_attrs,
 )
 from django.shortcuts import redirect, get_object_or_404, render
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -88,7 +89,12 @@ class UserProfileUpdateView(LoginRequiredMixin, UpdateView):
 # ahora las vistas para cambiar la contraseña y el pin de seguridad del usuario
 class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
     template_name = "users/password_change.html"
-    success_url = reverse_lazy("users:profile") + "?tab=security"
+
+    def get_success_url(self):
+        return f"{reverse('users:profile')}?tab=security"
+
+    def get_form(self, form_class=None):
+        return set_accessible_field_attrs(super().get_form(form_class))
 
     def form_valid(self, form):
         messages.success(self.request, "Contraseña actualizada correctamente.")
@@ -98,7 +104,9 @@ class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
 class UserPinChangeView(LoginRequiredMixin, FormView):
     template_name = "users/pin_change.html"
     form_class = UserPinChangeForm
-    success_url = reverse_lazy("users:profile") + "?tab=security"
+
+    def get_success_url(self):
+        return f"{reverse('users:profile')}?tab=security"
 
     def form_valid(self, form):
         user = self.request.user

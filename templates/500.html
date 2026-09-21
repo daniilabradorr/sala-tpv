@@ -1,4 +1,5 @@
-{% extends "errors/base.html" %}
+{% extends "errors/base.html" %}{% load static %}
 {% block title %}Error inesperado | Netxodo{% endblock %}{% block code %}500{% endblock %}
+{% block error_icon %}<svg class="error-icon" aria-hidden="true"><use href="{% static 'icons/netxodo-ui.svg' %}#settings"></use></svg>{% endblock %}
 {% block content %}<h1 id="error-title">Algo no ha salido como esperábamos</h1><p>Ha ocurrido un problema inesperado y no hemos podido completar la operación.</p><p>Puedes intentarlo de nuevo. Si el problema continúa, vuelve al inicio.</p>{% endblock %}
 {% block actions %}<a class="error-button" href="">Reintentar</a><a class="error-button error-button-secondary" href="/">Volver al inicio</a>{% endblock %}

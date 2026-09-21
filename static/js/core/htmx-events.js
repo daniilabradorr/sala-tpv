@@ -55,6 +55,10 @@ const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail
 export const initHtmxEvents = () => {
   if (initialized) return;
   document.body.addEventListener("htmx:configRequest", (event) => {
+    // UX hint only: the server never uses this header as authentication authority.
+    if (document.querySelector("[data-app-shell]")) {
+      event.detail.headers["X-Netxodo-Authenticated-Shell"] = "1";
+    }
     if (mutating.has(event.detail.verb.toUpperCase())) {
       const token = document.querySelector('meta[name="csrf-token"]')?.content;
       if (token) event.detail.headers["X-CSRFToken"] = token;

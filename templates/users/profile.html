@@ -7,7 +7,7 @@
   <h1>Mi perfil</h1>
   <header class="profile-identity">
     <span class="profile-avatar" aria-hidden="true">{{ user.first_name|first|default:"N" }}{{ user.last_name|first }}</span>
-    <div><h2>{{ user.get_full_name|default:user.email }}</h2><p>{{ user.email }}</p><p class="profile-meta">{{ user.get_role_display }} · {% if user.is_active %}Cuenta activa{% else %}Cuenta inactiva{% endif %}</p></div>
+    <div><h2>{% if user.first_name or user.last_name %}{{ user.first_name }}{% if user.first_name and user.last_name %} {% endif %}{{ user.last_name }}{% else %}{{ user.email }}{% endif %}</h2><p>{{ user.email }}</p><p class="profile-meta">{{ user.get_role_display }} · {% if user.is_active %}Cuenta activa{% else %}Cuenta inactiva{% endif %}</p></div>
   </header>
   <nav class="profile-tabs" aria-label="Secciones del perfil">
     <a href="{% url 'users:profile' %}" {% if active_tab == 'profile' %}aria-current="page"{% endif %}>Perfil</a>

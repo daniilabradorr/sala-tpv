@@ -26,12 +26,19 @@ class HtmxLoginRedirectMiddleware:
         location = response.get("Location", "")
         if urlsplit(location).path != urlsplit(resolve_url(settings.LOGIN_URL)).path:
             return response
-        parts = urlsplit(location)
-        query = dict(parse_qsl(parts.query, keep_blank_values=True))
-        query["expired"] = "1"
-        location = urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-        )
+        if request.headers.get("X-Netxodo-Authenticated-Shell") == "1":
+            parts = urlsplit(location)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query["expired"] = "1"
+            location = urlunsplit(
+                (
+                    parts.scheme,
+                    parts.netloc,
+                    parts.path,
+                    urlencode(query),
+                    parts.fragment,
+                )
+            )
         htmx_response = HttpResponse(status=204)
         htmx_response["HX-Redirect"] = location
         return htmx_response

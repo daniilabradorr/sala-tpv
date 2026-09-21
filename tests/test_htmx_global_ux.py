@@ -66,6 +66,19 @@ class ExpiredSessionTests(TestCase):
         redirect = urlsplit(response["HX-Redirect"])
         self.assertEqual(redirect.path, reverse("users:login"))
         self.assertEqual(parse_qs(redirect.query).get("next"), ["/"])
+        self.assertNotIn("expired", parse_qs(redirect.query))
+        self.assertEqual(response.content, b"")
+
+    def test_authenticated_shell_hint_marks_expired_session(self):
+        response = Client().get(
+            reverse("core:home"),
+            HTTP_HX_REQUEST="true",
+            HTTP_X_NETXODO_AUTHENTICATED_SHELL="1",
+        )
+        self.assertEqual(response.status_code, 204)
+        redirect = urlsplit(response["HX-Redirect"])
+        self.assertEqual(parse_qs(redirect.query).get("next"), ["/"])
+        self.assertEqual(parse_qs(redirect.query).get("expired"), ["1"])
         self.assertEqual(response.content, b"")
 
     def test_normal_request_keeps_django_redirect(self):

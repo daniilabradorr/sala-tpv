@@ -1,3 +1,4 @@
-{% extends "errors/base.html" %}
+{% extends "errors/base.html" %}{% load static %}
 {% block title %}Acceso denegado | Netxodo{% endblock %}{% block code %}403{% endblock %}
+{% block error_icon %}<svg class="error-icon" aria-hidden="true"><use href="{% static 'icons/netxodo-ui.svg' %}#warning"></use></svg>{% endblock %}
 {% block content %}<h1 id="error-title">No tienes acceso a esta sección</h1><p>Tu usuario no dispone de permisos para realizar esta operación.</p><p>Si crees que deberías tener acceso, contacta con el responsable de tu negocio.</p>{% endblock %}
