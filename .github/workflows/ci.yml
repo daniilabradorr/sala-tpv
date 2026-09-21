@@ -358,6 +358,7 @@ jobs:
           e2e.browser_htmx_global_ux
           e2e.browser_media
           e2e.browser_auth_profile
+          e2e.browser_onboarding
           --verbosity 2
 
       - name: Upload browser failure artifacts

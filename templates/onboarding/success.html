@@ -1,0 +1,4 @@
+{% extends "layouts/public.html" %}{% load static %}
+{% block title %}Tu Netxodo está listo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/onboarding.css' %}">{% endblock %}
+{% block content %}<section class="onboarding-card success-card" aria-labelledby="success-title"><img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="onboarding-logo"><div class="success-mark" aria-hidden="true">✓</div><h1 id="success-title">Tu Netxodo está listo</h1><p><strong>{{ onboarding.business_name }}</strong><br>{{ onboarding.store_name }}</p><ul class="success-list"><li>✓ Negocio</li><li>✓ Tienda</li><li>✓ Caja principal</li><li>✓ Métodos de pago</li><li>✓ Facturación inicial</li></ul><a class="button create-button" href="{% url 'onboarding:welcome' %}">Entrar en Netxodo</a></section>{% endblock %}
