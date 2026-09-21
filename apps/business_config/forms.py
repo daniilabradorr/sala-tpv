@@ -1,9 +1,34 @@
 from django import forms
 
 from apps.business_config.models import BusinessProfile, POSSettings
+from apps.core.media.validation import validate_image_upload
 
 
 class BusinessProfileForm(forms.ModelForm):
+    logo_upload = forms.FileField(
+        label="Seleccionar nuevo logo",
+        required=False,
+        widget=forms.FileInput(
+            attrs={
+                "accept": "image/jpeg,image/png,image/webp",
+                "data-media-upload": "",
+            }
+        ),
+    )
+    remove_logo = forms.BooleanField(label="Eliminar logo", required=False)
+
+    def clean_logo_upload(self):
+        upload = self.cleaned_data.get("logo_upload")
+        return validate_image_upload(upload) if upload else upload
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("logo_upload") and cleaned.get("remove_logo"):
+            raise forms.ValidationError(
+                "No puedes subir y eliminar el logo al mismo tiempo."
+            )
+        return cleaned
+
     def clean_country_code(self):
         return self.cleaned_data["country_code"].strip().upper()
 
@@ -27,7 +52,6 @@ class BusinessProfileForm(forms.ModelForm):
             "country_code",
             "currency_code",
             "brand_name",
-            "logo_url",
             "receipt_footer",
             "return_policy",
         ]

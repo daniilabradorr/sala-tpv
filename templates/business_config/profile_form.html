@@ -16,7 +16,7 @@
         <a class="button button-secondary" href="{% url 'business_config:pos' %}">Configuración TPV</a>
     </nav>
 
-    <form method="post" class="stacked-form business-profile-form" novalidate>
+    <form method="post" enctype="multipart/form-data" class="stacked-form business-profile-form" novalidate>
         {% csrf_token %}
         {% if form.non_field_errors %}
             <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
@@ -38,7 +38,13 @@
                 {% include "business_config/_field.html" with field=form.trade_name %}
                 {% include "business_config/_field.html" with field=form.brand_name %}
                 {% include "business_config/_field.html" with field=form.website %}
-                {% include "business_config/_field.html" with field=form.logo_url %}
+                <div class="media-editor">
+{% load media_tags static %}
+{% if form.instance.logo %}{% media_variant_url form.instance.logo "thumb" as logo_src %}{% elif form.instance.logo_url %}{% firstof form.instance.logo_url as logo_src %}{% else %}{% static "img/media-placeholder.svg" as logo_src %}{% endif %}
+<img class="media-preview media-preview--logo" data-media-preview src="{{ logo_src }}" data-media-fallback="{% static 'img/media-placeholder.svg' %}" alt="Logo de {{ form.instance.trade_name|default:form.instance.business.name }}">
+{% include "business_config/_field.html" with field=form.logo_upload %}
+{% include "business_config/_field.html" with field=form.remove_logo %}
+</div>
             </div>
         </fieldset>
 

@@ -1,9 +1,36 @@
 from django import forms
 
 from apps.catalog.models import Category, Tax, Product
+from apps.core.media.validation import validate_image_upload
 
 
-class CategoryBaseForm(forms.ModelForm):
+class ManagedImageModelForm(forms.ModelForm):
+    image_upload = forms.FileField(
+        label="Seleccionar nueva imagen",
+        required=False,
+        widget=forms.FileInput(
+            attrs={
+                "accept": "image/jpeg,image/png,image/webp",
+                "data-media-upload": "",
+            }
+        ),
+    )
+    remove_image = forms.BooleanField(label="Eliminar imagen", required=False)
+
+    def clean_image_upload(self):
+        upload = self.cleaned_data.get("image_upload")
+        return validate_image_upload(upload) if upload else upload
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("image_upload") and cleaned.get("remove_image"):
+            raise forms.ValidationError(
+                "No puedes subir y eliminar una imagen al mismo tiempo."
+            )
+        return cleaned
+
+
+class CategoryBaseForm(ManagedImageModelForm):
     """
     Formulario base para categorías.
 
@@ -296,7 +323,7 @@ class TaxUpdateForm(TaxBaseForm):
         ]
 
 
-class ProductBaseForm(forms.ModelForm):
+class ProductBaseForm(ManagedImageModelForm):
     """
     Formulario base para productos y servicios.
 
