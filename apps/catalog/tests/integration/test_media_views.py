@@ -165,7 +165,9 @@ class CatalogManagedMediaViewTests(TestCase):
 
         response = self.client.post(
             reverse("catalog:category_create"),
-            data=self.category_data(image_upload=image_upload("category-a.png", "green")),
+            data=self.category_data(
+                image_upload=image_upload("category-a.png", "green")
+            ),
         )
         self.assertEqual(response.status_code, 302)
 
