@@ -37,7 +37,7 @@
                     <a href="{% url 'sales:sale_list' store_id=active_store.pk %}">Ver ventas</a>
                 </div>
                 <p id="sales-chart-description" class="sr-only">Ventas netas de los últimos 7 días.</p>
-                {% if not trend_has_sales %}<p class="dashboard-empty">No hay ventas en este periodo</p>{% endif %}
+                {% if not trend_has_activity %}<p class="dashboard-empty">No hay ventas en este periodo</p>{% endif %}
                 <div class="dashboard-chart" data-dashboard-chart aria-hidden="true"></div>
                 {{ trend|json_script:"dashboard-chart-data" }}
                 <table class="sr-only">
@@ -60,7 +60,7 @@
                     <dl class="cash-details">
                         <div><dt>Apertura</dt><dd>{{ session.opening_amount|floatformat:2 }} €</dd></div>
                         <div><dt>Efectivo esperado</dt><dd>{{ session.expected_cash_amount|floatformat:2 }} €</dd></div>
-                        <div><dt>Abierta por</dt><dd>{{ session.opened_by.get_full_name|default:session.opened_by.email }}</dd></div>
+                        <div><dt>Abierta por</dt><dd>{{ session.opened_by }}</dd></div>
                         <div><dt>Hora</dt><dd>{{ session.opened_at|localtime|time:"H:i" }}</dd></div>
                     </dl>
                     <a class="button button-secondary" href="{% url 'cash_register:session_detail' store_id=active_store.pk session_id=session.pk %}">Ir a caja</a>
@@ -92,7 +92,7 @@
         {% if show_management_blocks %}
         <section class="card dashboard-panel activity-panel" aria-labelledby="activity-title">
             <div class="dashboard-panel-heading"><div><span class="eyebrow">Últimos cambios</span><h2 id="activity-title">Actividad reciente</h2></div></div>
-            {% if recent_activity %}<ol class="activity-list">{% for event in recent_activity %}<li><time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|localtime|time:"H:i" }}</time><div><strong>{{ event.user.get_full_name|default:event.user.email|default:"Sistema" }}</strong><p>{{ event.message }}</p></div></li>{% endfor %}</ol>
+            {% if recent_activity %}<ol class="activity-list">{% for event in recent_activity %}<li><time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|localtime|time:"H:i" }}</time><div>{% if event.user %}<strong>{{ event.user }}</strong>{% else %}<strong>Sistema</strong>{% endif %}<p>{{ event.message }}</p></div></li>{% endfor %}</ol>
             {% else %}<p class="dashboard-empty">Aún no hay actividad reciente</p>{% endif %}
             {# TODO(FE-24): enlazar a Auditoría cuando exista una URL pública autorizada. #}
         </section>
@@ -100,7 +100,7 @@
     {% else %}
         <section class="card dashboard-no-store">
             <span class="eyebrow">Dashboard</span>
-            <h1 id="dashboard-title">{% if has_operational_stores %}Selecciona una tienda{% else %}No hay tiendas activas{% endif %}</h1>
+            <h1 id="dashboard-title">No tienes tiendas operativas disponibles</h1>
             <p>Necesitas una tienda activa para trabajar en Ventas, Caja o Inventario.</p>
             {% if can_manage_business %}<a class="button" href="{% url 'stores:store_list' %}">Gestionar tiendas</a>{% endif %}
         </section>

@@ -5,7 +5,6 @@ from django.shortcuts import render
 from django.views.generic import TemplateView
 
 from apps.core.dashboard import build_dashboard_context, resolve_dashboard_period
-from apps.core.selectors import get_home_operational_stores
 from apps.core.shell import resolve_active_store
 
 
@@ -20,11 +19,9 @@ class HomeView(LoginRequiredMixin, TemplateView):
             raise PermissionDenied("El usuario debe pertenecer a un negocio.")
 
         administrative_mode = user.is_superuser and business is None
-        operational_stores = get_home_operational_stores(user=user)
         context.update(
             {
                 "business": business,
-                "operational_stores": operational_stores,
                 "administrative_mode": administrative_mode,
                 "can_manage_users": user.is_superuser
                 or user.role in {"owner", "manager"},
@@ -56,7 +53,8 @@ class HomeView(LoginRequiredMixin, TemplateView):
         return context
 
     def get_template_names(self):
-        if getattr(self.request, "htmx", False):
+        business = getattr(self.request.user, "business", None)
+        if getattr(self.request, "htmx", False) and business is not None:
             return ["core/partials/_dashboard_content.html"]
         return [self.template_name]
 

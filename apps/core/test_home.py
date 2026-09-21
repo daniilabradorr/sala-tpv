@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY
 from apps.users.models import CustomUser, RoleChoices
 from apps.users.tests.factories import (
     create_business,
@@ -118,7 +119,6 @@ class HomeViewTests(TestCase):
                 "billing:document_list",
                 kwargs={"store_id": self.active_store.pk},
             ),
-            reverse("stores:store_detail", kwargs={"pk": self.active_store.pk}),
         ):
             self.assertContains(response, url)
 
@@ -132,6 +132,23 @@ class HomeViewTests(TestCase):
                 self.assertNotContains(response, self.inactive_store.name)
                 self.assertNotContains(response, self.other_store.name)
                 self.client.logout()
+
+    def test_manipulated_session_never_selects_foreign_or_unauthorized_store(self):
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session[ACTIVE_STORE_SESSION_KEY] = self.other_store.pk
+        session.save()
+        response = self.client.get(reverse("core:home"))
+        self.assertEqual(response.context["active_store"], self.active_store)
+        self.assertNotContains(response, "Resumen de Tienda B1")
+
+        self.client.force_login(self.cashier)
+        session = self.client.session
+        session[ACTIVE_STORE_SESSION_KEY] = self.second_store.pk
+        session.save()
+        response = self.client.get(reverse("core:home"))
+        self.assertEqual(response.context["active_store"], self.active_store)
+        self.assertNotContains(response, "Resumen de Tienda A2")
 
     def test_role_aware_navigation(self):
         expectations = (
@@ -164,7 +181,7 @@ class HomeViewTests(TestCase):
         self.client.force_login(manager)
         response = self.client.get(reverse("core:home"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No tienes tiendas operativas asignadas.")
+        self.assertContains(response, "No tienes tiendas operativas disponibles")
 
     def test_normal_user_without_business_gets_forbidden(self):
         user = create_user(

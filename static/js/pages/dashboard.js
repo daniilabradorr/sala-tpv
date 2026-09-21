@@ -8,9 +8,11 @@ function renderDashboardChart(root = document) {
   const height = 230;
   const margin = { top: 16, right: 12, bottom: 32, left: 12 };
   const values = rows.map((row) => Number(row.amount));
+  const minimum = Math.min(...values, 0);
   const maximum = Math.max(...values, 0);
+  const range = maximum - minimum || 1;
   const x = (index) => margin.left + (index * (width - margin.left - margin.right)) / 6;
-  const y = (value) => margin.top + (height - margin.top - margin.bottom) * (1 - (maximum ? value / maximum : 0));
+  const y = (value) => margin.top + (height - margin.top - margin.bottom) * ((maximum - value) / range);
   const points = values.map((value, index) => `${x(index)},${y(value)}`).join(" ");
   const namespace = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(namespace, "svg");
@@ -27,6 +29,15 @@ function renderDashboardChart(root = document) {
     line.setAttribute("class", "chart-grid");
     svg.append(line);
   });
+  if (minimum < 0 && maximum > 0) {
+    const baseline = document.createElementNS(namespace, "line");
+    baseline.setAttribute("x1", margin.left);
+    baseline.setAttribute("x2", width - margin.right);
+    baseline.setAttribute("y1", y(0));
+    baseline.setAttribute("y2", y(0));
+    baseline.setAttribute("class", "chart-baseline");
+    svg.append(baseline);
+  }
   const polyline = document.createElementNS(namespace, "polyline");
   polyline.setAttribute("points", points);
   polyline.setAttribute("class", "chart-line");

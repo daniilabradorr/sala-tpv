@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 from decimal import Decimal
-
 from django.db.models import Q
 from django.utils import formats, timezone
 
@@ -141,7 +140,9 @@ def build_dashboard_context(*, business, store, user, period_key, today=None):
         "stock_attention": inventory["out_of_stock_count"]
         + inventory["low_stock_count"],
         "trend": trend,
-        "trend_has_sales": any(Decimal(row["amount"]) != 0 for row in trend),
+        # Reports only emits a bucket when a sale or return exists. A net-zero
+        # bucket therefore remains genuine activity rather than an empty trend.
+        "trend_has_activity": bool(summary["sales_timeseries"]),
         "cash_status": _cash_status(business=business, store=store),
         "critical_stock": _critical_stock(business=business, store=store),
         "pending_purchases": purchases,

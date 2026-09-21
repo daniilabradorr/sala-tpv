@@ -6,6 +6,7 @@ from apps.stores.selectors import (
 )
 
 ACTIVE_STORE_SESSION_KEY = "netxodo_active_store_id"
+ACTIVE_STORE_REQUEST_CACHE = "_netxodo_active_store_context"
 
 
 def get_shell_stores_for_user(user):
@@ -26,6 +27,10 @@ def get_shell_stores_for_user(user):
 def resolve_active_store(request, *, user):
     """Resolve URL/session state only within the shell-authorized Store set."""
 
+    cached = getattr(request, ACTIVE_STORE_REQUEST_CACHE, None)
+    if cached is not None:
+        return cached
+
     stores = get_shell_stores_for_user(user)
     stores_by_id = {store.pk: store for store in stores}
     route_store_id = getattr(
@@ -43,4 +48,6 @@ def resolve_active_store(request, *, user):
         request.session.pop(ACTIVE_STORE_SESSION_KEY, None)
     elif stored_id != active_store.pk:
         request.session[ACTIVE_STORE_SESSION_KEY] = active_store.pk
-    return stores, active_store
+    result = (stores, active_store)
+    setattr(request, ACTIVE_STORE_REQUEST_CACHE, result)
+    return result

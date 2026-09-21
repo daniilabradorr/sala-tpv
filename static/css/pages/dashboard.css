@@ -18,6 +18,7 @@
 .dashboard-chart { height: 15rem; min-width: 0; }
 .dashboard-chart svg { display: block; height: 100%; overflow: visible; width: 100%; }
 .chart-grid { stroke: var(--nx-border); stroke-width: 1; }
+.chart-baseline { stroke: var(--nx-text-muted); stroke-width: 1.5; }
 .chart-line { fill: none; stroke: var(--nx-primary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; }
 .chart-point { fill: var(--nx-surface); stroke: var(--nx-primary); stroke-width: 2; }
 .chart-label { fill: var(--nx-text-muted); font-size: 11px; text-anchor: middle; }

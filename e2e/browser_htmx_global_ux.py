@@ -65,7 +65,7 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         return browser, context, page, errors
 
     def _open_sale_with_product(self, page):
-        page.get_by_label("Operaciones por tienda").get_by_role(
+        page.locator("#app-sidebar").get_by_role(
             "link", name="Caja", exact=True
         ).click()
         main = page.locator("#main-content")
