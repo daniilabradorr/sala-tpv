@@ -24,6 +24,9 @@ def _display_name(user):
 
 
 def app_shell(request):
+    if getattr(request, "netxodo_skip_app_shell", False):
+        return {}
+
     user = getattr(request, "user", None)
     if user is None or not getattr(user, "is_authenticated", False):
         return {}
