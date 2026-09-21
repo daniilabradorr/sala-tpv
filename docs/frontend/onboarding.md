@@ -19,6 +19,12 @@ copian a campos ocultos, logs, revisión ni sesión. Tras el éxito, la sesión 
 conserva IDs, nombres y el nombre del Owner necesarios para success/welcome. Django
 valida la contraseña y el PIN se limita a 4–6 dígitos.
 
+El formulario valida antes del provisioning el código postal español, los teléfonos
+compatibles con Store, el teléfono numérico del Owner y la disponibilidad de su
+correo. Los validadores de contraseña reciben un `CustomUser` transitorio, nunca
+guardado. Un `ValidationError` legítimo de `full_clean()` se traduce a un mensaje
+seguro sin exponer detalles internos.
+
 ## Contrato actual
 
 País y moneda son fijos: España (`ES`) y EUR. Si se elige la dirección del negocio,
@@ -30,3 +36,6 @@ Después de provisionar se autentica al Owner con `django.contrib.auth.login` y 
 aplica Post/Redirect/Get. Success mantiene el layout público. Welcome enlaza catálogo,
 inventario y equipo; la acción de venta lleva primero a la apertura real de caja y no
 abre una sesión ni crea una venta automáticamente.
+
+Success y welcome exigen metadata emitida por el servidor para el mismo Business;
+welcome también comprueba que la Store pertenece a ese Business.

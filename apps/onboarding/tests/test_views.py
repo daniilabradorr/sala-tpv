@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.core.exceptions import ValidationError
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.billing.models import BillingSeries
@@ -13,9 +14,9 @@ from apps.onboarding.tests.test_forms import valid_form_data
 from apps.payments.models import PaymentMethod
 from apps.stores.models import Store
 from apps.users.models import CustomUser, RoleChoices
+from apps.users.tests.factories import create_business, create_user
 
 
-@override_settings(AUTH_PASSWORD_VALIDATORS=[])
 class OnboardingViewTests(TestCase):
     def assert_no_provisioning(self):
         for model in (
@@ -38,7 +39,7 @@ class OnboardingViewTests(TestCase):
         self.assertNotIn(pin, serialized)
         for key in session:
             self.assertNotIn("password", key.lower())
-            self.assertNotIn("owner_pin", key.lower())
+            self.assertNotIn("pin", key.lower())
 
     def test_get_and_invalid_post_never_create_partial_resources(self):
         response = self.client.get(reverse("onboarding:start"))
@@ -92,7 +93,14 @@ class OnboardingViewTests(TestCase):
         self.assertEqual(Business.objects.count(), 1)
 
     def test_store_same_address_and_partial_custom_fallback(self):
-        self.client.post(reverse("onboarding:start"), valid_form_data())
+        self.client.post(
+            reverse("onboarding:start"),
+            valid_form_data(
+                store_email="esto-no-es-email",
+                store_postal_code="BAD",
+                store_phone="BAD",
+            ),
+        )
         profile = BusinessProfile.objects.get()
         store = Store.objects.get()
         self.assertEqual(store.address_line_1, profile.address_line_1)
@@ -129,6 +137,49 @@ class OnboardingViewTests(TestCase):
         self.assertEqual(Store.objects.count(), 1)
         self.assertEqual(PaymentMethod.objects.count(), 4)
         self.assertEqual(BillingSeries.objects.count(), 5)
+        self.assertContains(response, 'id="id_tax_identifier"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'aria-describedby="id_tax_identifier_error"')
+
+    def test_predictable_invalid_inputs_return_inline_errors_without_resources(self):
+        cases = (
+            ("postal_code", "1234"),
+            ("phone", "telefonoABC"),
+            ("owner_phone", "600 ABC"),
+            ("store_postal_code", "BAD"),
+            ("store_phone", "BAD"),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                data = valid_form_data(**{field: value})
+                if field.startswith("store_"):
+                    data["same_business_address"] = ""
+                response = self.client.post(reverse("onboarding:start"), data)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                self.assert_no_provisioning()
+
+    def test_existing_owner_email_is_rejected_before_provisioning(self):
+        existing_business = create_business()
+        create_user(existing_business, email="ada@acme.example")
+        response = self.client.post(reverse("onboarding:start"), valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No podemos utilizar este correo")
+        self.assertIn("owner_email", response.context["form"].errors)
+        self.assertContains(response, 'id="id_owner_email"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'aria-describedby="id_owner_email_error"')
+        self.assertEqual(Business.objects.count(), 1)
+        self.assertEqual(CustomUser.objects.count(), 1)
+
+    @patch("apps.onboarding.views.OnboardingService.create_business")
+    def test_domain_validation_error_is_safely_rendered(self, create_business):
+        create_business.side_effect = ValidationError({"internal": "technical detail"})
+        response = self.client.post(reverse("onboarding:start"), valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No hemos podido validar los datos")
+        self.assertNotContains(response, "internal")
+        self.assertNotContains(response, "technical detail")
 
     @patch("apps.onboarding.views.OnboardingService.create_business")
     def test_known_service_error_does_not_show_success(self, create_business):
@@ -143,3 +194,34 @@ class OnboardingViewTests(TestCase):
         self.client.post(reverse("onboarding:start"), valid_form_data())
         response = self.client.get(reverse("onboarding:start"))
         self.assertRedirects(response, reverse("core:home"))
+
+    def test_welcome_requires_matching_onboarding_session_and_store(self):
+        business = create_business()
+        user = create_user(business)
+        self.client.force_login(user)
+        response = self.client.get(reverse("onboarding:welcome"))
+        self.assertRedirects(response, reverse("core:home"))
+
+        self.client.logout()
+        self.client.post(
+            reverse("onboarding:start"),
+            valid_form_data(
+                tax_identifier="B87654321", owner_email="fresh@example.com"
+            ),
+        )
+        response = self.client.get(reverse("onboarding:welcome"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_onboarding_post_requires_csrf_and_accepts_valid_token(self):
+        client = Client(enforce_csrf_checks=True)
+        url = reverse("onboarding:start")
+        self.assertEqual(client.post(url, valid_form_data()).status_code, 403)
+
+        client.get(url)
+        token = client.cookies["csrftoken"].value
+        response = client.post(
+            url,
+            valid_form_data(tax_identifier="B11223344", owner_email="csrf@example.com"),
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 302)

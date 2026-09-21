@@ -1,5 +1,6 @@
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
@@ -10,6 +11,7 @@ from apps.onboarding.services import (
     OnboardingError,
     OnboardingService,
 )
+from apps.stores.models import Store
 
 RESULT_SESSION_KEY = "onboarding_result"
 
@@ -25,11 +27,18 @@ def start(request):
         try:
             result = OnboardingService.create_business(**form.service_data())
         except OnboardingDuplicateBusinessError:
-            form.add_error(
+            form.add_accessible_error(
                 "tax_identifier", "Ya existe un negocio con esta identidad fiscal."
             )
         except OnboardingError as exc:
             form.add_error(None, str(exc))
+        except ValidationError:
+            # Model full_clean() remains a final domain safety net. Do not leak
+            # its field map, constraint names, or values on this public form.
+            form.add_error(
+                None,
+                "No hemos podido validar los datos. Revisa el formulario e inténtalo de nuevo.",
+            )
         else:
             login(
                 request,
@@ -79,11 +88,16 @@ def success(request):
 
 @login_required
 def welcome(request):
-    metadata = request.session.get(RESULT_SESSION_KEY, {})
+    metadata = request.session.get(RESULT_SESSION_KEY)
+    if not metadata or metadata.get("business_id") != request.user.business_id:
+        return redirect("core:home")
     store_id = metadata.get("store_id")
-    cash_url = (
-        reverse("cash_register:open", kwargs={"store_id": store_id})
-        if store_id
-        else reverse("core:home")
-    )
+    if (
+        not store_id
+        or not Store.objects.filter(
+            pk=store_id, business_id=request.user.business_id
+        ).exists()
+    ):
+        return redirect("core:home")
+    cash_url = reverse("cash_register:open", kwargs={"store_id": store_id})
     return render(request, "onboarding/welcome.html", {"cash_url": cash_url})
