@@ -1,0 +1,108 @@
+{% load l10n tz %}
+<section id="dashboard-content" class="dashboard" aria-labelledby="dashboard-title">
+    {% if active_store %}
+        <header class="dashboard-header">
+            <div>
+                <p class="dashboard-greeting">Buenos días, {{ request.user.first_name|default:request.user.email }}</p>
+                <h1 id="dashboard-title">Resumen de {{ active_store.name }}</h1>
+                <p class="dashboard-date">{{ today|date:"l, j \d\e F"|capfirst }}</p>
+            </div>
+            <div class="dashboard-actions">
+                {% if shell_capabilities.can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=active_store.pk %}">Nueva venta</a>{% endif %}
+                <label for="dashboard-period">Periodo</label>
+                <select id="dashboard-period" name="period"
+                        hx-get="{% url 'core:home' %}"
+                        hx-trigger="change"
+                        hx-target="#dashboard-content"
+                        hx-swap="outerHTML"
+                        hx-push-url="true">
+                    {% for option in period_options %}
+                        <option value="{{ option.key }}"{% if option.key == period_key %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </header>
+
+        <div class="dashboard-kpis" aria-label="Indicadores del periodo {{ period_label }}">
+            <article class="dashboard-kpi"><span>Ventas netas</span><strong>{{ sales.net_sales }}</strong></article>
+            <article class="dashboard-kpi"><span>Tickets</span><strong>{{ sales.ticket_count }}</strong></article>
+            <article class="dashboard-kpi"><span>Ticket medio</span><strong>{{ sales.average_ticket }}</strong></article>
+            <article class="dashboard-kpi"><span>Stock bajo / atención</span><strong>{{ stock_attention }}</strong></article>
+        </div>
+
+        <div class="dashboard-primary-grid">
+            <section class="card dashboard-panel sales-chart-panel" aria-labelledby="sales-chart-title">
+                <div class="dashboard-panel-heading">
+                    <div><span class="eyebrow">Tendencia</span><h2 id="sales-chart-title">Ventas últimos 7 días</h2></div>
+                    <a href="{% url 'sales:sale_list' store_id=active_store.pk %}">Ver ventas</a>
+                </div>
+                <p id="sales-chart-description" class="sr-only">Ventas netas de los últimos 7 días.</p>
+                {% if not trend_has_sales %}<p class="dashboard-empty">No hay ventas en este periodo</p>{% endif %}
+                <div class="dashboard-chart" data-dashboard-chart aria-hidden="true"></div>
+                {{ trend|json_script:"dashboard-chart-data" }}
+                <table class="sr-only">
+                    <caption>Ventas netas de los últimos 7 días</caption>
+                    <thead><tr><th>Fecha</th><th>Importe</th></tr></thead>
+                    <tbody>{% for row in trend %}<tr><td>{{ row.label }}</td><td>{{ row.formatted_amount }}</td></tr>{% endfor %}</tbody>
+                </table>
+            </section>
+
+            <section class="card dashboard-panel cash-panel" aria-labelledby="cash-title">
+                <div class="dashboard-panel-heading"><div><span class="eyebrow">Operación</span><h2 id="cash-title">Caja</h2></div></div>
+                {% if cash_status.register_count == 0 %}
+                    <p class="dashboard-empty">No hay cajas configuradas</p>
+                {% elif cash_status.open_count == 0 %}
+                    <p class="status-line"><span aria-hidden="true">○</span> Caja cerrada</p>
+                {% elif cash_status.open_count == 1 %}
+                    {% with session=cash_status.open_sessions.0 %}
+                    <p class="status-line status-open"><span aria-hidden="true">●</span> Sesión abierta</p>
+                    <h3>{{ session.cash_register.name }}</h3>
+                    <dl class="cash-details">
+                        <div><dt>Apertura</dt><dd>{{ session.opening_amount|floatformat:2 }} €</dd></div>
+                        <div><dt>Efectivo esperado</dt><dd>{{ session.expected_cash_amount|floatformat:2 }} €</dd></div>
+                        <div><dt>Abierta por</dt><dd>{{ session.opened_by.get_full_name|default:session.opened_by.email }}</dd></div>
+                        <div><dt>Hora</dt><dd>{{ session.opened_at|localtime|time:"H:i" }}</dd></div>
+                    </dl>
+                    <a class="button button-secondary" href="{% url 'cash_register:session_detail' store_id=active_store.pk session_id=session.pk %}">Ir a caja</a>
+                    {% endwith %}
+                {% else %}
+                    <p class="status-line status-open"><span aria-hidden="true">●</span> {{ cash_status.open_count }} cajas abiertas</p>
+                    <ul class="compact-list">{% for session in cash_status.open_sessions %}<li><span>{{ session.cash_register.name }}</span><a href="{% url 'cash_register:session_detail' store_id=active_store.pk session_id=session.pk %}">Ir a caja</a></li>{% endfor %}</ul>
+                {% endif %}
+                {% if cash_status.open_count != 1 %}<a class="button button-secondary" href="{% url 'cash_register:register_list' store_id=active_store.pk %}">Ver caja</a>{% endif %}
+            </section>
+        </div>
+
+        <div class="dashboard-secondary-grid">
+            <section class="card dashboard-panel" aria-labelledby="stock-title">
+                <div class="dashboard-panel-heading"><h2 id="stock-title">Stock crítico</h2><a href="{% url 'inventory:item_list' %}">Ver inventario</a></div>
+                {% if critical_stock %}<div class="dashboard-rows">{% for row in critical_stock %}<article class="dashboard-row"><div><strong>{{ row.item.product.name }}</strong><small>Disponible {{ row.item.available|floatformat:-3 }} · Mínimo {{ row.item.minimum_stock|floatformat:-3 }}</small></div><span class="status-pill status-{{ row.status_code }}">{{ row.status }}</span></article>{% endfor %}</div>
+                {% else %}<p class="dashboard-empty">El stock está bajo control</p>{% endif %}
+            </section>
+
+            {% if show_management_blocks %}
+            <section class="card dashboard-panel" aria-labelledby="purchases-title">
+                <div class="dashboard-panel-heading"><h2 id="purchases-title">Compras pendientes</h2><a href="{% url 'purchases:purchase_list' %}">Ver compras</a></div>
+                {% if pending_purchases %}<div class="dashboard-rows">{% for purchase in pending_purchases %}<a class="dashboard-row dashboard-row-link" href="{% url 'purchases:purchase_detail' pk=purchase.pk %}"><div><strong>{{ purchase.supplier.name }}</strong><small>{{ purchase.reference|default:"Sin referencia" }} · {{ purchase.get_status_display }}</small></div><span>{{ purchase.total_amount|floatformat:2 }} €</span></a>{% endfor %}</div>
+                {% else %}<p class="dashboard-empty">No hay compras pendientes</p>{% endif %}
+            </section>
+            {% endif %}
+        </div>
+
+        {% if show_management_blocks %}
+        <section class="card dashboard-panel activity-panel" aria-labelledby="activity-title">
+            <div class="dashboard-panel-heading"><div><span class="eyebrow">Últimos cambios</span><h2 id="activity-title">Actividad reciente</h2></div></div>
+            {% if recent_activity %}<ol class="activity-list">{% for event in recent_activity %}<li><time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|localtime|time:"H:i" }}</time><div><strong>{{ event.user.get_full_name|default:event.user.email|default:"Sistema" }}</strong><p>{{ event.message }}</p></div></li>{% endfor %}</ol>
+            {% else %}<p class="dashboard-empty">Aún no hay actividad reciente</p>{% endif %}
+            {# TODO(FE-24): enlazar a Auditoría cuando exista una URL pública autorizada. #}
+        </section>
+        {% endif %}
+    {% else %}
+        <section class="card dashboard-no-store">
+            <span class="eyebrow">Dashboard</span>
+            <h1 id="dashboard-title">{% if has_operational_stores %}Selecciona una tienda{% else %}No hay tiendas activas{% endif %}</h1>
+            <p>Necesitas una tienda activa para trabajar en Ventas, Caja o Inventario.</p>
+            {% if can_manage_business %}<a class="button" href="{% url 'stores:store_list' %}">Gestionar tiendas</a>{% endif %}
+        </section>
+    {% endif %}
+</section>
