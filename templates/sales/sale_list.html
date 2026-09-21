@@ -1,28 +1,22 @@
-{% extends "base.html" %}
-
+{% extends "base.html" %}{% load static %}
 {% block title %}Ventas | Netxodo{% endblock %}
-
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-history.css' %}">{% endblock %}
 {% block content %}
-<section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
-
-    <p>
-        <a href="{% url 'sales:sale_open' store_id=store.pk %}">Abrir nueva venta</a>
-    </p>
-
-    <form method="get">
-        {{ form.as_p }}
-        <button type="submit">Filtrar</button>
+<main class="sales-history">
+    <header class="sales-page-header"><div><p class="sales-eyebrow">{{ store.name }}</p><h1>Ventas</h1></div><div class="sales-actions"><a href="{% url 'sales:return_list' store_id=store.pk %}">Devoluciones →</a>{% if can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=store.pk %}">+ Nueva venta</a>{% endif %}</div></header>
+    <nav class="period-tabs" aria-label="Periodos rápidos">
+        <a href="?period=today" hx-get="?period=today" hx-target="#sales-results" hx-push-url="true">Hoy</a>
+        <a href="?period=7d" hx-get="?period=7d" hx-target="#sales-results" hx-push-url="true">7 días</a>
+        <a href="?period=30d" hx-get="?period=30d" hx-target="#sales-results" hx-push-url="true">30 días</a>
+    </nav>
+    <form class="sales-filters" method="get" hx-get="{% url 'sales:sale_list' store_id=store.pk %}" hx-target="#sales-results" hx-push-url="true">
+        <div class="filter-search">{{ form.query.label_tag }}{{ form.query }}</div>
+        <div>{{ form.status.label_tag }}{{ form.status }}</div><div>{{ form.payment_status.label_tag }}{{ form.payment_status }}</div>
+        <div>{{ form.document_type_requested.label_tag }}{{ form.document_type_requested }}</div><div>{{ form.opened_by.label_tag }}{{ form.opened_by }}</div>
+        <div>{{ form.customer.label_tag }}{{ form.customer }}</div><div>{{ form.date_from.label_tag }}{{ form.date_from }}</div><div>{{ form.date_to.label_tag }}{{ form.date_to }}</div>
+        <button type="submit">Aplicar filtros</button>
     </form>
-
-    <section>
-        {% for sale in sales %}
-            <a href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">
-                Venta {{ sale.pk }} &mdash; {{ sale.total_amount }} &euro;
-            </a>
-        {% empty %}
-            <p>No hay ventas.</p>
-        {% endfor %}
-    </section>
-</section>
+    {% include "sales/partials/_sale_results.html" %}
+</main>
 {% endblock %}
+{% block extra_js %}<script>document.addEventListener("click",e=>{const r=e.target.closest("tr[data-href]");if(r&&!e.target.closest("a"))location.href=r.dataset.href});document.addEventListener("keydown",e=>{const r=e.target.closest("tr[data-href]");if(r&&(e.key==="Enter"||e.key===" ")){e.preventDefault();location.href=r.dataset.href}});</script>{% endblock %}

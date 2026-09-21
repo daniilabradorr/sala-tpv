@@ -7,10 +7,12 @@ Reglas:
 """
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
@@ -97,6 +99,17 @@ def _get_pos_settings(business):
 
 class SaleFilterForm(forms.Form):
     """Formulario para filtrar el listado de ventas."""
+
+    period = forms.ChoiceField(
+        label="Periodo",
+        required=False,
+        choices=(
+            ("today", "Hoy"),
+            ("7d", "7 días"),
+            ("30d", "30 días"),
+            ("custom", "Personalizado"),
+        ),
+    )
 
     query = forms.CharField(
         label="Buscar",
@@ -186,6 +199,20 @@ class SaleFilterForm(forms.Form):
 
         date_from = cleaned_data.get("date_from")
         date_to = cleaned_data.get("date_to")
+
+        # Las fechas explícitas siempre prevalecen y convierten el periodo en
+        # personalizado. Así nunca se mezclan dos contratos incompatibles.
+        if date_from or date_to:
+            cleaned_data["period"] = "custom"
+        else:
+            period = cleaned_data.get("period") or "today"
+            days = {"today": 0, "7d": 6, "30d": 29}.get(period, 0)
+            today = timezone.localdate()
+            cleaned_data["period"] = (
+                period if period in {"today", "7d", "30d"} else "today"
+            )
+            cleaned_data["date_from"] = today - timedelta(days=days)
+            cleaned_data["date_to"] = today
 
         if date_from and date_to and date_from > date_to:
             raise ValidationError(

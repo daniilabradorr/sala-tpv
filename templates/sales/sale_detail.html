@@ -1,85 +1,21 @@
-{% extends "base.html" %}
+{% extends "base.html" %}{% load static %}
+{% block title %}Venta #{{ sale.pk }} | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-history.css' %}">{% endblock %}
+{% block content %}<main class="sale-history-detail">
+<a class="back-link" href="{% url 'sales:sale_list' store_id=store.pk %}">← Ventas</a>
+<header class="sale-detail-header"><div><p class="sales-eyebrow">Histórico de venta</p><h1>Venta #{{ sale.pk }}</h1><p><time datetime="{{ sale.created_at|date:'c' }}">{{ sale.created_at|date:"d/m/Y · H:i" }}</time></p></div><span class="badge status-{{ sale.status }}">{{ sale.get_status_display }}</span></header>
+<div class="sale-context"><span>{{ store.name }}</span>{% if sale.cash_register %}<span>{{ sale.cash_register }}</span>{% endif %}{% if sale.cash_session %}<span>Sesión #{{ sale.cash_session.pk }}</span>{% endif %}<span>{{ sale.opened_by }}</span></div>
 
-{% block title %}Detalle de venta | Netxodo{% endblock %}
+<section class="detail-summary card" aria-labelledby="summary-title"><h2 id="summary-title">Resumen</h2><dl>
+<div><dt>Total</dt><dd>{{ sale.total_amount }} €</dd></div><div><dt>Estado del pago</dt><dd>{{ sale.get_payment_status_display }}</dd></div>
+{% if sale.pending_amount > 0 %}<div><dt>Pendiente</dt><dd>{{ sale.pending_amount }} €</dd></div>{% endif %}<div><dt>Cliente</dt><dd>{{ sale.customer|default:"Mostrador" }}</dd></div><div><dt>Documento solicitado</dt><dd>{{ sale.get_document_type_requested_display }}</dd></div></dl></section>
 
-{% block content %}
-<section class="card">
-    <h1>Venta {{ sale.pk }}</h1>
+<section class="detail-section" aria-labelledby="products-title"><h2 id="products-title">Productos</h2><div class="detail-table-wrap"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Descuento</th><th>Impuesto</th><th>Total</th></tr></thead><tbody>{% for line in lines %}<tr><td><strong>{{ line.product_name }}</strong>{% if line.sku %}<small>{{ line.sku }}</small>{% endif %}</td><td>{{ line.quantity }} {{ line.unit }}</td><td>{{ line.unit_base_price }} €</td><td>{{ line.discount_amount }} €</td><td>{{ line.tax_rate }}% · {{ line.tax_amount }} €</td><td><strong>{{ line.line_total }} €</strong></td></tr>{% empty %}<tr><td colspan="6">Esta venta no tiene productos.</td></tr>{% endfor %}</tbody></table></div></section>
 
-    <section>
-        <h2>Estado</h2>
-        <p>{{ sale.get_status_display }}</p>
-        <p>Pago: {{ sale.get_payment_status_display }}</p>
-    </section>
+<div class="detail-grid"><section class="detail-section" aria-labelledby="payments-title"><h2 id="payments-title">Pagos</h2>{% for payment in payments %}<article class="detail-list-row"><div><strong>{{ payment.method }}</strong><small>{{ payment.get_payment_type_display }} · {{ payment.get_status_display }}</small></div><div><strong>{% if payment.payment_type == 'refund' %}−{% endif %}{{ payment.amount }} €</strong><small>{{ payment.processed_by }} · {{ payment.created_at|date:"d/m/Y H:i" }}</small></div></article>{% empty %}<p class="muted">No hay pagos registrados.</p>{% endfor %}</section>
+<section class="detail-section" aria-labelledby="billing-title"><h2 id="billing-title">Documentos fiscales</h2>{% for document in billing_documents %}<a class="detail-list-row" href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}"><div><strong>{{ document.get_document_type_display }}</strong><small>{{ document.get_status_display }}</small></div><div><strong>{{ document.series_text }}-{{ document.number }}</strong><small>{{ document.total_amount }} €</small></div></a>{% empty %}<p class="muted">No hay ningún documento fiscal emitido.</p>{% endfor %}</section></div>
 
-    <section>
-        <h2>Cliente</h2>
-        <p>{{ sale.customer|default:"Sin cliente" }}</p>
-    </section>
+<section class="detail-section" aria-labelledby="returns-title"><h2 id="returns-title">Devoluciones asociadas</h2>{% for return_doc in returns %}<a class="detail-list-row" href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}"><div><strong>Devolución #{{ return_doc.pk }}</strong><small>{{ return_doc.get_status_display }} · {{ return_doc.created_at|date:"d/m/Y H:i" }}</small></div><strong>{{ return_doc.total_amount }} €</strong></a>{% empty %}<p class="muted">No hay devoluciones asociadas.</p>{% endfor %}</section>
 
-    <section>
-        <h2>Importes</h2>
-        <p>Subtotal: {{ sale.subtotal_amount }} EUR</p>
-        <p>Descuento: {{ sale.discount_amount }} EUR</p>
-        <p>Impuestos: {{ sale.tax_amount }} EUR</p>
-        <p>Total: {{ sale.total_amount }} EUR</p>
-        <p>Pendiente: {{ sale.pending_amount }} EUR</p>
-    </section>
-
-    <section>
-        <h2>Lineas</h2>
-        {% for line in lines %}
-            <article>
-                <p>{{ line.product_name }} x {{ line.quantity }} ({{ line.line_total }} EUR)</p>
-                {% if is_editable %}
-                    <p>
-                        <a href="{% url 'sales:sale_line_update' store_id=store.pk sale_pk=sale.pk line_pk=line.pk %}">Editar linea</a>
-                    </p>
-                    <form method="post" action="{% url 'sales:sale_line_delete' store_id=store.pk sale_pk=sale.pk line_pk=line.pk %}">
-                        {% csrf_token %}
-                        <button type="submit">Eliminar linea</button>
-                    </form>
-                {% endif %}
-            </article>
-        {% empty %}
-            <p>Esta venta no tiene lineas.</p>
-        {% endfor %}
-    </section>
-
-    <section>
-        <h2>Acciones permitidas</h2>
-        {% if is_editable %}
-            <p><a href="{% url 'sales:sale_header_update' store_id=store.pk sale_pk=sale.pk %}">Editar cabecera</a></p>
-            <p><a href="{% url 'sales:sale_line_add' store_id=store.pk sale_pk=sale.pk %}">Anadir linea</a></p>
-            <form method="post" action="{% url 'sales:sale_complete' store_id=store.pk sale_pk=sale.pk %}">
-                {% csrf_token %}
-                <button type="submit">Completar venta</button>
-            </form>
-            <p><a href="{% url 'sales:sale_cancel' store_id=store.pk sale_pk=sale.pk %}">Cancelar venta</a></p>
-        {% endif %}
-
-        {% if is_completed %}
-            {% if show_issue_billing_action %}<p><a href="{% url 'billing:issue_sale_document' store_id=store.pk sale_pk=sale.pk %}">Emitir documento fiscal</a></p>{% endif %}
-            {% if show_substitute_f3_action %}<p><a href="{% url 'billing:substitute_simplified_document' store_id=store.pk sale_pk=sale.pk %}">Emitir F3 / factura completa sustitutiva</a></p>{% endif %}
-            {% if sale.pending_amount > 0 %}<p><a href="{% url 'payments:create' store_id=store.pk sale_id=sale.pk %}">Registrar cobro</a></p>{% endif %}
-            {% if sale.pending_amount > 0 and sale.customer %}<p><a href="{% url 'payments:sale_on_account' store_id=store.pk sale_id=sale.pk %}">Pasar pendiente a cuenta del cliente</a></p>{% endif %}
-            <p><a href="{% url 'sales:return_create' store_id=store.pk sale_pk=sale.pk %}">Crear devolucion</a></p>
-        {% endif %}
-
-        <p><a href="{% url 'sales:sale_list' store_id=store.pk %}">Volver al listado</a></p>
-    </section>
-
-    <section>
-        <h2>Devoluciones asociadas</h2>
-        {% for return_doc in returns %}
-            <p>
-                <a href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">
-                    Devolucion {{ return_doc.pk }} - {{ return_doc.get_status_display }} - {{ return_doc.total_amount }} EUR
-                </a>
-            </p>
-        {% empty %}
-            <p>No hay devoluciones asociadas.</p>
-        {% endfor %}
-    </section>
-</section>
-{% endblock %}
+{% if is_completed %}<section class="detail-actions" aria-label="Acciones disponibles">{% if show_issue_billing_action %}<a class="button button-secondary" href="{% url 'billing:issue_sale_document' store_id=store.pk sale_pk=sale.pk %}">Emitir documento fiscal</a>{% endif %}{% if show_substitute_f3_action %}<a class="button button-secondary" href="{% url 'billing:substitute_simplified_document' store_id=store.pk sale_pk=sale.pk %}">Emitir F3 sustitutiva</a>{% endif %}{% if sale.pending_amount > 0 %}<a class="button" href="{% url 'payments:create' store_id=store.pk sale_id=sale.pk %}">Registrar cobro</a>{% if sale.customer %}<a class="button button-secondary" href="{% url 'payments:sale_on_account' store_id=store.pk sale_id=sale.pk %}">Pasar pendiente a cuenta</a>{% endif %}{% endif %}{% if can_create_return %}<a class="button button-secondary" href="{% url 'sales:return_create' store_id=store.pk sale_pk=sale.pk %}">Crear devolución</a>{% endif %}</section>{% endif %}
+</main>{% endblock %}
