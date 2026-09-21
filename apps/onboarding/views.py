@@ -20,6 +20,7 @@ RESULT_SESSION_KEY = "onboarding_result"
 def start(request):
     if request.user.is_authenticated:
         return redirect("core:home")
+    request.netxodo_skip_app_shell = True
 
     form = OnboardingForm(request.POST or None)
     initial_step = 1
@@ -83,6 +84,7 @@ def success(request):
     metadata = request.session.get(RESULT_SESSION_KEY)
     if not metadata or metadata.get("business_id") != request.user.business_id:
         return redirect("core:home")
+    request.netxodo_skip_app_shell = True
     return render(request, "onboarding/success.html", {"onboarding": metadata})
 
 
@@ -99,5 +101,6 @@ def welcome(request):
         ).exists()
     ):
         return redirect("core:home")
+    request.netxodo_skip_app_shell = True
     cash_url = reverse("cash_register:open", kwargs={"store_id": store_id})
     return render(request, "onboarding/welcome.html", {"cash_url": cash_url})

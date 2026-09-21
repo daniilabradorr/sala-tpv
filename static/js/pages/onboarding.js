@@ -42,6 +42,11 @@
     const usesBusiness = sameAddress.checked;
     storeAddress.hidden = usesBusiness;
     storeAddress.setAttribute("aria-hidden", String(usesBusiness));
+    storeAddress
+      .querySelectorAll("input, select, textarea")
+      .forEach((control) => {
+        control.disabled = usesBusiness;
+      });
     root.querySelector("[data-business-address]").textContent =
       `${value("address_line_1") || "Dirección del negocio"} · ${value("postal_code")} ${value("city")}`;
   };

@@ -9,6 +9,7 @@ from apps.business_config.models import BusinessProfile, POSSettings
 from apps.cash_register.models import CashRegister
 from apps.catalog.models import Tax
 from apps.core.models import Business
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY
 from apps.onboarding.services import OnboardingError
 from apps.onboarding.tests.test_forms import valid_form_data
 from apps.payments.models import PaymentMethod
@@ -79,9 +80,14 @@ class OnboardingViewTests(TestCase):
         self.assertEqual(BillingSeries.objects.count(), 5)
         self.assertEqual(int(self.client.session["_auth_user_id"]), owner.pk)
         self.assert_session_has_no_secrets(password, pin)
+        self.assertNotIn(ACTIVE_STORE_SESSION_KEY, self.client.session)
 
         success = self.client.get(reverse("onboarding:success"))
         self.assertEqual(success.status_code, 200)
+        self.assertNotContains(success, "data-app-shell")
+        with self.assertRaises(KeyError):
+            success.context["shell_navigation"]
+        self.assertNotIn(ACTIVE_STORE_SESSION_KEY, self.client.session)
         self.assertNotContains(success, password)
         self.assertNotContains(success, pin)
         self.assertNotContains(success, "pin_hash")
@@ -211,6 +217,10 @@ class OnboardingViewTests(TestCase):
         )
         response = self.client.get(reverse("onboarding:welcome"))
         self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "data-app-shell")
+        with self.assertRaises(KeyError):
+            response.context["shell_navigation"]
+        self.assertNotIn(ACTIVE_STORE_SESSION_KEY, self.client.session)
 
     def test_onboarding_post_requires_csrf_and_accepts_valid_token(self):
         client = Client(enforce_csrf_checks=True)

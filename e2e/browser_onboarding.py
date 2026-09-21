@@ -70,16 +70,27 @@ class BrowserOnboardingTests(StaticLiveServerTestCase):
 
                             page.get_by_label("Nombre de la tienda").fill("Centro")
                             custom = page.locator("[data-store-address]")
+                            store_email = page.locator("#id_store_email")
+                            store_postal_code = page.locator("#id_store_postal_code")
                             expect(custom).to_be_hidden()
+                            expect(store_email).to_be_disabled()
+                            expect(store_postal_code).to_be_disabled()
                             page.get_by_label(
                                 "Usar la misma dirección del negocio"
                             ).uncheck()
                             expect(custom).to_be_visible()
+                            expect(store_email).to_be_enabled()
+                            expect(store_postal_code).to_be_enabled()
+                            store_email.fill("esto-no-es-email")
+                            store_postal_code.fill("BAD")
                             page.get_by_label(
                                 "Usar la misma dirección del negocio"
                             ).check()
                             expect(custom).to_be_hidden()
+                            expect(store_email).to_be_disabled()
+                            expect(store_postal_code).to_be_disabled()
                             page.get_by_role("button", name="Continuar").click()
+                            expect(page.get_by_text("Paso 3 de 4").last).to_be_visible()
 
                             page.locator("#id_owner_first_name").fill("Ada")
                             page.locator("#id_owner_last_name").fill("Lovelace")
@@ -112,7 +123,8 @@ class BrowserOnboardingTests(StaticLiveServerTestCase):
                                 document.querySelector('[data-onboarding-form]')
                                   .addEventListener('submit', window.__holdOnboarding);"""
                             )
-                            submit = page.get_by_role("button", name="Crear mi Netxodo")
+                            submit = page.locator("[data-submit]")
+                            expect(submit).to_have_text("Crear mi Netxodo")
                             submit.click()
                             expect(submit).to_be_disabled()
                             expect(submit).to_have_text("Procesando…")

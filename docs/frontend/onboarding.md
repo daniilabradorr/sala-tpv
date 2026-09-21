@@ -39,3 +39,6 @@ abre una sesión ni crea una venta automáticamente.
 
 Success y welcome exigen metadata emitida por el servidor para el mismo Business;
 welcome también comprueba que la Store pertenece a ese Business.
+Estas vistas suprimen explícitamente el context processor del App Shell: no construyen
+navegación ERP ni resuelven o escriben una Store activa mientras se muestran como
+superficies standalone con el layout público.
