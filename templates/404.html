@@ -1,6 +1,3 @@
 {% extends "errors/base.html" %}
-{% block title %}Página no encontrada | Netxodo{% endblock %}
-{% block content %}
-<h1>Página no encontrada</h1>
-<p>No hemos encontrado esta página o recurso.</p>
-{% endblock %}
+{% block title %}Página no encontrada | Netxodo{% endblock %}{% block code %}404{% endblock %}
+{% block content %}<h1 id="error-title">No encontramos lo que buscas</h1><p>Puede que la página ya no exista, que el enlace haya cambiado o que el recurso no esté disponible.</p>{% endblock %}

@@ -1,6 +1,3 @@
 {% extends "errors/base.html" %}
-{% block title %}Acceso denegado | Netxodo{% endblock %}
-{% block content %}
-<h1>Acceso denegado</h1>
-<p>No tienes permisos para acceder a esta página.</p>
-{% endblock %}
+{% block title %}Acceso denegado | Netxodo{% endblock %}{% block code %}403{% endblock %}
+{% block content %}<h1 id="error-title">No tienes acceso a esta sección</h1><p>Tu usuario no dispone de permisos para realizar esta operación.</p><p>Si crees que deberías tener acceso, contacta con el responsable de tu negocio.</p>{% endblock %}

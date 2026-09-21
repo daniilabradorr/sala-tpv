@@ -1,8 +1,27 @@
 from django import forms
+from django.contrib.auth.forms import AuthenticationForm
 from django.forms import modelformset_factory
 
 from apps.users.helpers import is_manager
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
+
+
+class UserLoginForm(AuthenticationForm):
+    """Django authentication with a non-enumerating, accessible presentation."""
+
+    error_messages = {
+        "invalid_login": "No hemos podido iniciar sesión con esos datos.",
+        "inactive": "No hemos podido iniciar sesión con esos datos.",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["username"].label = "Correo electrónico"
+        self.fields["username"].widget.attrs.update(
+            {"autocomplete": "username", "placeholder": "usuario@empresa.es"}
+        )
+        self.fields["password"].label = "Contraseña"
+        self.fields["password"].widget.attrs["autocomplete"] = "current-password"
 
 
 class UserProfileUpdateForm(forms.ModelForm):
@@ -27,6 +46,16 @@ class UserProfileUpdateForm(forms.ModelForm):
             "last_name",
             "phone",
         ]
+        labels = {
+            "first_name": "Nombre",
+            "last_name": "Apellidos",
+            "phone": "Teléfono",
+        }
+        widgets = {
+            "first_name": forms.TextInput(attrs={"autocomplete": "given-name"}),
+            "last_name": forms.TextInput(attrs={"autocomplete": "family-name"}),
+            "phone": forms.TextInput(attrs={"autocomplete": "tel"}),
+        }
 
 
 class UserCreateForm(forms.ModelForm):

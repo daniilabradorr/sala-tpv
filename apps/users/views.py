@@ -15,6 +15,7 @@ from apps.users.forms import (
     UserCreateForm,
     UserUpdateForm,
     UserPinChangeForm,
+    UserLoginForm,
 )
 from django.shortcuts import redirect, get_object_or_404, render
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -31,7 +32,13 @@ from apps.stores.models import Store
 # Create your views here.
 class UserLoginView(LoginView):
     template_name = "users/login.html"
+    authentication_form = UserLoginForm
     redirect_authenticated_user = True
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["session_expired"] = self.request.GET.get("expired") == "1"
+        return context
 
 
 class UserLogoutView(LogoutView):
@@ -50,6 +57,13 @@ class UserProfileDetailView(LoginRequiredMixin, DetailView):
         Así evitamos que un usuario vea el perfil de otro cambiando la URL.
         """
         return self.request.user
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["active_tab"] = (
+            "security" if self.request.GET.get("tab") == "security" else "profile"
+        )
+        return context
 
 
 # vista para actualizar el perfil del usuario
@@ -74,7 +88,7 @@ class UserProfileUpdateView(LoginRequiredMixin, UpdateView):
 # ahora las vistas para cambiar la contraseña y el pin de seguridad del usuario
 class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
     template_name = "users/password_change.html"
-    success_url = reverse_lazy("users:profile")
+    success_url = reverse_lazy("users:profile") + "?tab=security"
 
     def form_valid(self, form):
         messages.success(self.request, "Contraseña actualizada correctamente.")
@@ -84,7 +98,7 @@ class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
 class UserPinChangeView(LoginRequiredMixin, FormView):
     template_name = "users/pin_change.html"
     form_class = UserPinChangeForm
-    success_url = reverse_lazy("users:profile")
+    success_url = reverse_lazy("users:profile") + "?tab=security"
 
     def form_valid(self, form):
         user = self.request.user
