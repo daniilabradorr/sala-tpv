@@ -2,7 +2,7 @@ from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
 from apps.core.context_processors import app_shell
-from apps.core.shell import ACTIVE_STORE_SESSION_KEY
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY, resolve_active_store
 from apps.onboarding.services import OnboardingService
 from apps.stores.models import Store
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -63,6 +63,18 @@ class AppShellTests(TestCase):
         request = RequestFactory().get("/bad-request")
 
         self.assertEqual(app_shell(request), {})
+
+    def test_active_store_resolution_is_cached_for_one_request(self):
+        request = RequestFactory().get("/")
+        request.user = self.owner
+        request.session = {}
+
+        with self.assertNumQueries(1):
+            first = resolve_active_store(request, user=self.owner)
+            second = resolve_active_store(request, user=self.owner)
+
+        self.assertIs(first, second)
+        self.assertEqual(first[1].pk, self.default_store.pk)
 
     def test_default_fallback_and_valid_session(self):
         response = self.client.get(reverse("core:home"))
@@ -264,8 +276,13 @@ class AppShellTests(TestCase):
         self.assertIn(
             reverse("billing:document_list", args=[self.default_store.pk]), content
         )
-        self.assertNotIn("Informes", content)
-        self.assertNotIn("Actividad", content)
+        labels = [
+            item["label"]
+            for group in response.context["shell_navigation"]
+            for item in group["items"]
+        ]
+        self.assertNotIn("Informes", labels)
+        self.assertNotIn("Actividad", labels)
 
     def test_cashier_navigation_omits_administration_and_sale_permission_rules(self):
         self.client.force_login(self.cashier)

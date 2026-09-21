@@ -1,59 +1,28 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Inicio | Netxodo{% endblock %}
+{% block title %}{% if administrative_mode %}Administración{% else %}Inicio{% endif %} | Netxodo{% endblock %}
+
+{% block extra_head %}
+    {% if not administrative_mode %}<link rel="stylesheet" href="{% static 'css/pages/dashboard.css' %}">{% endif %}
+{% endblock %}
 
 {% block content %}
-<section class="card home-summary">
-    <span class="eyebrow">Netxodo</span>
-    <div class="section-accent" aria-hidden="true"></div>
-    <h1>{% if administrative_mode %}Administración{% elif business %}{{ business.name }}{% else %}Netxodo{% endif %}</h1>
-    {% if business %}
-        <dl class="home-context">
-            <div><dt>Empresa</dt><dd>{{ business.name }}</dd></div>
-            <div><dt>Rol</dt><dd>{{ request.user.get_role_display }}</dd></div>
-        </dl>
-    {% else %}
+{% if administrative_mode %}
+    <section class="card home-summary">
+        <span class="eyebrow">Netxodo</span>
+        <h1>Administración</h1>
         <p>Acceso administrativo sin una empresa asignada.</p>
         <div class="actions">
             <a class="button" href="{% url 'admin:index' %}">Administración</a>
             <a class="button button-secondary" href="{% url 'users:profile' %}">Mi perfil</a>
         </div>
-    {% endif %}
-</section>
-
-{% if business %}
-<section class="home-section" aria-labelledby="general-heading">
-    <h2 id="general-heading">Accesos generales</h2>
-    <div class="module-grid">
-        <a class="card module-card" href="{% url 'stores:store_list' %}">Tiendas</a>
-        <a class="card module-card" href="{% url 'catalog:dashboard' %}">Catálogo</a>
-        <a class="card module-card" href="{% url 'inventory:dashboard' %}">Inventario</a>
-        <a class="card module-card" href="{% url 'customers:customer_list' %}">Clientes</a>
-        {% if can_manage_users %}<a class="card module-card" href="{% url 'users:user_list' %}">Usuarios</a>{% endif %}
-        {% if can_manage_business %}<a class="card module-card" href="{% url 'business_config:profile' %}">Configuración</a>{% endif %}
-        <a class="card module-card" href="{% url 'users:profile' %}">Mi perfil</a>
-    </div>
-</section>
-
-<section id="operaciones" class="home-section" aria-labelledby="operations-heading">
-    <h2 id="operations-heading">Operaciones por tienda</h2>
-    {% if operational_stores %}
-        <div class="store-grid">
-            {% for store in operational_stores %}
-                <article class="card store-card">
-                    <h3>{{ store.name }}</h3>
-                    <div class="actions">
-                        <a class="button" href="{% url 'sales:sale_list' store_id=store.pk %}">Ventas</a>
-                        <a class="button button-secondary" href="{% url 'cash_register:register_list' store_id=store.pk %}">Caja</a>
-                        <a class="button button-secondary" href="{% url 'billing:document_list' store_id=store.pk %}">Facturación</a>
-                        <a class="button button-secondary" href="{% url 'stores:store_detail' pk=store.pk %}">Ver tienda</a>
-                    </div>
-                </article>
-            {% endfor %}
-        </div>
-    {% else %}
-        <p class="empty-state">No tienes tiendas operativas asignadas.</p>
-    {% endif %}
-</section>
+    </section>
+{% else %}
+    {% include "core/partials/_dashboard_content.html" %}
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {% if not administrative_mode %}<script type="module" src="{% static 'js/pages/dashboard.js' %}"></script>{% endif %}
 {% endblock %}
