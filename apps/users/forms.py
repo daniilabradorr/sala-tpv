@@ -1,8 +1,48 @@
 from django import forms
+from django.contrib.auth.forms import AuthenticationForm
 from django.forms import modelformset_factory
 
 from apps.users.helpers import is_manager
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
+
+
+def set_accessible_field_attrs(form):
+    """Link bound controls to their help and error text without JavaScript."""
+    if not form.is_bound:
+        return form
+    has_non_field_errors = bool(form.non_field_errors())
+    for name, field in form.fields.items():
+        described_by = []
+        if field.help_text:
+            described_by.append(f"id_{name}_helptext")
+        if form.errors.get(name):
+            described_by.append(f"id_{name}_error")
+        if has_non_field_errors:
+            described_by.append("form-non-field-errors")
+        if form.errors.get(name) or has_non_field_errors:
+            field.widget.attrs["aria-invalid"] = "true"
+        if described_by:
+            field.widget.attrs["aria-describedby"] = " ".join(described_by)
+    return form
+
+
+class UserLoginForm(AuthenticationForm):
+    """Django authentication with a non-enumerating, accessible presentation."""
+
+    error_messages = {
+        "invalid_login": "No hemos podido iniciar sesión con esos datos.",
+        "inactive": "No hemos podido iniciar sesión con esos datos.",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["username"].label = "Correo electrónico"
+        self.fields["username"].widget.attrs.update(
+            {"autocomplete": "username", "placeholder": "usuario@empresa.es"}
+        )
+        self.fields["password"].label = "Contraseña"
+        self.fields["password"].widget.attrs["autocomplete"] = "current-password"
+        set_accessible_field_attrs(self)
 
 
 class UserProfileUpdateForm(forms.ModelForm):
@@ -27,6 +67,20 @@ class UserProfileUpdateForm(forms.ModelForm):
             "last_name",
             "phone",
         ]
+        labels = {
+            "first_name": "Nombre",
+            "last_name": "Apellidos",
+            "phone": "Teléfono",
+        }
+        widgets = {
+            "first_name": forms.TextInput(attrs={"autocomplete": "given-name"}),
+            "last_name": forms.TextInput(attrs={"autocomplete": "family-name"}),
+            "phone": forms.TextInput(attrs={"autocomplete": "tel"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        set_accessible_field_attrs(self)
 
 
 class UserCreateForm(forms.ModelForm):
@@ -154,6 +208,10 @@ class UserPinChangeForm(forms.Form):
         max_length=6,
         widget=forms.PasswordInput,
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        set_accessible_field_attrs(self)
 
     def clean_new_pin(self):
         pin = self.cleaned_data["new_pin"]

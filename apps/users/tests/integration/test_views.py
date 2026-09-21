@@ -189,8 +189,11 @@ class UserViewsIntegrationTests(TestCase):
     def test_login_uses_netxodo_branding(self):
         response = self.client.get(reverse("users:login"))
 
-        self.assertContains(response, "Iniciar sesión | Netxodo")
+        self.assertContains(response, "Acceso | Netxodo")
+        self.assertContains(response, "Bienvenido de nuevo")
+        self.assertContains(response, 'alt="Netxodo"')
         self.assertNotContains(response, "Sala TPV")
+        self.assertNotContains(response, "data-app-shell")
 
     def test_login_view_rejects_wrong_password_and_accepts_correct_password(self):
         """Verifica que el login rechace contraseñas incorrectas y acepte las correctas."""
@@ -206,7 +209,17 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertEqual(bad_response.status_code, 200)
         self.assertNotIn("_auth_user_id", self.client.session)
-        self.assertContains(bad_response, "errorlist")
+        self.assertContains(
+            bad_response, "No hemos podido iniciar sesión con esos datos."
+        )
+        for leaked_copy in (
+            "usuario inexistente",
+            "cuenta no encontrada",
+            "contraseña incorrecta",
+            "inactive",
+            "email registrado",
+        ):
+            self.assertNotIn(leaked_copy, bad_response.content.decode().lower())
 
         good_response = self.client.post(
             url,
@@ -306,10 +319,11 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertRedirects(
             response,
-            reverse("users:profile"),
+            f"{reverse('users:profile')}?tab=security",
             fetch_redirect_response=False,
         )
         self.assertTrue(self.owner.check_password("newpass12345"))
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.owner.pk)
 
         self.client.logout()
         self.assertTrue(
@@ -318,6 +332,34 @@ class UserViewsIntegrationTests(TestCase):
                 password="newpass12345",
             )
         )
+
+    def test_password_change_rejects_wrong_current_password(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:password_change"),
+            data={
+                "old_password": "wrong-current-password",
+                "new_password1": "newpass12345",
+                "new_password2": "newpass12345",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password(self.password))
+
+    def test_password_change_rejects_mismatched_confirmation(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:password_change"),
+            data={
+                "old_password": self.password,
+                "new_password1": "newpass12345",
+                "new_password2": "different12345",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password(self.password))
 
     def test_pin_change_requires_login(self):
         """Verifica que el cambio de PIN requiera estar autenticado."""
@@ -348,7 +390,7 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertRedirects(
             response,
-            reverse("users:profile"),
+            f"{reverse('users:profile')}?tab=security",
             fetch_redirect_response=False,
         )
         self.assertNotEqual(self.owner.pin_hash, "1234")
@@ -356,6 +398,22 @@ class UserViewsIntegrationTests(TestCase):
 
         profile_response = self.client.get(reverse("users:profile"))
         self.assertNotContains(profile_response, "1234")
+        self.assertNotContains(profile_response, self.owner.pin_hash)
+
+    def test_pin_change_accepts_six_digits(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:pin_change"),
+            data={"new_pin": "123456", "new_pin_confirm": "123456"},
+        )
+        self.assertRedirects(
+            response,
+            f"{reverse('users:profile')}?tab=security",
+            fetch_redirect_response=False,
+        )
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_pin("123456"))
+        self.assertNotEqual(self.owner.pin_hash, "123456")
 
     # ============================================================
     # LISTADO Y DETALLE DE USUARIOS

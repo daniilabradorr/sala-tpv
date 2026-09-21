@@ -1,0 +1,26 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Netxodo{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'css/base.css' %}">
+  <link rel="stylesheet" href="{% static 'css/components/buttons.css' %}">
+  <link rel="stylesheet" href="{% static 'css/components/forms.css' %}">
+  <link rel="stylesheet" href="{% static 'css/components/cards.css' %}">
+  <link rel="stylesheet" href="{% static 'css/pages/auth.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="auth-body">
+  <a class="skip-link" href="#main-content">Saltar al contenido principal</a>
+  <main id="main-content" class="auth-main" tabindex="-1">
+    <div class="auth-container">
+      {% include "includes/messages.html" %}
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

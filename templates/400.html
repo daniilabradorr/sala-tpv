@@ -1,6 +1,4 @@
-{% extends "errors/base.html" %}
-{% block title %}Solicitud no válida | Netxodo{% endblock %}
-{% block content %}
-<h1>Solicitud no válida</h1>
-<p>La solicitud no es válida.</p>
-{% endblock %}
+{% extends "errors/base.html" %}{% load static %}
+{% block title %}Solicitud no válida | Netxodo{% endblock %}{% block code %}400{% endblock %}
+{% block error_icon %}<svg class="error-icon" aria-hidden="true"><use href="{% static 'icons/netxodo-ui.svg' %}#file-text"></use></svg>{% endblock %}
+{% block content %}<h1 id="error-title">No hemos podido procesar esta solicitud</h1><p>La información enviada no es válida o la petición ya no puede procesarse. Vuelve a intentarlo desde Netxodo.</p>{% endblock %}

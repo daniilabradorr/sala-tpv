@@ -339,6 +339,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Contraseña").fill(self.OWNER_PASSWORD)
         self.page.get_by_role("button", name="Iniciar sesión").click()
         self.page.wait_for_url(self._url("/"))
+        self._assert_authenticated_static_assets()
         expect(self.page.get_by_role("heading", name="Netxodo E2E")).to_be_visible()
         expect(
             self.page.locator("#main-content").get_by_role("heading", name="Tienda E2E")
@@ -406,7 +407,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         }
 
     def _assert_local_static_assets(self):
-        logo = self.page.locator("img.brand-logo")
+        logo = self.page.locator('img[alt="Netxodo"]')
         expect(logo).to_be_visible()
         self.assertTrue(
             logo.evaluate("(img) => img.complete && img.naturalWidth > 0"),
@@ -414,7 +415,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         )
 
         responses = dict(self.local_static_responses)
-        expected_paths = ("/static/css/base.css", "/static/js/app.js")
+        expected_paths = (
+            "/static/css/base.css",
+            "/static/css/pages/auth.css",
+            "/static/js/core/password-visibility.js",
+        )
         for path in expected_paths:
             url = self._url(path)
             self.assertIn(url, responses, f"The browser did not request {path}.")
@@ -422,6 +427,15 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
         failures = [(url, status) for url, status in responses.items() if status >= 400]
         self.assertEqual(failures, [], f"Local static asset failures: {failures}")
+        self.assertEqual(self.page.locator("[data-app-shell]").count(), 0)
+        self.assertNotIn(self._url("/static/js/app.js"), responses)
+
+    def _assert_authenticated_static_assets(self):
+        responses = dict(self.local_static_responses)
+        app_url = self._url("/static/js/app.js")
+        self.assertIn(app_url, responses, "The App Shell did not request app.js.")
+        self.assertLess(responses[app_url], 400, f"Static asset failed: {app_url}")
+        self.assertEqual(self.page.locator("[data-app-shell]").count(), 1)
 
     def _assert_database_state(
         self,
