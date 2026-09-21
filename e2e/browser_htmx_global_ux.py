@@ -245,11 +245,14 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 page.locator("#sale-cart .quantity-form").get_by_role(
                     "button", name="Actualizar"
                 ).click()
-                page.wait_for_url(re.compile(r"/users/login/\?next="))
+                page.wait_for_url(
+                    re.compile(r"/users/login/\?(?=.*next=)(?=.*expired=1)")
+                )
                 expect(
-                    page.get_by_role("heading", name="Iniciar sesión")
+                    page.get_by_role("heading", name="Tu sesión ha caducado")
                 ).to_be_visible()
                 self.assertEqual(page.locator("#sale-cart, #checkout-panel").count(), 0)
+                self.assertEqual(page.locator("[data-app-shell]").count(), 0)
                 self.assertEqual(errors, [])
             finally:
                 context.close()

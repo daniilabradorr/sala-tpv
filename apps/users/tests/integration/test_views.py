@@ -189,8 +189,11 @@ class UserViewsIntegrationTests(TestCase):
     def test_login_uses_netxodo_branding(self):
         response = self.client.get(reverse("users:login"))
 
-        self.assertContains(response, "Iniciar sesión | Netxodo")
+        self.assertContains(response, "Acceso | Netxodo")
+        self.assertContains(response, "Bienvenido de nuevo")
+        self.assertContains(response, 'alt="Netxodo"')
         self.assertNotContains(response, "Sala TPV")
+        self.assertNotContains(response, "data-app-shell")
 
     def test_login_view_rejects_wrong_password_and_accepts_correct_password(self):
         """Verifica que el login rechace contraseñas incorrectas y acepte las correctas."""
@@ -206,7 +209,17 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertEqual(bad_response.status_code, 200)
         self.assertNotIn("_auth_user_id", self.client.session)
-        self.assertContains(bad_response, "errorlist")
+        self.assertContains(
+            bad_response, "No hemos podido iniciar sesión con esos datos."
+        )
+        for leaked_copy in (
+            "usuario inexistente",
+            "cuenta no encontrada",
+            "contraseña incorrecta",
+            "inactive",
+            "email registrado",
+        ):
+            self.assertNotIn(leaked_copy, bad_response.content.decode().lower())
 
         good_response = self.client.post(
             url,
