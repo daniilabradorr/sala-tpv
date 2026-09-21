@@ -120,8 +120,6 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 expect(
                     page.get_by_text("El archivo no contiene una imagen válida.")
                 ).to_be_visible()
-                product.refresh_from_db()
-                self.assertFalse(product.image)
                 self.assertIn(
                     "media-placeholder",
                     page.locator("img.media-preview").get_attribute("src"),
@@ -133,6 +131,9 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                     )
             finally:
                 browser.close()
+
+        product.refresh_from_db()
+        self.assertFalse(product.image)
 
     def test_business_logo_upload_replace_and_remove(self):
         first_file = self._image("logo-first.png", "green")
