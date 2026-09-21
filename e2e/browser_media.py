@@ -120,6 +120,12 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 expect(
                     page.get_by_text("El archivo no contiene una imagen válida.")
                 ).to_be_visible()
+                product.refresh_from_db()
+                self.assertFalse(product.image)
+                self.assertIn(
+                    "media-placeholder",
+                    page.locator("img.media-preview").get_attribute("src"),
+                )
                 for width, height in ((375, 812), (1440, 900)):
                     page.set_viewport_size({"width": width, "height": height})
                     self.assertLessEqual(

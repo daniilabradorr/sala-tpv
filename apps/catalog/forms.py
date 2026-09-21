@@ -4,7 +4,7 @@ from apps.catalog.models import Category, Tax, Product
 from apps.core.media.validation import validate_image_upload
 
 
-class ManagedImageFormMixin:
+class ManagedImageModelForm(forms.ModelForm):
     image_upload = forms.FileField(
         label="Seleccionar nueva imagen",
         required=False,
@@ -30,7 +30,7 @@ class ManagedImageFormMixin:
         return cleaned
 
 
-class CategoryBaseForm(ManagedImageFormMixin, forms.ModelForm):
+class CategoryBaseForm(ManagedImageModelForm):
     """
     Formulario base para categorías.
 
@@ -323,7 +323,7 @@ class TaxUpdateForm(TaxBaseForm):
         ]
 
 
-class ProductBaseForm(ManagedImageFormMixin, forms.ModelForm):
+class ProductBaseForm(ManagedImageModelForm):
     """
     Formulario base para productos y servicios.
 
