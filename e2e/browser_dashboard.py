@@ -168,10 +168,29 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
                         expect(
                             page.locator('[data-dashboard-shell="stable"]')
                         ).to_have_count(1)
+
+                        period_select.select_option("30d")
+                        expect(page).to_have_url(re.compile(r"[?&]period=30d(?:&|$)"))
+                        expect(page.locator("#dashboard-period")).to_have_value("30d")
+                        expect(
+                            page.locator("[data-dashboard-chart] svg")
+                        ).to_have_count(1)
+
+                        page.go_back()
+                        expect(page.locator("#dashboard-period")).to_have_value("7d")
+                        expect(
+                            page.locator("[data-dashboard-chart] svg")
+                        ).to_have_count(1)
                         page.go_back()
                         expect(page.locator("#dashboard-period")).to_have_value("today")
+                        expect(
+                            page.locator("[data-dashboard-chart] svg")
+                        ).to_have_count(1)
                         page.go_forward()
                         expect(page.locator("#dashboard-period")).to_have_value("7d")
+                        expect(
+                            page.locator("[data-dashboard-chart] svg")
+                        ).to_have_count(1)
                         expect(dashboard).to_have_count(1)
                         self.assertLessEqual(
                             page.evaluate("document.documentElement.scrollWidth"),

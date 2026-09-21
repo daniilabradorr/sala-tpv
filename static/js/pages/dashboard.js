@@ -56,4 +56,4 @@ function renderDashboardChart(root = document) {
 }
 
 renderDashboardChart();
-document.body.addEventListener("htmx:afterSwap", (event) => renderDashboardChart(event.detail.target));
+document.body.addEventListener("htmx:afterSwap", () => renderDashboardChart());
