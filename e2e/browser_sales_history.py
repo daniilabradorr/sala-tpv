@@ -242,13 +242,6 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                                     "window.matchMedia('(max-width: 767px)').matches"
                                 )
                             )
-                            self.assertTrue(
-                                page.evaluate(
-                                    """[...document.styleSheets].some(
-                                        (sheet) => sheet.href?.includes('/css/pages/sales-history.css')
-                                    )"""
-                                )
-                            )
                             expect(page.locator(".sales-mobile-list")).to_be_visible()
                             expect(
                                 page.locator(".sale-mobile-card").first

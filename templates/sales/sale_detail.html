@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% load static %}
 {% block title %}Venta #{{ sale.pk }} | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-history.css' %}">{% endblock %}
 {% block content %}<section class="sale-history-detail" aria-labelledby="sale-detail-title">
 <a class="back-link" href="{% url 'sales:sale_list' store_id=store.pk %}">← Ventas</a>
 <header class="sale-detail-header"><div><p class="sales-eyebrow">Histórico de venta</p><h1 id="sale-detail-title">Venta #{{ sale.pk }}</h1><p><time datetime="{{ sale.created_at|date:'c' }}">{{ sale.created_at|date:"d/m/Y · H:i" }}</time></p></div><span class="badge status-{{ sale.status }}">{{ sale.get_status_display }}</span></header>
