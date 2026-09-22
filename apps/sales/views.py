@@ -467,12 +467,17 @@ class SaleDetailView(
                 ),
                 "pos_settings": pos_settings,
             }
+            is_partial_request = (
+                request.htmx and not request.htmx.history_restore_request
+            )
             template = (
                 "sales/partials/_product_grid.html"
-                if request.htmx
+                if is_partial_request
                 else "sales/sale_workspace.html"
             )
-            return render(request, template, context)
+            response = render(request, template, context)
+            patch_vary_headers(response, ("HX-Request", "HX-History-Restore-Request"))
+            return response
 
         business = _get_business(request)
         issued_documents = billing_documents_for_sale(
@@ -771,6 +776,7 @@ class SaleHeaderUpdateView(
                     "form": form,
                     "header_form": form,
                 },
+                status=422 if request.htmx else 200,
             )
 
         if request.htmx:
@@ -895,9 +901,11 @@ class SaleLineAddView(
             _add_service_errors_to_form(form, error)
 
             if request.htmx:
-                return _workspace_cart_response(
+                response = _workspace_cart_response(
                     request, business=business, store=store, sale=sale, form=form
                 )
+                response.status_code = 422
+                return response
 
             return render(
                 request,
@@ -971,7 +979,7 @@ class SaleLineUpdateView(
 
         return render(
             request,
-            self.template_name,
+            "sales/partials/_line_editor.html" if request.htmx else self.template_name,
             {
                 "store": store,
                 "sale": sale,
@@ -1005,7 +1013,9 @@ class SaleLineUpdateView(
 
             return render(
                 request,
-                self.template_name,
+                "sales/partials/_line_editor.html"
+                if request.htmx
+                else self.template_name,
                 {
                     "store": store,
                     "sale": sale,
@@ -1013,6 +1023,7 @@ class SaleLineUpdateView(
                     "form": form,
                     "is_create": False,
                 },
+                status=422 if request.htmx else 200,
             )
 
         try:
@@ -1030,13 +1041,38 @@ class SaleLineUpdateView(
 
             return render(
                 request,
-                self.template_name,
+                "sales/partials/_line_editor.html"
+                if request.htmx
+                else self.template_name,
                 {
                     "store": store,
                     "sale": sale,
                     "line": line,
                     "form": form,
                     "is_create": False,
+                },
+                status=422 if request.htmx else 200,
+            )
+
+        if request.htmx:
+            sale = get_sale_detail(business=business, pk=sale.pk)
+            pos_settings = POSSettings.objects.filter(business=business).first()
+            response = render(
+                request,
+                "sales/partials/_line_update_success.html",
+                {
+                    "store": store,
+                    "sale": sale,
+                    "lines": sale.lines.all(),
+                    "pos_settings": pos_settings,
+                    "cart_oob": True,
+                },
+            )
+            return add_hx_trigger(
+                response,
+                {
+                    "nx:close-modal": {"id": "line-editor-dialog"},
+                    "nx:toast": {"message": "Línea actualizada.", "tone": "success"},
                 },
             )
 
