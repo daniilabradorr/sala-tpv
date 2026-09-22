@@ -17,6 +17,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.cache import patch_vary_headers
 from django.views import View
 
 from apps.core.htmx import add_hx_trigger
@@ -29,10 +30,11 @@ from apps.billing.selectors import (
     billing_documents_for_sale,
     billing_documents_for_sale_return,
 )
+from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import get_cash_session_detail
-from apps.business_config.models import POSSettings
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
+from apps.payments.selectors import get_sale_payments
 from apps.sales.forms import (
     CheckoutForm,
     CheckoutPaymentFormSet,
@@ -83,6 +85,7 @@ from apps.sales.services import (
     update_sale_line,
     update_sale_return_line,
 )
+from apps.users.helpers import can_sell_in_store
 from apps.users.mixins import (
     BusinessRequiredMixin,
     CanSellInStoreMixin,
@@ -305,38 +308,94 @@ class SaleListView(
     def get(self, request, store_id):
         business, store = self.get_business_and_store()
 
+        filter_data = request.GET.copy()
+        if not (
+            filter_data.get("date_from") or filter_data.get("date_to")
+        ) and filter_data.get("period") not in {"today", "7d", "30d"}:
+            filter_data["period"] = "today"
+
         form = SaleFilterForm(
-            request.GET or None,
+            filter_data,
             business=business,
             store=store,
         )
 
-        filters = {
-            "store": store,
-        }
-
+        filters = {"store": store}
         if form.is_valid():
             filters.update(form.cleaned_data)
             filters["store"] = store
+            active_period = form.cleaned_data["period"]
+            sales = get_sales_for_business(business=business, filters=filters)
         else:
-            _add_invalid_form_messages(request, form)
+            active_period = (
+                "custom"
+                if filter_data.get("date_from") or filter_data.get("date_to")
+                else filter_data.get("period", "today")
+            )
+            sales = get_sales_for_business(
+                business=business, filters={"store": store}
+            ).none()
+            invalid_fields = {name for name in form.errors if name in form.fields}
+            if form.non_field_errors():
+                invalid_fields.update({"date_from", "date_to"})
+            for field_name in invalid_fields:
+                described_by = (
+                    "filter-form-errors"
+                    if field_name in {"date_from", "date_to"}
+                    and form.non_field_errors()
+                    else f"error-{field_name}"
+                )
+                form.fields[field_name].widget.attrs.update(
+                    {
+                        "aria-invalid": "true",
+                        "aria-describedby": described_by,
+                    }
+                )
 
-        sales = get_sales_for_business(
-            business=business,
-            filters=filters,
-        )
+        paginator = Paginator(sales, 25)
+        page_obj = paginator.get_page(request.GET.get("page"))
+        query_params = request.GET.copy()
+        query_params.pop("page", None)
+
+        quick_periods = []
+        for value, label in (("today", "Hoy"), ("7d", "7 días"), ("30d", "30 días")):
+            period_params = request.GET.copy()
+            period_params["period"] = value
+            for key in ("page", "date_from", "date_to"):
+                period_params.pop(key, None)
+            quick_periods.append(
+                {
+                    "value": value,
+                    "label": label,
+                    "url": f"?{period_params.urlencode()}",
+                    "active": active_period == value,
+                }
+            )
 
         context = {
             "store": store,
             "form": form,
-            "sales": sales,
+            "sales": page_obj.object_list,
+            "page_obj": page_obj,
+            "query_string": query_params.urlencode(),
+            "has_active_filters": bool(request.GET),
+            "can_sell": can_sell_in_store(request.user, store),
+            "active_period": active_period,
+            "quick_periods": quick_periods,
         }
 
-        return render(
-            request,
-            self.template_name,
-            context,
+        is_partial_request = request.htmx and not request.htmx.history_restore_request
+        template_name = (
+            "sales/partials/_sale_history_content.html"
+            if is_partial_request
+            else self.template_name
         )
+        response = render(request, template_name, context)
+        patch_vary_headers(
+            response,
+            ("HX-Request", "HX-History-Restore-Request"),
+        )
+        return response
 
 
 # ==========================================================
@@ -415,8 +474,9 @@ class SaleDetailView(
             )
             return render(request, template, context)
 
+        business = _get_business(request)
         issued_documents = billing_documents_for_sale(
-            business=_get_business(request), sale=sale
+            business=business, sale=sale
         ).filter(status=BillingDocumentStatusChoices.ISSUED)
         has_original = issued_documents.filter(
             document_type__in=[
@@ -435,7 +495,7 @@ class SaleDetailView(
 
         if sale.is_completed:
             returnable_lines = get_returnable_sale_lines(
-                business=_get_business(request),
+                business=business,
                 sale=sale,
             )
 
@@ -445,6 +505,12 @@ class SaleDetailView(
             "lines": sale.lines.all(),
             "returns": sale.returns.all(),
             "returnable_lines": returnable_lines,
+            "payments": get_sale_payments(business=business, sale_id=sale.pk),
+            "billing_documents": issued_documents,
+            "can_sell": can_sell_in_store(request.user, self.store),
+            "can_create_return": sale.is_completed
+            and can_sell_in_store(request.user, self.store)
+            and returnable_lines.exists(),
             "is_editable": sale.is_editable,
             "is_completed": sale.is_completed,
             "is_cancelled": sale.is_cancelled,

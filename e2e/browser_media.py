@@ -72,6 +72,14 @@ class BrowserMediaTests(StaticLiveServerTestCase):
         page.get_by_role("button", name="Iniciar sesión").click()
         page.wait_for_url(f"{self.live_server_url}/")
 
+    def _wait_for_loaded_image(self, page, image):
+        expect(image).to_be_visible()
+        page.wait_for_function(
+            "(img) => img.complete && img.naturalWidth > 0",
+            arg=image.element_handle(),
+        )
+        self.assertGreater(image.evaluate("img => img.naturalWidth"), 0)
+
     def test_product_upload_replace_remove_invalid_and_responsive(self):
         from apps.catalog.tests.factories import create_product
 
@@ -92,8 +100,7 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 )
                 page.get_by_role("button", name="Guardar producto").click()
                 image = page.locator("img.media-preview")
-                expect(image).to_be_visible()
-                self.assertGreater(image.evaluate("img => img.naturalWidth"), 0)
+                self._wait_for_loaded_image(page, image)
                 source_a = image.get_attribute("src")
 
                 page.goto(edit_url)
@@ -149,7 +156,7 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Guardar cambios").click()
                 page.goto(profile_url)
                 logo = page.locator("img.media-preview--logo")
-                self.assertGreater(logo.evaluate("img => img.naturalWidth"), 0)
+                self._wait_for_loaded_image(page, logo)
                 source_a = logo.get_attribute("src")
                 page.get_by_label("Seleccionar nuevo logo").set_input_files(second_file)
                 page.get_by_role("button", name="Guardar cambios").click()

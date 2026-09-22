@@ -1,28 +1,10 @@
-{% extends "base.html" %}
-
+{% extends "base.html" %}{% load static %}
 {% block title %}Ventas | Netxodo{% endblock %}
-
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-history.css' %}">{% endblock %}
 {% block content %}
-<section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
-
-    <p>
-        <a href="{% url 'sales:sale_open' store_id=store.pk %}">Abrir nueva venta</a>
-    </p>
-
-    <form method="get">
-        {{ form.as_p }}
-        <button type="submit">Filtrar</button>
-    </form>
-
-    <section>
-        {% for sale in sales %}
-            <a href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">
-                Venta {{ sale.pk }} &mdash; {{ sale.total_amount }} &euro;
-            </a>
-        {% empty %}
-            <p>No hay ventas.</p>
-        {% endfor %}
-    </section>
+<section class="sales-history" aria-labelledby="sales-title">
+    <header class="sales-page-header"><div><p class="sales-eyebrow">{{ store.name }}</p><h1 id="sales-title">Ventas</h1></div><div class="sales-actions"><a href="{% url 'sales:return_list' store_id=store.pk %}">Devoluciones →</a>{% if can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=store.pk %}">+ Nueva venta</a>{% endif %}</div></header>
+    {% include "sales/partials/_sale_history_content.html" %}
 </section>
 {% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/sales-history.js' %}"></script>{% endblock %}

@@ -236,7 +236,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _create_return(self, *, sale_id, product_name, reason):
         self.step = f"create return for {product_name}"
         self._goto(f"/sales/stores/{self.store.pk}/sales/{sale_id}/")
-        self.page.get_by_role("link", name="Crear devolucion").click()
+        self.page.get_by_role("link", name="Crear devolución", exact=True).click()
         self.page.get_by_label("Motivo de la devolución").fill(reason)
         self.page.get_by_role("button", name="Guardar").click()
         return_id = self._id_from_url(r"/returns/(\d+)/$")
