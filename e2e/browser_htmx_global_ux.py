@@ -236,6 +236,47 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 context.close()
                 browser.close()
 
+    def test_server_authorized_overlay_close_bypasses_processing_guard(self):
+        with sync_playwright() as playwright:
+            browser, context, page, errors = self._browser_page(playwright)
+            try:
+                self._open_sale_with_product(page)
+                modal_trigger = page.get_by_role("link", name=re.compile(r"^COBRAR"))
+                modal_trigger.click()
+                modal = page.locator("#checkout-dialog")
+                expect(modal).to_be_visible()
+                modal.evaluate("dialog => { dialog.dataset.nxProcessing = 'true'; }")
+                modal.locator("[data-nx-modal-close]").evaluate(
+                    "button => button.click()"
+                )
+                expect(modal).to_be_visible()
+                page.evaluate(
+                    "document.dispatchEvent(new CustomEvent('nx:close-modal', "
+                    "{detail:{id:'checkout-dialog'}}))"
+                )
+                expect(modal).to_be_hidden()
+                expect(modal_trigger).to_be_focused()
+
+                drawer_trigger = page.locator("[data-store-trigger]")
+                drawer_trigger.click()
+                drawer = page.locator("#store-dialog")
+                expect(drawer).to_be_visible()
+                drawer.evaluate("dialog => { dialog.dataset.nxProcessing = 'true'; }")
+                drawer.locator("[data-nx-drawer-close]").evaluate(
+                    "button => button.click()"
+                )
+                expect(drawer).to_be_visible()
+                page.evaluate(
+                    "document.dispatchEvent(new CustomEvent('nx:close-drawer', "
+                    "{detail:{id:'store-dialog'}}))"
+                )
+                expect(drawer).to_be_hidden()
+                expect(drawer_trigger).to_be_focused()
+                self.assertEqual(errors, [])
+            finally:
+                context.close()
+                browser.close()
+
     def test_expired_session_causes_full_navigation_not_partial_login(self):
         with sync_playwright() as playwright:
             browser, context, page, errors = self._browser_page(playwright)

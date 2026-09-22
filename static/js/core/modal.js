@@ -1,8 +1,9 @@
 let initialized = false;
 const triggers = new WeakMap();
 const isProcessing = (dialog) => dialog.dataset.nxProcessing === "true";
-export const closeModal = (dialog) => {
-  if (!dialog?.open || isProcessing(dialog)) return false;
+export const closeModal = (dialog, { allowWhileProcessing = false } = {}) => {
+  if (!dialog?.open) return false;
+  if (isProcessing(dialog) && !allowWhileProcessing) return false;
   dialog.close();
   return true;
 };
@@ -29,7 +30,10 @@ export const initModal = () => {
   }, true);
   document.addEventListener("nx:close-modal", (event) => {
     const id = event.detail?.id;
-    closeModal(id ? document.getElementById(id) : document.querySelector("[data-nx-modal][open]"));
+    closeModal(
+      id ? document.getElementById(id) : document.querySelector("[data-nx-modal][open]"),
+      { allowWhileProcessing: true },
+    );
   });
   initialized = true;
 };

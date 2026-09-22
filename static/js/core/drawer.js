@@ -1,8 +1,10 @@
 let initialized = false;
 const triggers = new WeakMap();
-const closeDrawer = (drawer) => {
-  if (!drawer?.open || drawer.dataset.nxProcessing === "true") return;
+const closeDrawer = (drawer, { allowWhileProcessing = false } = {}) => {
+  if (!drawer?.open) return false;
+  if (drawer.dataset.nxProcessing === "true" && !allowWhileProcessing) return false;
   drawer.close();
+  return true;
 };
 export const initDrawer = () => {
   if (initialized) return;
@@ -24,7 +26,10 @@ export const initDrawer = () => {
   }, true);
   document.addEventListener("nx:close-drawer", (event) => {
     const id = event.detail?.id;
-    closeDrawer(id ? document.getElementById(id) : document.querySelector("[data-nx-drawer][open]"));
+    closeDrawer(
+      id ? document.getElementById(id) : document.querySelector("[data-nx-drawer][open]"),
+      { allowWhileProcessing: true },
+    );
   });
   initialized = true;
 };
