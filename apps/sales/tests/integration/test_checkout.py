@@ -493,6 +493,7 @@ class CheckoutIntegrationTests(TestCase):
         for key in keys:
             self.assertContains(response, str(key))
         self.assertContains(response, "La suma de los pagos")
+        self.assertNotContains(response, "['La suma de los pagos")
         self.assert_pristine(sale)
 
     def test_checkout_only_presents_active_methods_and_split_setting(self):
@@ -501,17 +502,49 @@ class CheckoutIntegrationTests(TestCase):
         )
         sale = self.sale()
         self.series()
+        settings = POSSettings.objects.get(business=self.business)
+        settings.allow_split_payments = False
+        settings.save(update_fields=["allow_split_payments", "updated_at"])
         response = self.client.get(self.checkout_url(sale))
         self.assertContains(response, "Efectivo")
         self.assertContains(response, "Tarjeta")
         self.assertNotContains(response, "Inactivo")
         self.assertNotContains(response, "Pago dividido")
 
-        settings = POSSettings.objects.get(business=self.business)
         settings.allow_split_payments = True
         settings.save(update_fields=["allow_split_payments", "updated_at"])
         response = self.client.get(self.checkout_url(sale))
         self.assertContains(response, "Pago dividido")
+
+    def test_split_is_not_offered_with_only_one_active_method(self):
+        self.card.is_active = False
+        self.card.save(update_fields=["is_active", "updated_at"])
+        settings = POSSettings.objects.get(business=self.business)
+        settings.allow_split_payments = True
+        settings.save(update_fields=["allow_split_payments", "updated_at"])
+
+        response = self.client.get(self.checkout_url(self.sale()))
+
+        self.assertContains(response, "Efectivo")
+        self.assertNotContains(response, "Tarjeta")
+        self.assertNotContains(response, "Pago dividido")
+
+    def test_extra_split_rows_are_deleted_server_side_with_unique_keys(self):
+        PaymentMethod.objects.create(business=self.business, name="Bizum", code="bizum")
+        PaymentMethod.objects.create(
+            business=self.business, name="Transferencia", code="transfer"
+        )
+
+        response = self.client.get(self.checkout_url(self.sale()))
+        forms = response.context["payment_formset"].forms
+
+        self.assertEqual(len(forms), 4)
+        self.assertFalse(forms[0]["DELETE"].value())
+        self.assertFalse(forms[1]["DELETE"].value())
+        self.assertTrue(forms[2]["DELETE"].value())
+        self.assertTrue(forms[3]["DELETE"].value())
+        keys = [str(form["idempotency_key"].value()) for form in forms]
+        self.assertEqual(len(set(keys)), 4)
 
     def test_billing_failure_renders_recovery_without_second_charge_cta(self):
         sale = self.sale()

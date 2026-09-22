@@ -7,10 +7,13 @@ from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
+from apps.billing.models import BillingDocument
 from apps.cash_register.models import CashSession
 from apps.catalog.models import Category
 from apps.onboarding.services import OnboardingService
-from apps.payments.models import Payment
+from apps.payments.models import Payment, PaymentStatusChoices
+from apps.sales.models import PaymentStatusChoices as SalePaymentStatus
+from apps.sales.models import Sale
 from apps.sales.tests.factories import create_sales_inventory_item, create_sales_product
 
 
@@ -109,11 +112,104 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             expect(dialog.get_by_role("link", name="Ver documento")).to_be_visible()
             browser.close()
         self.assertEqual(Payment.objects.filter(method__code="card").count(), 1)
+        payment = Payment.objects.get(method__code="card")
+        self.assertEqual(payment.status, PaymentStatusChoices.COMPLETED)
+        self.assertTrue(BillingDocument.objects.filter(sale=payment.sale).exists())
 
-    def test_cash_split_and_responsive_previews(self):
+    def test_cash_checkout_and_change_preview(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login_and_sale(page)
+            dialog = self._open_checkout(page, 1440)
+            dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+            dialog.get_by_label("Entregado por el cliente").fill("20")
+            expect(dialog.locator("[data-cash-change]")).to_have_text("9,10 €")
+            dialog.get_by_role("button", name="EXACTO").click()
+            expect(dialog.locator("[data-cash-change]")).to_have_text("0,00 €")
+            dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+            expect(
+                dialog.get_by_role("heading", name="VENTA COMPLETADA")
+            ).to_be_visible()
+            browser.close()
+        payment = Payment.objects.get(method__code="cash")
+        self.assertEqual(payment.status, PaymentStatusChoices.COMPLETED)
+        self.assertTrue(BillingDocument.objects.filter(sale=payment.sale).exists())
+
+    def test_split_checkout_creates_two_completed_payments(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login_and_sale(page)
+            dialog = self._open_checkout(page, 1440)
+            dialog.get_by_role("radio", name="Pago dividido").check()
+            parts = dialog.locator("[data-split-part]:visible")
+            expect(parts).to_have_count(2)
+            parts.nth(0).get_by_label("Método").select_option(label="Efectivo")
+            parts.nth(0).get_by_label("Importe").fill("5.00")
+            parts.nth(0).get_by_label("Entregado (efectivo)").fill("10.00")
+            parts.nth(1).get_by_label("Método").select_option(label="Tarjeta")
+            parts.nth(1).get_by_label("Importe").fill("5.90")
+            expect(dialog.locator("[data-split-assigned]")).to_have_text("10,90 €")
+            expect(dialog.locator("[data-split-remaining]")).to_have_text("0,00 €")
+            dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+            expect(
+                dialog.get_by_role("heading", name="VENTA COMPLETADA")
+            ).to_be_visible()
+            browser.close()
+        sale = Sale.objects.get()
+        self.assertEqual(sale.pending_amount, Decimal("0.00"))
+        self.assertEqual(sale.payment_status, SalePaymentStatus.PAID)
+        payments = Payment.objects.filter(sale=sale)
+        self.assertEqual(payments.count(), 2)
+        self.assertEqual(
+            set(payments.values_list("method__code", flat=True)), {"cash", "card"}
+        )
+        self.assertFalse(
+            payments.exclude(status=PaymentStatusChoices.COMPLETED).exists()
+        )
+        self.assertTrue(BillingDocument.objects.filter(sale=sale).exists())
+
+    def test_invalid_split_stays_open_and_preserves_idempotency_keys(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login_and_sale(page)
+            dialog = self._open_checkout(page, 1440)
+            dialog.get_by_role("radio", name="Pago dividido").check()
+            parts = dialog.locator("[data-split-part]:visible")
+            parts.nth(0).get_by_label("Método").select_option(label="Efectivo")
+            parts.nth(0).get_by_label("Importe").fill("5.00")
+            parts.nth(0).get_by_label("Entregado (efectivo)").fill("10.00")
+            parts.nth(1).get_by_label("Método").select_option(label="Tarjeta")
+            parts.nth(1).get_by_label("Importe").fill("4.00")
+            keys_before = dialog.locator('[name$="idempotency_key"]').evaluate_all(
+                "elements => elements.map(element => element.value)"
+            )
+            with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and response.status == 422
+                    and "/checkout/" in response.url
+                )
+            ):
+                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+            expect(dialog).to_have_attribute("open", "")
+            expect(dialog.get_by_text("La suma de los pagos")).to_be_visible()
+            expect(dialog.locator('[name="payments-0-amount"]')).to_have_value("5.00")
+            expect(dialog.locator('[name="payments-1-amount"]')).to_have_value("4.00")
+            keys_after = dialog.locator('[name$="idempotency_key"]').evaluate_all(
+                "elements => elements.map(element => element.value)"
+            )
+            self.assertEqual(keys_after, keys_before)
+            browser.close()
+        self.assertFalse(Payment.objects.exists())
+
+    def test_checkout_responsive_escape_and_focus_contract(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             for viewport in (
+                {"width": 1440, "height": 900},
                 {"width": 900, "height": 900},
                 {"width": 375, "height": 812},
             ):
@@ -121,15 +217,22 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                     page = browser.new_page(viewport=viewport)
                     self._login_and_sale(page)
                     dialog = self._open_checkout(page, viewport["width"])
+                    expect(
+                        dialog.get_by_role("radio", name=re.compile("Efectivo"))
+                    ).to_be_visible()
                     dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
-                    dialog.get_by_role("button", name="EXACTO").click()
-                    expect(dialog.locator("[data-cash-change]")).to_have_text("0,00 €")
-                    dialog.get_by_label("Entregado por el cliente").fill("20")
-                    expect(dialog.locator("[data-cash-change]")).to_have_text("9,10 €")
+                    expect(
+                        dialog.get_by_label("Entregado por el cliente")
+                    ).to_be_visible()
                     dialog.get_by_role("radio", name="Pago dividido").check()
                     expect(dialog.locator("[data-split-part]:visible")).to_have_count(2)
                     assert page.evaluate(
                         "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
                     )
+                    page.keyboard.press("Escape")
+                    expect(dialog).not_to_have_attribute("open", "")
+                    expect(
+                        page.get_by_role("link", name=re.compile("COBRAR"))
+                    ).to_be_focused()
                     page.close()
             browser.close()

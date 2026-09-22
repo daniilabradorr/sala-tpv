@@ -11,7 +11,7 @@
     <li class="{% if document %}done{% elif sale.payment_status == 'paid' %}warning{% endif %}">{% if document %}Documento emitido{% elif sale.payment_status == 'paid' %}Documento pendiente{% else %}Documento fiscal{% endif %}</li>
   </ol>
 
-  {% if checkout_error %}<div class="tpv-errors" role="alert"><strong>No se ha podido completar el proceso.</strong><span>{{ checkout_error }}</span></div>{% endif %}
+  {% if checkout_errors %}<div class="tpv-errors" role="alert"><strong>No se ha podido completar el proceso.</strong>{% for message in checkout_errors %}<span>{{ message }}</span>{% endfor %}</div>{% endif %}
 
   {% if complete %}
     <div class="checkout-success">
@@ -50,6 +50,7 @@
           <label><input type="radio" name="mode" value="single" {% if form.mode.value != 'split' %}checked{% endif %}><span>Pago simple</span></label>
           {% if allow_split %}<label><input type="radio" name="mode" value="split" {% if form.mode.value == 'split' %}checked{% endif %}><span>Pago dividido</span></label>{% endif %}
         </fieldset>
+        {% for error in form.mode.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
 
         <section data-single-payment {% if form.mode.value == 'split' %}hidden{% endif %}>
           <fieldset class="payment-methods"><legend>¿Cómo paga el cliente?</legend>
@@ -64,6 +65,7 @@
             <p class="cash-change"><span>Cambio</span><strong data-cash-change>0,00 €</strong></p>
           </div>
           <label class="reference-field" data-single-reference for="{{ form.external_reference.id_for_label }}">Referencia <small>Opcional</small>{{ form.external_reference }}</label>
+          {% for error in form.external_reference.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
         </section>
 
         {% if allow_split %}<section class="split-payment" data-split-payment {% if form.mode.value != 'split' %}hidden{% endif %}>

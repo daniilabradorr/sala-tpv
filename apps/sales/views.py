@@ -1257,7 +1257,8 @@ class SaleCheckoutView(
 
     def _forms(self, request, business, sale):
         options = checkout_options(business=business, sale=sale)
-        methods = list(options["methods"])
+        methods = options["methods"]
+        method_count = methods.count()
         data = request.POST if request.method == "POST" else None
         initial = {}
         candidates = list(options["series"])
@@ -1272,15 +1273,36 @@ class SaleCheckoutView(
         formset = CheckoutPaymentFormSet(
             data,
             prefix="payments",
-            initial=None if data is not None else [{} for _method in methods],
+            initial=(
+                None
+                if data is not None
+                else [
+                    {} if index < 2 else {"DELETE": True}
+                    for index in range(method_count)
+                ]
+            ),
             form_kwargs={"methods": methods},
         )
         # There can never be more useful parts than active, unique methods.
-        formset.max_num = len(methods)
-        return options, form, formset
+        formset.max_num = method_count
+        return options, form, formset, method_count
+
+    @staticmethod
+    def _error_messages(error):
+        if error is None:
+            return []
+        if hasattr(error, "message_dict"):
+            return [
+                str(message)
+                for messages_for_field in error.message_dict.values()
+                for message in messages_for_field
+            ]
+        if hasattr(error, "messages"):
+            return [str(message) for message in error.messages]
+        return [str(error)]
 
     def _render(self, request, business, store, sale, *, error=None, cash_change=None):
-        options, form, formset = self._forms(request, business, sale)
+        options, form, formset, method_count = self._forms(request, business, sale)
         state = checkout_state(business=business, sale=sale)
         pos_settings = POSSettings.objects.filter(business=business).first()
         selected_method = next(
@@ -1297,8 +1319,10 @@ class SaleCheckoutView(
             "store": store,
             "form": form,
             "payment_formset": formset,
-            "allow_split": bool(pos_settings and pos_settings.allow_split_payments),
-            "checkout_error": error,
+            "allow_split": bool(
+                pos_settings and pos_settings.allow_split_payments and method_count >= 2
+            ),
+            "checkout_errors": self._error_messages(error),
             "cash_change": cash_change,
             "selected_method_code": getattr(selected_method, "code", None),
         }
@@ -1317,7 +1341,7 @@ class SaleCheckoutView(
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
-        options, form, formset = self._forms(request, business, sale)
+        options, form, formset, _method_count = self._forms(request, business, sale)
         mode = request.POST.get("mode", "single")
         valid = form.is_valid() and (mode != "split" or formset.is_valid())
         if not valid:
