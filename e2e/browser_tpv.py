@@ -220,8 +220,10 @@ class BrowserTPVTests(StaticLiveServerTestCase):
 
                         cart.get_by_role("button", name="Eliminar").click()
                         expect(cart.get_by_text("Café especial")).to_have_count(0)
-                        if viewport["width"] < 1200 and cart.get_attribute("open"):
+                        if viewport["width"] < 1200:
+                            expect(cart).to_have_attribute("open", "")
                             cart.get_by_role("button", name="Cerrar ticket").click()
+                            expect(cart).not_to_have_attribute("open", "")
                         page.get_by_role(
                             "button", name=re.compile("Café especial")
                         ).click()
