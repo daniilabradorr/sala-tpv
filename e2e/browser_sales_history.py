@@ -236,6 +236,9 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                             re.compile(r"[?&]status=completed(?:&|$)")
                         )
                         expect(page.locator(".sales-history")).to_be_visible()
+                        expect(page.locator(".sales-history")).to_have_attribute(
+                            "hx-history", "false"
+                        )
                         expect(page.locator("[data-app-shell]")).to_be_visible()
                         expect(page.locator("#sales-history-content")).to_be_visible()
                         if viewport["width"] <= 767:

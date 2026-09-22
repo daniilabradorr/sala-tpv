@@ -227,7 +227,10 @@ class SalesHistoryTests(TestCase):
             HTTP_HX_HISTORY_RESTORE_REQUEST="true",
         )
         self.assertTemplateUsed(restored, "sales/sale_list.html")
-        self.assertContains(restored, 'class="sales-history"')
+        self.assertContains(
+            restored,
+            'class="sales-history" aria-labelledby="sales-title" hx-history="false"',
+        )
         self.assertContains(restored, "data-app-shell")
         self.assertContains(restored, 'id="sales-history-content"', count=1)
 
