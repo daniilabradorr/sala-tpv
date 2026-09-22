@@ -706,9 +706,15 @@ class SaleLineUpdateForm(BaseSaleLineForm):
             **kwargs,
         )
 
-        self.fields[
-            "unit_base_price"
-        ].help_text = "Precio histórico aplicado a esta línea."
+        if self.pos_settings and not self.pos_settings.allow_manual_price:
+            self.fields.pop("unit_base_price")
+        else:
+            self.fields[
+                "unit_base_price"
+            ].help_text = "Precio histórico aplicado a esta línea."
+
+        if self.pos_settings and not self.pos_settings.allow_manual_discounts:
+            self.fields.pop("discount_amount")
 
     def get_reference_price(
         self,

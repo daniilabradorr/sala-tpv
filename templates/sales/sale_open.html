@@ -1,20 +1,17 @@
-{% extends "base.html" %}
-
-{% block title %}Abrir venta | Netxodo{% endblock %}
-
+{% extends "base.html" %}{% load static %}
+{% block title %}Nueva venta | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/sales_tpv.css' %}">{% endblock %}
 {% block content %}
-<section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
-
-    {% if locked_cash_session %}<p class="catalog-note">La venta se asociará a <strong>{{ locked_cash_session.cash_register.name }}</strong>, sesión #{{ locked_cash_session.pk }}.</p>{% endif %}
-
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-
-        <button type="submit">
-            Guardar
-        </button>
-    </form>
+<section class="card sale-open" aria-labelledby="sale-open-title">
+  <span class="eyebrow">TPV · {{ store.name }}</span><h1 id="sale-open-title">Nueva venta</h1>
+  {% if locked_cash_session %}
+    <dl class="sale-open-context"><div><dt>Tienda</dt><dd>{{ store.name }}</dd></div><div><dt>Caja</dt><dd>{{ locked_cash_session.cash_register.name }}</dd></div><div><dt>Sesión</dt><dd>#{{ locked_cash_session.pk }}</dd></div></dl>
+  {% else %}<p class="catalog-note">Selecciona el contexto de caja solo cuando sea necesario.</p>{% endif %}
+  <form method="post" class="sale-open-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="tpv-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}{% if not field.is_hidden %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% include "sales/partials/_field_errors.html" with field=field %}</div>{% else %}{{ field }}{% endif %}{% endfor %}
+    <button type="submit" class="button sale-open-submit">Iniciar venta</button>
+  </form>
 </section>
 {% endblock %}

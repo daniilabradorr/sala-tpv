@@ -166,9 +166,39 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
         self.assertContains(
             response,
             f'id="quantity-{line.pk}" name="quantity" type="number" '
-            'min="0.001" step="0.001" value="2.000"',
+            'min="0.001" step="0.001" inputmode="decimal" value="2.000"',
         )
         self.assertNotContains(response, 'value="2,000"')
+
+    def test_workspace_hides_line_editor_when_manual_changes_are_disabled(self):
+        self.login_as_owner()
+        self.pos_settings.allow_manual_price = False
+        self.pos_settings.allow_manual_discounts = False
+        self.pos_settings.max_manual_discount_percent = Decimal("0.00")
+        self.pos_settings.save(
+            update_fields=[
+                "allow_manual_price",
+                "allow_manual_discounts",
+                "max_manual_discount_percent",
+                "updated_at",
+            ]
+        )
+        sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
+        add_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("1.000"),
+            user=self.owner,
+        )
+        response = self.client.get(
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, ">Editar</a>")
 
     def test_return_complete_requires_pin_and_accepts_valid_pin(self):
         self.login_as_owner()

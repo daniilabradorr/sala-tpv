@@ -166,10 +166,14 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         if customer:
             self.page.get_by_role("radio", name="Cliente", exact=True).check()
             self.page.locator("#id_customer").select_option(label=customer)
-        self.page.get_by_label(
-            "Factura"
-            if document_type == RequestedDocumentTypeChoices.INVOICE
-            else "Ticket"
+        self.page.get_by_role(
+            "radio",
+            name=(
+                "Factura"
+                if document_type == RequestedDocumentTypeChoices.INVOICE
+                else "Ticket"
+            ),
+            exact=True,
         ).check()
         self.page.get_by_role("button", name="Actualizar cabecera").click()
         return self._id_from_url(r"/sales/(\d+)/$")
@@ -187,7 +191,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         update_button = quantity_input.locator("xpath=ancestor::form").get_by_role(
             "button", name="Actualizar"
         )
-        self.page.locator("#sale-cart").evaluate(
+        self.page.locator("#sale-cart-content").evaluate(
             "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
         )
         with self.page.expect_response(
@@ -198,7 +202,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             update_button.click()
         self.assertLess(response_info.value.status, 400)
         updated_cart = self.page.locator(
-            "#sale-cart:not([data-e2e-before-quantity-swap])"
+            "#sale-cart-content:not([data-e2e-before-quantity-swap])"
         )
         expect(updated_cart).to_be_visible()
         updated_quantity = (
