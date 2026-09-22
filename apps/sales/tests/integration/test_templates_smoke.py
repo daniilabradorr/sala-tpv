@@ -174,8 +174,14 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
         self.login_as_owner()
         self.pos_settings.allow_manual_price = False
         self.pos_settings.allow_manual_discounts = False
+        self.pos_settings.max_manual_discount_percent = Decimal("0.00")
         self.pos_settings.save(
-            update_fields=["allow_manual_price", "allow_manual_discounts", "updated_at"]
+            update_fields=[
+                "allow_manual_price",
+                "allow_manual_discounts",
+                "max_manual_discount_percent",
+                "updated_at",
+            ]
         )
         sale = open_sale(business=self.business, store=self.store, opened_by=self.owner)
         add_sale_line(

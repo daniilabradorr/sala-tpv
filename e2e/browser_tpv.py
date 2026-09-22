@@ -86,6 +86,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         self.store_id = result.store.pk
         self.session_id = self.session.pk
         self.customer_id = self.customer.pk
+        self.category_id = self.category.pk
 
     def _login(self, page):
         page.goto(f"{self.live_server_url}/users/login/")
@@ -146,16 +147,24 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         search = page.locator("#product-search")
                         if viewport["width"] >= 768:
                             expect(search).to_be_focused()
-                        search.fill("CAFE-10")
+                        category_chip = page.locator("#category-chips").get_by_role(
+                            "button", name="Bebidas TPV", exact=True
+                        )
+                        category_chip.click()
+                        expect(category_chip).to_have_attribute("aria-pressed", "true")
+
+                        with page.expect_request(
+                            lambda request: (
+                                "q=CAFE-10" in request.url
+                                and f"category={self.category_id}" in request.url
+                            )
+                        ):
+                            search.fill("CAFE-10")
                         product_button = page.get_by_role(
                             "button", name=re.compile("Café especial")
                         )
                         expect(product_button).to_be_visible()
-
-                        page.get_by_role("button", name="Bebidas TPV").click()
-                        expect(
-                            page.get_by_role("button", name="Bebidas TPV")
-                        ).to_have_attribute("aria-pressed", "true")
+                        expect(category_chip).to_have_attribute("aria-pressed", "true")
                         expect(product_button).to_be_visible()
                         product_button.click()
 

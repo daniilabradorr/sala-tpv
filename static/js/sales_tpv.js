@@ -72,6 +72,13 @@
   });
 
   document.addEventListener("click", (event) => {
+    const category = event.target.closest("[data-category-value]");
+    if (category) {
+      const form = category.closest("form");
+      form.querySelector('[name="category"]').value = category.dataset.categoryValue;
+      form.requestSubmit();
+      return;
+    }
     const button = event.target.closest("[data-quantity-step]");
     if (!button) return;
     const form = button.closest("form");

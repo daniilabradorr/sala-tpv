@@ -931,8 +931,14 @@ class SaleViewsIntegrationTests(TestCase):
 
         settings.allow_manual_price = True
         settings.allow_manual_discounts = False
+        settings.max_manual_discount_percent = Decimal("0.00")
         settings.save(
-            update_fields=["allow_manual_price", "allow_manual_discounts", "updated_at"]
+            update_fields=[
+                "allow_manual_price",
+                "allow_manual_discounts",
+                "max_manual_discount_percent",
+                "updated_at",
+            ]
         )
         response = self.client.get(url, HTTP_HX_REQUEST="true")
         self.assertIn("unit_base_price", response.context["form"].fields)

@@ -28,9 +28,11 @@ const setProcessing = (detail, processing) => {
   if (processing) { button.dataset.nxOriginalText = button.textContent; button.disabled = true; if (button.dataset.loadingText) button.textContent = button.dataset.loadingText; }
   else { button.disabled = false; if (button.dataset.nxOriginalText) button.textContent = button.dataset.nxOriginalText; }
 };
-const feedback = (message, action = "") => {
+const feedback = (message, action = "", requestScopedSurface = null) => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
-  const surface = document.querySelector("[data-nx-modal][open], [data-nx-drawer][open]");
+  const surface = requestScopedSurface?.isConnected
+    ? requestScopedSurface
+    : document.querySelector("[data-nx-modal][open], [data-nx-drawer][open]");
   const host = document.querySelector("[data-nx-feedback-host]");
   if (surface) {
     surface.prepend(region);
@@ -68,9 +70,10 @@ export const initHtmxEvents = () => {
   document.body.addEventListener("htmx:afterRequest", (event) => finishRequest(event.detail));
   document.body.addEventListener("htmx:sendError", (event) => {
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
+    const surface = requestSurface(event.detail) || requestSurfaces.get(event.detail.xhr);
     finishRequest(event.detail);
-    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.");
-    else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.");
+    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface);
+    else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.", surface);
   });
   document.body.addEventListener("htmx:beforeSwap", (event) => {
     const status = event.detail.xhr.status;
