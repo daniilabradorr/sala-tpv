@@ -326,7 +326,11 @@ class SaleListView(
             active_period = form.cleaned_data["period"]
             sales = get_sales_for_business(business=business, filters=filters)
         else:
-            active_period = filter_data.get("period", "today")
+            active_period = (
+                "custom"
+                if filter_data.get("date_from") or filter_data.get("date_to")
+                else filter_data.get("period", "today")
+            )
             sales = get_sales_for_business(
                 business=business, filters={"store": store}
             ).none()

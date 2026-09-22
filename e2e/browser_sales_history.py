@@ -1,13 +1,23 @@
 """Real Chromium coverage for the FE-09 sales history surface."""
 
 import re
+import uuid
 from decimal import Decimal
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
+from django.utils import timezone
 from playwright.sync_api import expect, sync_playwright
 
+from apps.billing.models import (
+    BillingDocument,
+    BillingDocumentStatusChoices,
+    BillingDocumentTypeChoices,
+    BillingSeries,
+)
+from apps.cash_register.models import CashSession
 from apps.onboarding.services import OnboardingService
+from apps.payments.models import Payment, PaymentMethod, PaymentStatusChoices
 from apps.sales.models import SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
@@ -64,6 +74,61 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
             product=product,
             unit_base_price=Decimal("10.00"),
         )
+        method = PaymentMethod.objects.create(
+            business=result.business, name="Tarjeta E2E", code="card"
+        )
+        cash_session = CashSession.objects.create(
+            business=result.business,
+            store=result.store,
+            cash_register=result.cash_register,
+            opened_by=result.owner,
+        )
+        Payment.objects.create(
+            business=result.business,
+            store=result.store,
+            sale=sale,
+            method=method,
+            cash_session=cash_session,
+            amount=sale.total_amount,
+            status=PaymentStatusChoices.COMPLETED,
+            processed_by=result.owner,
+            idempotency_key=uuid.uuid4(),
+        )
+        series = BillingSeries.objects.create(
+            business=result.business,
+            store=result.store,
+            name="Serie E2E",
+            document_type=BillingDocumentTypeChoices.F2,
+            prefix="E2E",
+            year=timezone.localdate().year,
+        )
+        self.document = BillingDocument.objects.create(
+            business=result.business,
+            store=result.store,
+            sale=sale,
+            series=series,
+            issued_by=result.owner,
+            series_text="E2E/2026",
+            number=1,
+            document_type=BillingDocumentTypeChoices.F2,
+            status=BillingDocumentStatusChoices.ISSUED,
+            issued_at=timezone.now(),
+            operation_date=timezone.localdate(),
+            idempotency_key=uuid.uuid4(),
+            idempotency_fingerprint="b" * 64,
+            description="Venta E2E",
+            issuer_legal_name="Histórico E2E SL",
+            issuer_tax_identifier="B87654321",
+            issuer_address_line_1="Calle Historia 1",
+            issuer_postal_code="37001",
+            issuer_city="Salamanca",
+            issuer_province="Salamanca",
+            issuer_country_code="ES",
+            subtotal_amount=sale.subtotal_amount,
+            discount_amount=sale.discount_amount,
+            tax_amount=sale.tax_amount,
+            total_amount=sale.total_amount,
+        )
 
     def test_history_htmx_detail_and_responsive_layout(self):
         with sync_playwright() as playwright:
@@ -83,7 +148,15 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         page.get_by_label("Correo electrónico").fill(self.email)
                         page.get_by_label("Contraseña").fill(self.password)
                         page.get_by_role("button", name="Iniciar sesión").click()
-                        page.get_by_role("link", name="Ventas", exact=True).click()
+                        sidebar = page.locator("#app-sidebar")
+                        sales_link = sidebar.get_by_role(
+                            "link", name="Ventas", exact=True
+                        )
+                        sidebar_toggle = page.locator("[data-sidebar-toggle]")
+                        if sidebar_toggle.is_visible():
+                            sidebar_toggle.click()
+                            expect(sidebar).not_to_have_attribute("inert", "")
+                        sales_link.click()
 
                         shell = page.locator("[data-app-shell]")
                         expect(shell).to_be_visible()
@@ -100,7 +173,9 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         ).to_have_count(1)
                         expect(page.locator("#sales-history-content")).to_have_count(1)
 
-                        page.get_by_label("Estado").select_option("completed")
+                        status_select = page.locator("#id_status")
+                        status_select.select_option("completed")
+                        expect(status_select).to_have_value("completed")
                         page.get_by_role("button", name="Aplicar filtros").click()
                         expect(page).to_have_url(re.compile(r"[?&]period=7d(?:&|$)"))
                         expect(page).to_have_url(
@@ -116,8 +191,28 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         expect(
                             page.get_by_text("Producto snapshot E2E")
                         ).to_be_visible()
+                        expect(page.get_by_text("Tarjeta E2E")).to_be_visible()
+                        document_link = page.get_by_role(
+                            "link", name=re.compile(r"Factura simplificada.*000001")
+                        )
+                        expect(document_link).to_be_visible()
+                        expect(document_link).to_have_attribute(
+                            "href", re.compile(rf"/{self.document.pk}/")
+                        )
                         page.go_back()
                         expect(page).to_have_url(re.compile(r"[?&]period=7d(?:&|$)"))
+                        expect(page).to_have_url(
+                            re.compile(r"[?&]status=completed(?:&|$)")
+                        )
+                        page.go_forward()
+                        expect(
+                            page.get_by_text("Producto snapshot E2E")
+                        ).to_be_visible()
+                        page.go_back()
+                        expect(page).to_have_url(re.compile(r"[?&]period=7d(?:&|$)"))
+                        expect(page).to_have_url(
+                            re.compile(r"[?&]status=completed(?:&|$)")
+                        )
                         self.assertEqual(errors, [])
                         overflow = page.evaluate(
                             "document.documentElement.scrollWidth > document.documentElement.clientWidth"
