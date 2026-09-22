@@ -362,6 +362,7 @@ jobs:
           e2e.browser_dashboard
           e2e.browser_sales_history
           e2e.browser_tpv
+          e2e.browser_checkout
           --verbosity 2
 
       - name: Upload browser failure artifacts

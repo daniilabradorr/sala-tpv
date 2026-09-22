@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from apps.billing.models import BillingDocument, BillingSeries
 from apps.business_config.services import create_business_configuration
+from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
 from apps.payments.models import Payment, PaymentMethod
 from apps.sales.checkout import (
@@ -248,6 +249,24 @@ class CheckoutIntegrationTests(TestCase):
                 self.assertEqual(payment.method, method)
                 self.assertEqual(payment.cash_session, sale.cash_session)
 
+    def test_bizum_transfer_and_external_reference_use_active_business_methods(self):
+        for code in ("bizum", "transfer"):
+            with self.subTest(code=code):
+                method = PaymentMethod.objects.create(
+                    business=self.business, name=code.title(), code=code
+                )
+                sale = self.sale()
+                intent = PaymentIntent(
+                    method_id=method.pk,
+                    amount=Decimal("40.00"),
+                    idempotency_key=uuid.uuid4(),
+                    external_reference=f"REF-{code}",
+                )
+                self._run_checkout(sale, [intent], self.series())
+                payment = Payment.objects.get(sale=sale)
+                self.assertEqual(payment.method, method)
+                self.assertEqual(payment.external_reference, f"REF-{code}")
+
     def test_inactive_and_cross_tenant_methods_are_rejected(self):
         inactive = PaymentMethod.objects.create(
             business=self.business, name="Bizum", code="bizum", is_active=False
@@ -475,6 +494,47 @@ class CheckoutIntegrationTests(TestCase):
             self.assertContains(response, str(key))
         self.assertContains(response, "La suma de los pagos")
         self.assert_pristine(sale)
+
+    def test_checkout_only_presents_active_methods_and_split_setting(self):
+        PaymentMethod.objects.create(
+            business=self.business, name="Inactivo", code="bizum", is_active=False
+        )
+        sale = self.sale()
+        self.series()
+        response = self.client.get(self.checkout_url(sale))
+        self.assertContains(response, "Efectivo")
+        self.assertContains(response, "Tarjeta")
+        self.assertNotContains(response, "Inactivo")
+        self.assertNotContains(response, "Pago dividido")
+
+        settings = POSSettings.objects.get(business=self.business)
+        settings.allow_split_payments = True
+        settings.save(update_fields=["allow_split_payments", "updated_at"])
+        response = self.client.get(self.checkout_url(sale))
+        self.assertContains(response, "Pago dividido")
+
+    def test_billing_failure_renders_recovery_without_second_charge_cta(self):
+        sale = self.sale()
+        series = self.series()
+        data = {
+            "mode": "single",
+            "method": self.card.pk,
+            "series": series.pk,
+            "payment_idempotency_key": uuid.uuid4(),
+            "billing_idempotency_key": uuid.uuid4(),
+        }
+        with patch(
+            "apps.sales.checkout.issue_sale_document",
+            side_effect=ValidationError("Emisión temporalmente no disponible"),
+        ):
+            response = self.client.post(
+                self.checkout_url(sale), data, HTTP_HX_REQUEST="true"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cobro registrado")
+        self.assertContains(response, "REINTENTAR EMISIÓN")
+        self.assertNotContains(response, "CONFIRMAR COBRO")
+        self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
 
     def test_invalid_htmx_checkout_swaps_partial_with_422_and_preserves_intent(self):
         sale = self.sale()

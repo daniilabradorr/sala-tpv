@@ -1257,6 +1257,7 @@ class SaleCheckoutView(
 
     def _forms(self, request, business, sale):
         options = checkout_options(business=business, sale=sale)
+        methods = list(options["methods"])
         data = request.POST if request.method == "POST" else None
         initial = {}
         candidates = list(options["series"])
@@ -1264,15 +1265,18 @@ class SaleCheckoutView(
             initial["series"] = candidates[0]
         form = CheckoutForm(
             data,
-            methods=options["methods"],
+            methods=methods,
             series=options["series"],
             initial=initial,
         )
         formset = CheckoutPaymentFormSet(
             data,
             prefix="payments",
-            form_kwargs={"methods": options["methods"]},
+            initial=None if data is not None else [{} for _method in methods],
+            form_kwargs={"methods": methods},
         )
+        # There can never be more useful parts than active, unique methods.
+        formset.max_num = len(methods)
         return options, form, formset
 
     def _render(self, request, business, store, sale, *, error=None, cash_change=None):
@@ -1298,11 +1302,13 @@ class SaleCheckoutView(
             "cash_change": cash_change,
             "selected_method_code": getattr(selected_method, "code", None),
         }
-        return render(
+        response = render(
             request,
             self.partial_name if request.htmx else self.template_name,
             context,
         )
+        patch_vary_headers(response, ("HX-Request", "HX-History-Restore-Request"))
+        return response
 
     def get(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
@@ -1336,7 +1342,7 @@ class SaleCheckoutView(
                         idempotency_key=part["idempotency_key"],
                     )
                     for part in formset.cleaned_data
-                    if part
+                    if part and not part.get("DELETE")
                 ]
             elif form.cleaned_data.get("method"):
                 intents = [
@@ -1366,7 +1372,11 @@ class SaleCheckoutView(
             )
         except (ValidationError, ValueError) as error:
             # Re-read persisted state so partial success is represented truthfully.
-            return self._render(request, business, store, sale, error=error)
+            response = self._render(request, business, store, sale, error=error)
+            state = checkout_state(business=business, sale=sale)
+            if request.htmx and state["sale"].payment_status != "paid":
+                response.status_code = 422
+            return response
         cash_change = next(
             (
                 intent.cash_received - intent.amount
