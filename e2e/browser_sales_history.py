@@ -83,6 +83,7 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
             for method in result.payment_methods
             if method.code == PaymentMethodCodeChoices.CARD
         )
+        self.payment_method_name = method.name
         cash_session = CashSession.objects.create(
             business=result.business,
             store=result.store,
@@ -161,7 +162,11 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         sidebar_toggle = page.locator("[data-sidebar-toggle]")
                         if sidebar_toggle.is_visible():
                             sidebar_toggle.click()
+                            expect(sidebar_toggle).to_have_attribute(
+                                "aria-expanded", "true"
+                            )
                             expect(sidebar).not_to_have_attribute("inert", "")
+                            expect(sales_link).to_be_in_viewport()
                         sales_link.click()
 
                         shell = page.locator("[data-app-shell]")
@@ -197,7 +202,14 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         expect(
                             page.get_by_text("Producto snapshot E2E")
                         ).to_be_visible()
-                        expect(page.get_by_text("Tarjeta E2E")).to_be_visible()
+                        payments_section = page.locator(
+                            'section[aria-labelledby="payments-title"]'
+                        )
+                        expect(
+                            payments_section.get_by_text(
+                                self.payment_method_name, exact=True
+                            )
+                        ).to_be_visible()
                         document_link = page.get_by_role(
                             "link", name=re.compile(r"Factura simplificada.*000001")
                         )
