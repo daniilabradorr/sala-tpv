@@ -18,20 +18,17 @@
       <h2 id="catalog-title">Catálogo</h2>
       <form id="catalog-filters" class="tpv-search" method="get"
             hx-get="{% url 'sales:sale_detail' store.pk sale.pk %}" hx-target="#product-grid"
-            hx-swap="outerHTML" hx-trigger="input changed delay:275ms from:[name=q]"
+            hx-swap="outerHTML" hx-trigger="submit, input changed delay:275ms from:[name=q]"
             hx-sync="this:replace">
         <label class="sr-only" for="product-search">Buscar producto, SKU o código de barras</label>
         <input id="product-search" name="q" value="{{ query }}" placeholder="Buscar producto, SKU o código de barras…" autocomplete="off" data-tpv-search>
-        <div class="category-chips" role="group" aria-label="Categorías">
-          <button type="submit" name="category" value="" class="category-chip {% if not selected_category %}is-active{% endif %}">Todos</button>
-          {% for category in categories %}<button type="submit" name="category" value="{{ category.pk }}" class="category-chip {% if selected_category.pk == category.pk %}is-active{% endif %}">{{ category.name }}</button>{% endfor %}
-        </div>
+        {% include "sales/partials/_category_chips.html" %}
       </form>
       {% include "sales/partials/_product_grid.html" %}
     </section>
     {% include "sales/partials/_cart.html" %}
   </div>
-  <button class="mobile-cart-bar" type="button" data-ticket-open aria-controls="sale-cart">
+  <button class="mobile-cart-bar" type="button" data-nx-drawer-trigger="sale-cart" aria-controls="sale-cart">
     <span>🛒 <strong data-cart-count>{{ lines|length }}</strong> productos · <strong data-cart-total>{{ sale.total_amount|floatformat:2 }} €</strong></span><span>Ver ticket</span>
   </button>
   <dialog id="line-editor-dialog" class="nx-modal line-editor-dialog" data-nx-modal aria-labelledby="line-editor-title"><div id="line-editor-panel"></div></dialog>

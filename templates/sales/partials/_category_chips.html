@@ -1,0 +1,4 @@
+<div id="category-chips" class="category-chips" role="group" aria-label="Categorías"{% if category_chips_oob %} hx-swap-oob="outerHTML"{% endif %}>
+  <button type="submit" name="category" value="" class="category-chip {% if not selected_category %}is-active{% endif %}" aria-pressed="{% if not selected_category %}true{% else %}false{% endif %}">Todos</button>
+  {% for category in categories %}<button type="submit" name="category" value="{{ category.pk }}" class="category-chip {% if selected_category.pk == category.pk %}is-active{% endif %}" aria-pressed="{% if selected_category.pk == category.pk %}true{% else %}false{% endif %}">{{ category.name }}</button>{% endfor %}
+</div>

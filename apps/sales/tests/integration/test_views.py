@@ -65,6 +65,12 @@ TEST_TEMPLATES = [
                         "sales/partials/_workspace_header.html": (
                             "header {{ sale.customer }} {{ header_form.errors }}"
                         ),
+                        "sales/partials/_line_editor.html": (
+                            "<section id='line-editor'>{{ form.errors }}</section>"
+                        ),
+                        "sales/partials/_line_update_success.html": (
+                            "{% include 'sales/partials/_cart.html' %}"
+                        ),
                         "sales/sale_open.html": "{{ form.errors }}",
                         "sales/sale_header_form.html": "{{ form.errors }}",
                         "sales/sale_line_form.html": "{{ form.errors }}",
@@ -244,7 +250,11 @@ class SaleViewsIntegrationTests(TestCase):
         self.login_as(self.owner)
         sale, _line = self.create_open_sale_with_line()
         create_sales_product(
-            business=self.business, tax=self.tax, name="Café Especial", sku="CAF-1"
+            business=self.business,
+            tax=self.tax,
+            name="Café Especial",
+            sku="CAF-1",
+            barcode="8412345678901",
         )
         inactive = create_sales_product(
             business=self.business, tax=self.tax, name="Café inactivo"
@@ -274,6 +284,19 @@ class SaleViewsIntegrationTests(TestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertTemplateUsed(response, "sales/partials/_product_grid.html")
+        self.assertTemplateNotUsed(response, "sales/sale_workspace.html")
+
+        for query in ("Café Especial", "CAF-1", "8412345678901"):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    reverse(
+                        "sales:sale_detail",
+                        kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+                    ),
+                    {"q": query},
+                    HTTP_HX_REQUEST="true",
+                )
+                self.assertContains(response, "Café Especial")
 
     def test_workspace_category_filter_is_tenant_scoped(self):
         self.login_as(self.owner)
@@ -489,8 +512,11 @@ class SaleViewsIntegrationTests(TestCase):
                 {"product": self.product.pk, "quantity": "1.000"},
                 HTTP_HX_REQUEST="true",
             )
+        self.assertEqual(response.status_code, 422)
         self.assertTemplateUsed(response, "sales/partials/_cart.html")
-        self.assertContains(response, "No se puede añadir este producto.")
+        self.assertContains(
+            response, "No se puede añadir este producto.", status_code=422
+        )
         self.assertEqual(sale.lines.count(), 0)
 
         response = self.client.post(
@@ -527,6 +553,81 @@ class SaleViewsIntegrationTests(TestCase):
         )
         self.assertEqual(sale.status, SaleStatusChoices.OPEN)
         self.assertEqual(sale.opened_by, self.owner)
+        self.assertEqual(sale.store, self.store)
+        self.assertIsNone(sale.customer)
+        self.assertEqual(sale.document_type_requested, "ticket")
+
+    def test_open_for_session_locks_cash_context(self):
+        register = self.create_cash_register(name="Caja bloqueada")
+        session = self.create_cash_session(register=register)
+        self.login_as(self.owner)
+        url = reverse(
+            "sales:sale_open_for_session",
+            kwargs={"store_id": self.store.pk, "session_id": session.pk},
+        )
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["locked_cash_session"], session)
+        self.assertEqual(
+            response.context["form"].fields["cash_register"].widget.input_type,
+            "hidden",
+        )
+        self.assertEqual(
+            response.context["form"].fields["cash_session"].widget.input_type,
+            "hidden",
+        )
+
+        response = self.client.post(
+            url,
+            {"document_type_requested": "ticket", "customer": ""},
+        )
+        sale = Sale.objects.get(business=self.business)
+        self.assertRedirects(
+            response,
+            reverse(
+                "sales:sale_detail",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(sale.cash_register, register)
+        self.assertEqual(sale.cash_session, session)
+
+    def test_open_sale_renders_non_field_service_errors(self):
+        self.login_as(self.owner)
+        with patch(
+            "apps.sales.views.open_sale",
+            side_effect=ValidationError("No se puede abrir esta venta."),
+        ):
+            response = self.client.post(
+                reverse("sales:sale_open", kwargs={"store_id": self.store.pk}),
+                {"document_type_requested": "ticket", "customer": ""},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "No se puede abrir esta venta.", response.context["form"].non_field_errors()
+        )
+        self.assertContains(response, "No se puede abrir esta venta.")
+
+    def test_htmx_delete_returns_only_updated_cart(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        response = self.client.post(
+            reverse(
+                "sales:sale_line_delete",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "sale_pk": sale.pk,
+                    "line_pk": line.pk,
+                },
+            ),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateNotUsed(response, "sales/sale_workspace.html")
+        self.assertFalse(sale.lines.exists())
 
     def test_open_get_initializes_single_register_and_only_exposes_safe_session(self):
         settings = self.business.pos_settings
@@ -781,6 +882,93 @@ class SaleViewsIntegrationTests(TestCase):
         sale.refresh_from_db()
         self.assertEqual(sale.status, SaleStatusChoices.COMPLETED)
         self.assertEqual(sale.closed_by, self.owner)
+
+    def test_line_update_full_and_htmx_representations_vary_on_hx_request(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        url = reverse(
+            "sales:sale_line_update",
+            kwargs={
+                "store_id": self.store.pk,
+                "sale_pk": sale.pk,
+                "line_pk": line.pk,
+            },
+        )
+
+        full_response = self.client.get(url)
+        self.assertEqual(full_response.status_code, 200)
+        self.assertTemplateUsed(full_response, "sales/sale_line_form.html")
+        self.assertNotContains(full_response, "id='line-editor'")
+        self.assertIn("HX-Request", full_response["Vary"])
+
+        partial_response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertEqual(partial_response.status_code, 200)
+        self.assertTemplateUsed(partial_response, "sales/partials/_line_editor.html")
+        self.assertContains(partial_response, "id='line-editor'")
+        self.assertIn("HX-Request", partial_response["Vary"])
+
+    def test_line_editor_only_exposes_actions_allowed_by_pos_settings(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        url = reverse(
+            "sales:sale_line_update",
+            kwargs={
+                "store_id": self.store.pk,
+                "sale_pk": sale.pk,
+                "line_pk": line.pk,
+            },
+        )
+        settings = self.business.pos_settings
+
+        settings.allow_manual_price = False
+        settings.allow_manual_discounts = True
+        settings.save(
+            update_fields=["allow_manual_price", "allow_manual_discounts", "updated_at"]
+        )
+        response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertNotIn("unit_base_price", response.context["form"].fields)
+        self.assertIn("discount_amount", response.context["form"].fields)
+
+        settings.allow_manual_price = True
+        settings.allow_manual_discounts = False
+        settings.save(
+            update_fields=["allow_manual_price", "allow_manual_discounts", "updated_at"]
+        )
+        response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertIn("unit_base_price", response.context["form"].fields)
+        self.assertNotIn("discount_amount", response.context["form"].fields)
+
+        settings.allow_manual_price = False
+        settings.save(update_fields=["allow_manual_price", "updated_at"])
+        response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertNotIn("unit_base_price", response.context["form"].fields)
+        self.assertNotIn("discount_amount", response.context["form"].fields)
+
+    def test_successful_htmx_line_edit_oob_swaps_cart_without_nested_panel(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        response = self.client.post(
+            reverse(
+                "sales:sale_line_update",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "sale_pk": sale.pk,
+                    "line_pk": line.pk,
+                },
+            ),
+            {
+                "quantity": "1.500",
+                "unit_base_price": str(line.unit_base_price),
+                "discount_amount": "0.00",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_line_update_success.html")
+        self.assertNotContains(response, 'id="line-editor-panel"')
+        trigger = json.loads(response["HX-Trigger"])
+        self.assertEqual(trigger["nx:close-modal"]["id"], "line-editor-dialog")
+        self.assertIn("nx:toast", trigger)
 
     def test_sale_detail_returns_404_for_sale_from_other_business(self):
         self.login_as(self.owner)

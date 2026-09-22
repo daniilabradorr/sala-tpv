@@ -1,3 +1,4 @@
+{% if request.htmx %}{% include "sales/partials/_category_chips.html" with category_chips_oob=True %}{% endif %}
 <div id="product-grid" class="product-grid" aria-live="polite" aria-busy="false">
   {% for product in products %}
     <form method="post" action="{% url 'sales:sale_line_add' store.pk sale.pk %}"

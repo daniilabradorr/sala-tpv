@@ -166,10 +166,14 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         if customer:
             self.page.get_by_role("radio", name="Cliente", exact=True).check()
             self.page.locator("#id_customer").select_option(label=customer)
-        self.page.get_by_label(
-            "Factura"
-            if document_type == RequestedDocumentTypeChoices.INVOICE
-            else "Ticket"
+        self.page.get_by_role(
+            "radio",
+            name=(
+                "Factura"
+                if document_type == RequestedDocumentTypeChoices.INVOICE
+                else "Ticket"
+            ),
+            exact=True,
         ).check()
         self.page.get_by_role("button", name="Actualizar cabecera").click()
         return self._id_from_url(r"/sales/(\d+)/$")

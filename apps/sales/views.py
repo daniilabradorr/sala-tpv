@@ -977,7 +977,7 @@ class SaleLineUpdateView(
             },
         )
 
-        return render(
+        response = render(
             request,
             "sales/partials/_line_editor.html" if request.htmx else self.template_name,
             {
@@ -988,6 +988,8 @@ class SaleLineUpdateView(
                 "is_create": False,
             },
         )
+        patch_vary_headers(response, ("HX-Request",))
+        return response
 
     def post(self, request, store_id, sale_pk, line_pk):
         business, store = self.get_business_and_store()
