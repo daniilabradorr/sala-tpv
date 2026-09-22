@@ -1,0 +1,37 @@
+<div id="sales-history-content">
+    <nav class="period-tabs" aria-label="Periodos rápidos">
+        {% for period in quick_periods %}
+            <a href="{{ period.url }}"
+               hx-get="{{ period.url }}"
+               hx-target="#sales-history-content"
+               hx-swap="outerHTML"
+               hx-push-url="true"
+               {% if period.active %}class="is-active" aria-current="page"{% endif %}>{{ period.label }}</a>
+        {% endfor %}
+        {% if active_period == "custom" %}<span class="is-active" aria-current="page">Personalizado</span>{% endif %}
+    </nav>
+
+    <form class="sales-filters"
+          method="get"
+          action="{% url 'sales:sale_list' store_id=store.pk %}"
+          hx-get="{% url 'sales:sale_list' store_id=store.pk %}"
+          hx-target="#sales-history-content"
+          hx-swap="outerHTML"
+          hx-push-url="true">
+        <input type="hidden" name="period" value="{{ active_period }}">
+        {% if form.non_field_errors %}
+            <div id="filter-form-errors" class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <div class="filter-search">{{ form.query.label_tag }}{{ form.query }}{% include "sales/partials/_field_errors.html" with field=form.query %}</div>
+        <div>{{ form.status.label_tag }}{{ form.status }}{% include "sales/partials/_field_errors.html" with field=form.status %}</div>
+        <div>{{ form.payment_status.label_tag }}{{ form.payment_status }}{% include "sales/partials/_field_errors.html" with field=form.payment_status %}</div>
+        <div>{{ form.document_type_requested.label_tag }}{{ form.document_type_requested }}{% include "sales/partials/_field_errors.html" with field=form.document_type_requested %}</div>
+        <div>{{ form.opened_by.label_tag }}{{ form.opened_by }}{% include "sales/partials/_field_errors.html" with field=form.opened_by %}</div>
+        <div>{{ form.customer.label_tag }}{{ form.customer }}{% include "sales/partials/_field_errors.html" with field=form.customer %}</div>
+        <div>{{ form.date_from.label_tag }}{{ form.date_from }}{% include "sales/partials/_field_errors.html" with field=form.date_from %}</div>
+        <div>{{ form.date_to.label_tag }}{{ form.date_to }}{% include "sales/partials/_field_errors.html" with field=form.date_to %}</div>
+        <button type="submit">Aplicar filtros</button>
+    </form>
+
+    {% include "sales/partials/_sale_results.html" %}
+</div>

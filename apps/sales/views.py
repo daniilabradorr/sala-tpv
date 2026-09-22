@@ -308,9 +308,9 @@ class SaleListView(
         business, store = self.get_business_and_store()
 
         filter_data = request.GET.copy()
-        if not (filter_data.get("date_from") or filter_data.get("date_to")) and filter_data.get(
-            "period"
-        ) not in {"today", "7d", "30d"}:
+        if not (
+            filter_data.get("date_from") or filter_data.get("date_to")
+        ) and filter_data.get("period") not in {"today", "7d", "30d"}:
             filter_data["period"] = "today"
 
         form = SaleFilterForm(
@@ -319,24 +319,53 @@ class SaleListView(
             store=store,
         )
 
-        filters = {
-            "store": store,
-        }
-
+        filters = {"store": store}
         if form.is_valid():
             filters.update(form.cleaned_data)
             filters["store"] = store
+            active_period = form.cleaned_data["period"]
+            sales = get_sales_for_business(business=business, filters=filters)
         else:
-            _add_invalid_form_messages(request, form)
+            active_period = filter_data.get("period", "today")
+            sales = get_sales_for_business(
+                business=business, filters={"store": store}
+            ).none()
+            invalid_fields = {name for name in form.errors if name in form.fields}
+            if form.non_field_errors():
+                invalid_fields.update({"date_from", "date_to"})
+            for field_name in invalid_fields:
+                described_by = (
+                    "filter-form-errors"
+                    if field_name in {"date_from", "date_to"}
+                    and form.non_field_errors()
+                    else f"error-{field_name}"
+                )
+                form.fields[field_name].widget.attrs.update(
+                    {
+                        "aria-invalid": "true",
+                        "aria-describedby": described_by,
+                    }
+                )
 
-        sales = get_sales_for_business(
-            business=business,
-            filters=filters,
-        )
         paginator = Paginator(sales, 25)
         page_obj = paginator.get_page(request.GET.get("page"))
         query_params = request.GET.copy()
         query_params.pop("page", None)
+
+        quick_periods = []
+        for value, label in (("today", "Hoy"), ("7d", "7 días"), ("30d", "30 días")):
+            period_params = request.GET.copy()
+            period_params["period"] = value
+            for key in ("page", "date_from", "date_to"):
+                period_params.pop(key, None)
+            quick_periods.append(
+                {
+                    "value": value,
+                    "label": label,
+                    "url": f"?{period_params.urlencode()}",
+                    "active": active_period == value,
+                }
+            )
 
         context = {
             "store": store,
@@ -346,11 +375,15 @@ class SaleListView(
             "query_string": query_params.urlencode(),
             "has_active_filters": bool(request.GET),
             "can_sell": can_sell_in_store(request.user, store),
+            "active_period": active_period,
+            "quick_periods": quick_periods,
         }
 
         return render(
             request,
-            "sales/partials/_sale_results.html" if request.htmx else self.template_name,
+            "sales/partials/_sale_history_content.html"
+            if request.htmx
+            else self.template_name,
             context,
         )
 
