@@ -276,10 +276,10 @@ class SalesHistoryTests(TestCase):
 
         response = self.client.get(self.detail_url(sale))
         self.assertContains(response, "Producto original")
-        self.assertContains(response, "10.00 €")
-        self.assertContains(response, "21.00%")
+        self.assertContains(response, "10,00 €")
+        self.assertContains(response, "21,00%")
         self.assertNotContains(response, "Producto cambiado")
-        self.assertNotContains(response, "99.00 €")
+        self.assertNotContains(response, "99,00 €")
 
     def test_historical_detail_shows_charges_and_refunds(self):
         sale, line, _product = self.make_product_sale()
@@ -323,7 +323,7 @@ class SalesHistoryTests(TestCase):
         self.assertContains(response, "Tarjeta histórica", count=2)
         self.assertContains(response, "Cobro")
         self.assertContains(response, "Reembolso")
-        self.assertContains(response, "−5.00 €")
+        self.assertContains(response, "−5,00 €")
         self.assertContains(response, str(self.owner))
 
     def test_billing_documents_are_scoped_and_formatted(self):

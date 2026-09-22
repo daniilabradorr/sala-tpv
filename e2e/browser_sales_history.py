@@ -17,7 +17,11 @@ from apps.billing.models import (
 )
 from apps.cash_register.models import CashSession
 from apps.onboarding.services import OnboardingService
-from apps.payments.models import Payment, PaymentMethod, PaymentStatusChoices
+from apps.payments.models import (
+    Payment,
+    PaymentMethodCodeChoices,
+    PaymentStatusChoices,
+)
 from apps.sales.models import SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
@@ -74,8 +78,10 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
             product=product,
             unit_base_price=Decimal("10.00"),
         )
-        method = PaymentMethod.objects.create(
-            business=result.business, name="Tarjeta E2E", code="card"
+        method = next(
+            method
+            for method in result.payment_methods
+            if method.code == PaymentMethodCodeChoices.CARD
         )
         cash_session = CashSession.objects.create(
             business=result.business,
