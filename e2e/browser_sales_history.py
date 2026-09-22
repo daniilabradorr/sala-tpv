@@ -155,18 +155,20 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         page.get_by_label("Correo electrónico").fill(self.email)
                         page.get_by_label("Contraseña").fill(self.password)
                         page.get_by_role("button", name="Iniciar sesión").click()
+                        page.wait_for_url(f"{self.live_server_url}/")
                         sidebar = page.locator("#app-sidebar")
                         sales_link = sidebar.get_by_role(
                             "link", name="Ventas", exact=True
                         )
                         sidebar_toggle = page.locator("[data-sidebar-toggle]")
                         if sidebar_toggle.is_visible():
+                            expect(sidebar).to_have_attribute("inert", "")
                             sidebar_toggle.click()
                             expect(sidebar_toggle).to_have_attribute(
                                 "aria-expanded", "true"
                             )
                             expect(sidebar).not_to_have_attribute("inert", "")
-                            expect(sales_link).to_be_in_viewport()
+                            expect(sales_link).to_be_visible()
                         sales_link.click()
 
                         shell = page.locator("[data-app-shell]")
