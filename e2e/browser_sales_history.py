@@ -235,6 +235,22 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         expect(page).to_have_url(
                             re.compile(r"[?&]status=completed(?:&|$)")
                         )
+                        expect(page.locator("#sales-history-content")).to_be_visible()
+                        if viewport["width"] <= 767:
+                            self.assertTrue(
+                                page.evaluate(
+                                    "window.matchMedia('(max-width: 767px)').matches"
+                                )
+                            )
+                            expect(page.locator(".sales-mobile-list")).to_be_visible()
+                            expect(
+                                page.locator(".sale-mobile-card").first
+                            ).to_be_visible()
+                            expect(page.locator(".sales-table-wrap")).to_be_hidden()
+                            expect(page.locator(".sales-table")).to_be_hidden()
+                        else:
+                            expect(page.locator(".sales-table-wrap")).to_be_visible()
+                            expect(page.locator(".sales-table")).to_be_visible()
                         self.assertEqual(errors, [])
                         overflow = page.evaluate(
                             "document.documentElement.scrollWidth > document.documentElement.clientWidth"
