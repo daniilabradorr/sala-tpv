@@ -237,7 +237,29 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         overflow = page.evaluate(
                             "document.documentElement.scrollWidth > document.documentElement.clientWidth"
                         )
-                        self.assertFalse(overflow)
+                        offenders = []
+                        if overflow:
+                            offenders = page.evaluate(
+                                """() => {
+                                    const width = document.documentElement.clientWidth;
+                                    return [...document.querySelectorAll("body *")]
+                                        .map((element) => {
+                                            const rect = element.getBoundingClientRect();
+                                            return {
+                                                tag: element.tagName,
+                                                cls: String(element.className),
+                                                id: element.id,
+                                                left: rect.left,
+                                                right: rect.right,
+                                                width: rect.width,
+                                            };
+                                        })
+                                        .filter((item) => item.right > width + 1 || item.left < -1);
+                                }"""
+                            )
+                        self.assertFalse(
+                            overflow, f"Horizontal overflow elements: {offenders}"
+                        )
                         context.close()
             finally:
                 browser.close()
