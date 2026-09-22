@@ -258,8 +258,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                             trigger = page.locator(
                                 '[data-nx-drawer-trigger="sale-cart"]'
                             )
-                            if not cart.get_attribute("open"):
-                                trigger.click()
+                            expect(cart).to_have_attribute("open", "")
                             page.keyboard.press("Escape")
                             expect(cart).not_to_have_attribute("open", "")
                             expect(trigger).to_be_focused()
