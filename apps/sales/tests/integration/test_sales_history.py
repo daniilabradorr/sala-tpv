@@ -211,6 +211,11 @@ class SalesHistoryTests(TestCase):
     def test_htmx_history_restore_returns_full_page(self):
         self.make_sale()
 
+        full = self.client.get(self.url, {"period": "7d"})
+        self.assertTemplateUsed(full, "sales/sale_list.html")
+        self.assertContains(full, 'class="sales-history"')
+        self.assertContains(full, "data-app-shell")
+
         partial = self.client.get(
             self.url,
             {"period": "7d"},
@@ -230,6 +235,14 @@ class SalesHistoryTests(TestCase):
         self.assertContains(restored, 'class="sales-history"')
         self.assertContains(restored, "data-app-shell")
         self.assertContains(restored, 'id="sales-history-content"', count=1)
+
+        for response in (full, partial, restored):
+            vary = {
+                value.strip().lower()
+                for value in response.headers.get("Vary", "").split(",")
+            }
+            self.assertIn("hx-request", vary)
+            self.assertIn("hx-history-restore-request", vary)
 
     def test_pagination_has_progressive_links_and_preserves_filters(self):
         for _ in range(27):

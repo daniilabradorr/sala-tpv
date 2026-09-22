@@ -17,6 +17,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.cache import patch_vary_headers
 from django.views import View
 
 from apps.core.htmx import add_hx_trigger
@@ -389,7 +390,12 @@ class SaleListView(
             if is_partial_request
             else self.template_name
         )
-        return render(request, template_name, context)
+        response = render(request, template_name, context)
+        patch_vary_headers(
+            response,
+            ("HX-Request", "HX-History-Restore-Request"),
+        )
+        return response
 
 
 # ==========================================================
