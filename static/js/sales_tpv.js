@@ -1,6 +1,4 @@
 (() => {
-  let reopenTicketAfterSwap = false;
-
   const workspace = () => document.querySelector(".tpv");
 
   function syncCustomer(root = document) {
@@ -89,35 +87,15 @@
     form.requestSubmit();
   });
 
-  document.addEventListener("htmx:beforeSwap", (event) => {
-    if (event.detail.target?.id === "sale-cart") {
-      reopenTicketAfterSwap = Boolean(document.querySelector("#sale-cart[open]"));
-    }
-  });
-
-  document.addEventListener("htmx:oobBeforeSwap", (event) => {
-    if (event.detail.target?.id === "sale-cart") {
-      reopenTicketAfterSwap = Boolean(document.querySelector("#sale-cart[open]"));
-    }
-  });
-
   document.addEventListener("htmx:afterSwap", () => {
     syncCustomer();
     syncCartSummary();
     normalizeResponsiveTicket();
-    if (reopenTicketAfterSwap && matchMedia("(max-width: 1199px)").matches) {
-      reopenTicketAfterSwap = false;
-      workspace()?.querySelector('[data-nx-drawer-trigger="sale-cart"]')?.click();
-    }
   });
 
   document.addEventListener("htmx:oobAfterSwap", () => {
     syncCartSummary();
     normalizeResponsiveTicket();
-    if (reopenTicketAfterSwap && matchMedia("(max-width: 1199px)").matches) {
-      reopenTicketAfterSwap = false;
-      workspace()?.querySelector('[data-nx-drawer-trigger="sale-cart"]')?.click();
-    }
   });
 
   if (matchMedia("(min-width: 768px)").matches) {

@@ -200,7 +200,7 @@ def _workspace_cart_response(request, *, business, store, sale, form=None):
     pos_settings = POSSettings.objects.filter(business=business).first()
     return render(
         request,
-        "sales/partials/_cart.html",
+        "sales/partials/_cart_content.html",
         {
             "store": store,
             "sale": sale,

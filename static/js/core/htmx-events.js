@@ -28,13 +28,12 @@ const setProcessing = (detail, processing) => {
   if (processing) { button.dataset.nxOriginalText = button.textContent; button.disabled = true; if (button.dataset.loadingText) button.textContent = button.dataset.loadingText; }
   else { button.disabled = false; if (button.dataset.nxOriginalText) button.textContent = button.dataset.nxOriginalText; }
 };
-const feedback = (message, action = "", requestScopedSurface = null) => {
+const resolvedRequestSurface = (detail) =>
+  requestSurface(detail) || (detail.xhr ? requestSurfaces.get(detail.xhr) : null);
+const feedback = (message, action = "", surface = null) => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
-  const surface = requestScopedSurface?.isConnected
-    ? requestScopedSurface
-    : document.querySelector("[data-nx-modal][open], [data-nx-drawer][open]");
   const host = document.querySelector("[data-nx-feedback-host]");
-  if (surface) {
+  if (surface?.isConnected) {
     surface.prepend(region);
     region.classList.add("nx-feedback--in-surface");
   } else if (host) {
@@ -70,7 +69,7 @@ export const initHtmxEvents = () => {
   document.body.addEventListener("htmx:afterRequest", (event) => finishRequest(event.detail));
   document.body.addEventListener("htmx:sendError", (event) => {
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
-    const surface = requestSurface(event.detail) || requestSurfaces.get(event.detail.xhr);
+    const surface = resolvedRequestSurface(event.detail);
     finishRequest(event.detail);
     if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface);
     else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.", surface);
@@ -80,7 +79,7 @@ export const initHtmxEvents = () => {
     if (status === 422) { event.detail.shouldSwap = true; event.detail.isError = false; return; }
     const messages = {403: "No tienes permiso para realizar esta acción.", 404: "Este recurso ya no está disponible.", 409: "La información ha cambiado. Actualiza los datos antes de continuar."};
     const message = messages[status] || (status >= 500 ? "Se ha producido un error inesperado." : null);
-    if (message) { event.detail.shouldSwap = false; feedback(message); }
+    if (message) { event.detail.shouldSwap = false; feedback(message, "", resolvedRequestSurface(event.detail)); }
   });
   document.body.addEventListener("htmx:responseError", (event) => finishRequest(event.detail));
   document.addEventListener("nx:refresh-region", (event) => {

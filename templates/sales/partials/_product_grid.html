@@ -2,7 +2,7 @@
 <div id="product-grid" class="product-grid" aria-live="polite" aria-busy="false">
   {% for product in products %}
     <form method="post" action="{% url 'sales:sale_line_add' store.pk sale.pk %}"
-          hx-post="{% url 'sales:sale_line_add' store.pk sale.pk %}" hx-target="#sale-cart"
+          hx-post="{% url 'sales:sale_line_add' store.pk sale.pk %}" hx-target="#sale-cart-content"
           hx-swap="outerHTML" hx-disabled-elt="button">
       {% csrf_token %}<input type="hidden" name="product" value="{{ product.pk }}"><input type="hidden" name="quantity" value="1.000">
       <button class="product-card" type="submit" {% if product.display_price == None %}disabled{% endif %}>

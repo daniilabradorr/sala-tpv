@@ -59,8 +59,11 @@ TEST_TEMPLATES = [
                             "grid {% for product in products %}{{ product.name }}{% endfor %}"
                         ),
                         "sales/partials/_cart.html": (
-                            "<aside id='sale-cart'>cart {{ sale.total_amount }} "
-                            "{{ cart_form.errors }}</aside>"
+                            "<dialog id='sale-cart'>{% include 'sales/partials/_cart_content.html' %}</dialog>"
+                        ),
+                        "sales/partials/_cart_content.html": (
+                            "<div id='sale-cart-content'>cart {{ sale.total_amount }} "
+                            "{{ cart_form.errors }}</div>"
                         ),
                         "sales/partials/_workspace_header.html": (
                             "header {{ sale.customer }} {{ header_form.errors }}"
@@ -69,7 +72,7 @@ TEST_TEMPLATES = [
                             "<section id='line-editor'>{{ form.errors }}</section>"
                         ),
                         "sales/partials/_line_update_success.html": (
-                            "{% include 'sales/partials/_cart.html' %}"
+                            "{% include 'sales/partials/_cart_content.html' %}"
                         ),
                         "sales/sale_open.html": "{{ form.errors }}",
                         "sales/sale_header_form.html": "{{ form.errors }}",
@@ -335,7 +338,7 @@ class SaleViewsIntegrationTests(TestCase):
         response = self.client.post(url, {"quantity": "2.500"}, HTTP_HX_REQUEST="true")
         line.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertEqual(line.quantity, Decimal("2.500"))
         self.assertEqual(line.unit_base_price, original_price)
         self.assertEqual(line.discount_amount, original_discount)
@@ -365,7 +368,7 @@ class SaleViewsIntegrationTests(TestCase):
 
         response = self.client.post(url, {"quantity": "0"}, HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 422)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertContains(response, "quantity", status_code=422)
         line.refresh_from_db()
         self.assertEqual(line.quantity, original_quantity)
@@ -495,9 +498,9 @@ class SaleViewsIntegrationTests(TestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(response.status_code, 422)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertTemplateNotUsed(response, "sales/sale_line_form.html")
-        self.assertContains(response, "sale-cart", status_code=422)
+        self.assertContains(response, "sale-cart-content", status_code=422)
         form = response.context["cart_form"]
         self.assertIn("quantity", form.errors)
         self.assertEqual(form.errors.as_data()["quantity"][0].code, "min_value")
@@ -513,7 +516,7 @@ class SaleViewsIntegrationTests(TestCase):
                 HTTP_HX_REQUEST="true",
             )
         self.assertEqual(response.status_code, 422)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertContains(
             response, "No se puede añadir este producto.", status_code=422
         )
@@ -525,7 +528,7 @@ class SaleViewsIntegrationTests(TestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertEqual(sale.lines.count(), 1)
 
     def test_owner_can_open_sale(self):
@@ -625,7 +628,7 @@ class SaleViewsIntegrationTests(TestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "sales/partials/_cart.html")
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
         self.assertTemplateNotUsed(response, "sales/sale_workspace.html")
         self.assertFalse(sale.lines.exists())
 

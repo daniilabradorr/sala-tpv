@@ -173,12 +173,39 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         expect(cart.get_by_text("Café especial")).to_be_visible()
                         quantity = cart.get_by_label("Cantidad")
                         expect(quantity).to_have_value("1.000")
-                        cart.get_by_label("Aumentar Café especial").click()
+                        with page.expect_response(
+                            lambda response: (
+                                "/quantity/" in response.url
+                                and response.request.method == "POST"
+                            )
+                        ):
+                            cart.get_by_label("Aumentar Café especial").click()
+                        if viewport["width"] < 1200:
+                            expect(cart).to_have_attribute("open", "")
+                            expect(cart.get_by_label("Cantidad")).to_be_visible()
                         expect(cart.get_by_label("Cantidad")).to_have_value("2.000")
-                        cart.get_by_label("Reducir Café especial").click()
+                        with page.expect_response(
+                            lambda response: (
+                                "/quantity/" in response.url
+                                and response.request.method == "POST"
+                            )
+                        ):
+                            cart.get_by_label("Reducir Café especial").click()
+                        if viewport["width"] < 1200:
+                            expect(cart).to_have_attribute("open", "")
+                            expect(cart.get_by_label("Cantidad")).to_be_visible()
                         expect(cart.get_by_label("Cantidad")).to_have_value("1.000")
                         cart.get_by_label("Cantidad").fill("1.500")
-                        cart.get_by_role("button", name="Actualizar").click()
+                        with page.expect_response(
+                            lambda response: (
+                                "/quantity/" in response.url
+                                and response.request.method == "POST"
+                            )
+                        ):
+                            cart.get_by_role("button", name="Actualizar").click()
+                        if viewport["width"] < 1200:
+                            expect(cart).to_have_attribute("open", "")
+                            expect(cart.get_by_label("Cantidad")).to_be_visible()
                         expect(cart.get_by_label("Cantidad")).to_have_value("1.500")
 
                         cart.get_by_role("link", name="Editar").click()
