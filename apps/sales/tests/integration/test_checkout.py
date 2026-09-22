@@ -546,6 +546,63 @@ class CheckoutIntegrationTests(TestCase):
         keys = [str(form["idempotency_key"].value()) for form in forms]
         self.assertEqual(len(set(keys)), 4)
 
+    def test_invalid_three_part_split_keeps_active_third_part_and_keys(self):
+        bizum = PaymentMethod.objects.create(
+            business=self.business, name="Bizum", code="bizum"
+        )
+        transfer = PaymentMethod.objects.create(
+            business=self.business, name="Transferencia", code="transfer"
+        )
+        sale = self.sale()
+        keys = [uuid.uuid4() for _index in range(4)]
+        response = self.client.post(
+            self.checkout_url(sale),
+            {
+                "mode": "split",
+                "series": self.series().pk,
+                "payment_idempotency_key": uuid.uuid4(),
+                "billing_idempotency_key": uuid.uuid4(),
+                "payments-TOTAL_FORMS": "4",
+                "payments-INITIAL_FORMS": "4",
+                "payments-MIN_NUM_FORMS": "2",
+                "payments-MAX_NUM_FORMS": "4",
+                "payments-0-method": self.cash.pk,
+                "payments-0-amount": "2.00",
+                "payments-0-cash_received": "5.00",
+                "payments-0-idempotency_key": keys[0],
+                "payments-1-method": self.card.pk,
+                "payments-1-amount": "2.00",
+                "payments-1-idempotency_key": keys[1],
+                "payments-2-method": bizum.pk,
+                "payments-2-amount": "2.00",
+                "payments-2-idempotency_key": keys[2],
+                "payments-3-method": transfer.pk,
+                "payments-3-amount": "",
+                "payments-3-idempotency_key": keys[3],
+                "payments-3-DELETE": "on",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        forms = response.context["payment_formset"].forms
+        self.assertFalse(forms[0]["DELETE"].value())
+        self.assertFalse(forms[1]["DELETE"].value())
+        self.assertFalse(forms[2]["DELETE"].value())
+        self.assertTrue(forms[3]["DELETE"].value())
+        for index, key in enumerate(keys):
+            self.assertEqual(str(forms[index]["idempotency_key"].value()), str(key))
+        self.assertEqual(forms[2]["amount"].value(), "2.00")
+        self.assertContains(response, 'data-split-index="2" ', status_code=422)
+        self.assertNotContains(response, 'data-split-index="2" hidden', status_code=422)
+        self.assertContains(response, 'data-split-index="3" hidden', status_code=422)
+        self.assertContains(
+            response,
+            "La suma de los pagos debe coincidir con el importe pendiente.",
+            status_code=422,
+        )
+        self.assertFalse(Payment.objects.filter(sale=sale).exists())
+
     def test_billing_failure_renders_recovery_without_second_charge_cta(self):
         sale = self.sale()
         series = self.series()

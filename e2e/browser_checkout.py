@@ -183,6 +183,10 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             parts.nth(0).get_by_label("Entregado (efectivo)").fill("10.00")
             parts.nth(1).get_by_label("Método").select_option(label="Tarjeta")
             parts.nth(1).get_by_label("Importe").fill("4.00")
+            dialog.locator("[data-add-part]").click()
+            expect(parts).to_have_count(3)
+            parts.nth(2).get_by_label("Método").select_option(label="Bizum")
+            parts.nth(2).get_by_label("Importe").fill("1.00")
             keys_before = dialog.locator('[name$="idempotency_key"]').evaluate_all(
                 "elements => elements.map(element => element.value)"
             )
@@ -198,6 +202,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             expect(dialog.get_by_text("La suma de los pagos")).to_be_visible()
             expect(dialog.locator('[name="payments-0-amount"]')).to_have_value("5.00")
             expect(dialog.locator('[name="payments-1-amount"]')).to_have_value("4.00")
+            expect(dialog.locator("[data-split-part]:visible")).to_have_count(3)
+            expect(dialog.locator('[name="payments-2-amount"]')).to_have_value("1.00")
+            expect(dialog.locator('[name="payments-2-DELETE"]')).not_to_be_checked()
             keys_after = dialog.locator('[name$="idempotency_key"]').evaluate_all(
                 "elements => elements.map(element => element.value)"
             )

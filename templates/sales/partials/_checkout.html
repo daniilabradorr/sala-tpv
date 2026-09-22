@@ -71,7 +71,7 @@
         {% if allow_split %}<section class="split-payment" data-split-payment {% if form.mode.value != 'split' %}hidden{% endif %}>
           {{ payment_formset.management_form }}
           <div data-split-parts>
-          {% for part in payment_formset %}<fieldset class="split-part" data-split-part {% if forloop.counter > 2 and not part.errors %}hidden{% endif %}>
+          {% for part in payment_formset %}<fieldset class="split-part" data-split-part data-split-index="{{ forloop.counter0 }}" {% if part.DELETE.value %}hidden{% endif %}>
             <legend>Parte <span data-part-number>{{ forloop.counter }}</span></legend>{{ part.idempotency_key }}
             <div class="split-part-grid">
               <label for="{{ part.method.id_for_label }}">Método<select name="{{ part.method.html_name }}" id="{{ part.method.id_for_label }}" data-split-method>{% for value,label in part.fields.method.choices %}<option value="{{ value }}" {% if part.method.value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
