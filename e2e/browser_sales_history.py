@@ -235,6 +235,8 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                         expect(page).to_have_url(
                             re.compile(r"[?&]status=completed(?:&|$)")
                         )
+                        expect(page.locator(".sales-history")).to_be_visible()
+                        expect(page.locator("[data-app-shell]")).to_be_visible()
                         expect(page.locator("#sales-history-content")).to_be_visible()
                         if viewport["width"] <= 767:
                             self.assertTrue(

@@ -383,13 +383,13 @@ class SaleListView(
             "quick_periods": quick_periods,
         }
 
-        return render(
-            request,
+        is_partial_request = request.htmx and not request.htmx.history_restore_request
+        template_name = (
             "sales/partials/_sale_history_content.html"
-            if request.htmx
-            else self.template_name,
-            context,
+            if is_partial_request
+            else self.template_name
         )
+        return render(request, template_name, context)
 
 
 # ==========================================================

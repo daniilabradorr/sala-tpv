@@ -87,8 +87,3 @@ body.sidebar-open { overflow: hidden; }
     .shell-dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { .app-sidebar { transition: none; } }
-/* Critical FE-09 responsive visibility must survive HTMX history snapshots. */
-@media (max-width: 767px) {
-    .sales-history .sales-table-wrap { display: none !important; }
-    .sales-history .sales-mobile-list { display: grid; }
-}
