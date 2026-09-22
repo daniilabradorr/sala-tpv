@@ -242,12 +242,25 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                                     "window.matchMedia('(max-width: 767px)').matches"
                                 )
                             )
+                            self.assertTrue(
+                                page.evaluate(
+                                    """[...document.styleSheets].some(
+                                        (sheet) => sheet.href?.includes('/css/pages/sales-history.css')
+                                    )"""
+                                )
+                            )
                             expect(page.locator(".sales-mobile-list")).to_be_visible()
                             expect(
                                 page.locator(".sale-mobile-card").first
                             ).to_be_visible()
                             expect(page.locator(".sales-table-wrap")).to_be_hidden()
                             expect(page.locator(".sales-table")).to_be_hidden()
+                            self.assertEqual(
+                                page.locator(".sales-table-wrap").evaluate(
+                                    "element => getComputedStyle(element).display"
+                                ),
+                                "none",
+                            )
                         else:
                             expect(page.locator(".sales-table-wrap")).to_be_visible()
                             expect(page.locator(".sales-table")).to_be_visible()

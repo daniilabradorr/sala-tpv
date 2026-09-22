@@ -1,6 +1,5 @@
 {% extends "base.html" %}{% load static %}
 {% block title %}Ventas | Netxodo{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-history.css' %}">{% endblock %}
 {% block content %}
 <section class="sales-history" aria-labelledby="sales-title">
     <header class="sales-page-header"><div><p class="sales-eyebrow">{{ store.name }}</p><h1 id="sales-title">Ventas</h1></div><div class="sales-actions"><a href="{% url 'sales:return_list' store_id=store.pk %}">Devoluciones →</a>{% if can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=store.pk %}">+ Nueva venta</a>{% endif %}</div></header>
