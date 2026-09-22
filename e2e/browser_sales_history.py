@@ -195,7 +195,9 @@ class BrowserSalesHistoryTests(StaticLiveServerTestCase):
                             re.compile(r"[?&]status=completed(?:&|$)")
                         )
 
-                        if viewport["width"] <= 650:
+                        if viewport["width"] <= 767:
+                            expect(page.locator(".sales-table-wrap")).to_be_hidden()
+                            expect(page.locator(".sales-table")).to_be_hidden()
                             expect(page.locator(".sale-mobile-card")).to_be_visible()
                             page.locator(".sale-mobile-card").first.click()
                         else:
