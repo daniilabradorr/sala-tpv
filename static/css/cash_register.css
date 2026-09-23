@@ -1,4 +1,5 @@
-.cash-workspace { display: grid; gap: 1.25rem; }
+.cash-workspace { display: grid; min-width: 0; gap: 1.25rem; }
+.cash-workspace > * { min-width: 0; max-width: 100%; }
 .cash-session-header, .cash-section, .cash-register-list, .cash-operation { border: 1px solid var(--border); border-radius: 12px; background: var(--nx-surface, #07182b); padding: clamp(1rem, 2.5vw, 1.75rem); }
 .cash-session-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.5rem; border-top: 3px solid var(--nx-blue-bright, #0794f2); }
 .cash-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.25rem; }
@@ -69,7 +70,7 @@
 .cash-card-kpis div { padding:.75rem; background:var(--nx-surface-muted); }
 .cash-card-kpis dd { margin:.25rem 0 0; font-weight:800; }
 .cash-status--inactive { color:var(--muted); }
-.cash-tabs { display:flex; gap:.35rem; overflow:auto; border-bottom:1px solid var(--border); }
+.cash-tabs { display:flex; min-width:0; max-width:100%; gap:.35rem; overflow:auto; border-bottom:1px solid var(--border); }
 .cash-tabs a { min-height:44px; padding:.75rem 1rem; color:var(--muted); text-decoration:none; white-space:nowrap; }
 .cash-tabs a[aria-selected="true"] { color:var(--text); border-bottom:3px solid var(--nx-blue-bright); }
 .cash-dialog { width:min(94vw,620px); }

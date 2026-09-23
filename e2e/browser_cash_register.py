@@ -115,8 +115,35 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                 page.get_by_role("tab", name="Arqueos").click()
                 page.get_by_role("tab", name="Resumen").click()
                 self.assertEqual(page.locator("#cash-tab-panel").count(), 1)
+                viewport_metrics = page.evaluate(
+                    """() => {
+                      const viewport = document.documentElement.clientWidth;
+                      const overflowing = [...document.querySelectorAll("*")]
+                        .map((el) => {
+                          const rect = el.getBoundingClientRect();
+                          return {
+                            tag: el.tagName,
+                            id: el.id || "",
+                            cls: typeof el.className === "string" ? el.className : "",
+                            left: rect.left,
+                            right: rect.right,
+                            width: rect.width,
+                            scrollWidth: el.scrollWidth,
+                          };
+                        })
+                        .filter((item) => item.right > viewport + 1 || item.left < -1)
+                        .slice(0, 10);
+                      return {
+                        viewport,
+                        documentWidth: document.documentElement.scrollWidth,
+                        overflowing,
+                      };
+                    }"""
+                )
                 self.assertLessEqual(
-                    page.evaluate("document.documentElement.scrollWidth"), width
+                    viewport_metrics["documentWidth"],
+                    viewport_metrics["viewport"],
+                    viewport_metrics["overflowing"],
                 )
 
             page.set_viewport_size({"width": 1440, "height": 900})
@@ -147,7 +174,9 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("link", name="Cerrar caja", exact=True).click()
             page.get_by_label("Efectivo contado").fill("124")
             page.get_by_role("button", name="Continuar").click()
-            expect(page.get_by_text("Confirmar cierre", exact=True)).to_be_visible()
+            expect(
+                page.get_by_role("heading", name="Confirmar cierre", exact=True)
+            ).to_be_visible()
             expect(page.get_by_text("124,00 €", exact=True)).to_be_visible()
             page.get_by_role("button", name="Cerrar caja").click()
             expect(page.get_by_text("✓ CAJA CERRADA", exact=True)).to_be_visible()
@@ -256,7 +285,9 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             first.get_by_role("link", name="Cerrar caja", exact=True).click()
             first.get_by_label("Efectivo contado").fill("100")
             first.get_by_role("button", name="Continuar").click()
-            expect(first.get_by_text("Confirmar cierre", exact=True)).to_be_visible()
+            expect(
+                first.get_by_role("heading", name="Confirmar cierre", exact=True)
+            ).to_be_visible()
 
             second.goto(detail_url)
             second.get_by_role("link", name="Cerrar caja", exact=True).click()
@@ -377,10 +408,10 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             expect(physical).to_contain_text("115,00 €")
             expect(physical).not_to_contain_text("220,00 €")
             cash_method = page.locator(".cash-payment-method").filter(
-                has_text="Efectivo"
+                has=page.get_by_role("heading", name="Efectivo", exact=True)
             )
             card_method = page.locator(".cash-payment-method").filter(
-                has_text="Tarjeta"
+                has=page.get_by_role("heading", name="Tarjeta", exact=True)
             )
             expect(cash_method).to_contain_text("20,00 €")
             expect(cash_method).to_contain_text("5,00 €")
