@@ -125,7 +125,18 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         expect(quantity).to_have_value("0")
         row.get_by_role("button", name="Sumar una unidad de Coca-Cola 33cl").click()
         expect(row.get_by_label("Devolver al stock disponible")).to_be_checked()
-        row.get_by_role("button", name="Actualizar").click()
+        old_workspace = page.locator("#return-workspace").element_handle()
+        self.assertIsNotNone(old_workspace)
+        action = row.get_attribute("action")
+        self.assertIsNotNone(action)
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and response.url.endswith(action)
+            )
+        ) as response_info:
+            row.get_by_role("button", name="Actualizar").click()
+        self.assertEqual(response_info.value.status, 200)
+        page.wait_for_function("(node) => !node.isConnected", arg=old_workspace)
         expect(page.locator(".return-total strong")).to_have_text(
             re.compile(r"2[,.]42 €")
         )
@@ -134,13 +145,18 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         swapped_quantity = swapped_row.get_by_label(
             "Cantidad a devolver de Coca-Cola 33cl"
         )
-        swapped_row.get_by_role(
+        minus_button = swapped_row.get_by_role(
             "button", name="Restar una unidad de Coca-Cola 33cl"
-        ).click()
-        expect(swapped_quantity).to_have_value("0")
-        swapped_row.get_by_role(
+        )
+        plus_button = swapped_row.get_by_role(
             "button", name="Sumar una unidad de Coca-Cola 33cl"
-        ).click()
+        )
+        expect(minus_button).to_have_attribute("data-bound", "true")
+        expect(plus_button).to_have_attribute("data-bound", "true")
+        expect(swapped_quantity).to_have_value("1")
+        minus_button.click()
+        expect(swapped_quantity).to_have_value("0")
+        plus_button.click()
         expect(swapped_quantity).to_have_value("1")
         self.assertLessEqual(
             page.evaluate("document.documentElement.scrollWidth"),
