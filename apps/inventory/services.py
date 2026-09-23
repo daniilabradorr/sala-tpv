@@ -679,6 +679,28 @@ def add_stock_adjustment_line(
     return line
 
 
+@transaction.atomic
+def prepare_quick_stock_adjustment(
+    *, inventory_item, counted_stock, notes="", user=None
+):
+    """Atomically prepare a DRAFT and one line without mutating physical stock."""
+
+    adjustment = create_stock_adjustment(
+        business=inventory_item.business,
+        store=inventory_item.store,
+        reason=StockAdjustment.REASON_STOCKTAKE,
+        notes=notes,
+        user=user,
+    )
+    add_stock_adjustment_line(
+        adjustment=adjustment,
+        inventory_item=inventory_item,
+        counted_stock=counted_stock,
+        notes=notes,
+    )
+    return adjustment
+
+
 def update_stock_adjustment_line(
     *,
     line,

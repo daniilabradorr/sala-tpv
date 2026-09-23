@@ -9,7 +9,7 @@ Regla:
 - Siempre filtramos por business.
 """
 
-from django.db.models import F
+from django.db.models import F, Q
 from django.shortcuts import get_object_or_404
 
 from apps.inventory.models import (
@@ -113,15 +113,18 @@ def get_inventory_dashboard_data(
     ]
 
     return {
-        "total_products_with_stock": inventory_items.filter(
-            available__gt=0,
-        ).count(),
+        "controlled_products": inventory_items.count(),
+        # Backwards-compatible key for callers predating the workspace.
+        "total_products_with_stock": inventory_items.count(),
         "low_stock_products": inventory_items.filter(
             available__gt=0,
             available__lte=F("minimum_stock"),
         ).count(),
         "out_of_stock_products": inventory_items.filter(
             available__lte=0,
+        ).count(),
+        "healthy_stock_products": inventory_items.filter(
+            available__gt=F("minimum_stock"),
         ).count(),
         "latest_movements": latest_movements,
         "latest_adjustments": latest_adjustments,
@@ -149,6 +152,7 @@ def get_inventory_items_for_business(business, filters=None, stores=None):
             "business",
             "store",
             "product",
+            "product__category",
         )
         .annotate(
             available=F("current_stock") - F("reserved_stock"),
@@ -165,6 +169,25 @@ def get_inventory_items_for_business(business, filters=None, stores=None):
     is_active = filters.get("is_active")
     low_stock = filters.get("low_stock")
     out_of_stock = filters.get("out_of_stock")
+    search = filters.get("search")
+    stock_status = filters.get("stock_status")
+    category = filters.get("category")
+    location = filters.get("location")
+
+    if search:
+        queryset = queryset.filter(
+            Q(product__name__icontains=search) | Q(product__sku__icontains=search)
+        )
+    if category:
+        queryset = queryset.filter(product__category=category)
+    if location:
+        queryset = queryset.filter(location__icontains=location)
+    if stock_status == "normal":
+        queryset = queryset.filter(available__gt=F("minimum_stock"))
+    elif stock_status == "low":
+        queryset = queryset.filter(available__gt=0, available__lte=F("minimum_stock"))
+    elif stock_status == "out":
+        queryset = queryset.filter(available__lte=0)
 
     if store:
         queryset = queryset.filter(store=store)

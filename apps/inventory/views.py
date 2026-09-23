@@ -11,14 +11,21 @@ Regla general:
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.vary import vary_on_headers
+from django.utils.decorators import method_decorator
 from django.views import View
+
+from apps.core.shell import resolve_active_store
 
 from apps.inventory.forms import (
     InitialStockForm,
     InventoryItemCreateForm,
     InventoryItemFilterForm,
     InventoryItemUpdateForm,
+    QuickStockAdjustmentForm,
     StockAdjustmentConfirmForm,
     StockAdjustmentCreateForm,
     StockAdjustmentFilterForm,
@@ -46,6 +53,7 @@ from apps.inventory.services import (
     create_inventory_item,
     create_stock_adjustment,
     delete_stock_adjustment_line,
+    prepare_quick_stock_adjustment,
     update_inventory_item_settings,
     update_stock_adjustment_line,
 )
@@ -101,6 +109,7 @@ def _add_form_error_messages(request, form):
 # ==========================================================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class InventoryDashboardView(BusinessRequiredMixin, View):
     """Dashboard principal de inventario para el negocio actual."""
 
@@ -111,9 +120,41 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
     def get(self, request):
         """Renderiza el resumen del dashboard de inventario."""
 
+        visible_stores = list(get_inventory_visible_stores(request.user))
+        _shell_stores, active_store = resolve_active_store(request, user=request.user)
+        requested_store = request.GET.get("store")
+        can_all = request.user.is_superuser or is_owner_or_manager(request.user)
+        is_all_stores = requested_store == "all" and can_all
+        if requested_store and requested_store != "all":
+            selected_store = next(
+                (store for store in visible_stores if str(store.pk) == requested_store),
+                None,
+            )
+            if selected_store is None:
+                raise Http404("Tienda no disponible")
+        elif is_all_stores:
+            selected_store = None
+        else:
+            selected_store = next(
+                (
+                    store
+                    for store in visible_stores
+                    if active_store and store.pk == active_store.pk
+                ),
+                visible_stores[0] if visible_stores else None,
+            )
+        scoped_stores = (
+            visible_stores
+            if is_all_stores
+            else ([selected_store] if selected_store else [])
+        )
+        tab = request.GET.get("tab", "stock")
+        if tab not in {"stock", "movements", "adjustments"}:
+            tab = "stock"
+
         dashboard_data = get_inventory_dashboard_data(
             request.user.business,
-            stores=get_inventory_visible_stores(request.user),
+            stores=scoped_stores,
             latest_movements_limit=self.latest_movements_limit,
             latest_adjustments_limit=self.latest_adjustments_limit,
         )
@@ -121,7 +162,56 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
         dashboard_data["can_manage_inventory"] = request.user.is_superuser or (
             is_owner_or_manager(request.user)
         )
-        return render(request, self.template_name, dashboard_data)
+        dashboard_data.update(
+            {
+                "visible_stores": visible_stores,
+                "selected_store": selected_store,
+                "is_all_stores": is_all_stores,
+                "can_all_stores": can_all,
+                "tab": tab,
+            }
+        )
+        if tab == "stock":
+            form = InventoryItemFilterForm(
+                request.GET or None,
+                business=request.user.business,
+                stores=scoped_stores,
+            )
+            filters = form.cleaned_data if form.is_valid() else {}
+            page = Paginator(
+                get_inventory_items_for_business(
+                    request.user.business, filters=filters, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update(
+                {"form": form, "page_obj": page, "inventory_items": page}
+            )
+        elif tab == "movements":
+            page = Paginator(
+                get_stock_movements_for_business(
+                    request.user.business, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update({"page_obj": page, "stock_movements": page})
+        else:
+            page = Paginator(
+                get_stock_adjustments_for_business(
+                    request.user.business, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update({"page_obj": page, "stock_adjustments": page})
+        query = request.GET.copy()
+        query.pop("page", None)
+        dashboard_data["query_string"] = query.urlencode()
+        template = (
+            "inventory/partials/_workspace.html"
+            if request.headers.get("HX-Request") == "true"
+            else self.template_name
+        )
+        return render(request, template, dashboard_data)
 
 
 # ==========================================================
@@ -433,6 +523,45 @@ class InventoryInitialStockView(
             "inventory:item_detail",
             pk=inventory_item.pk,
         )
+
+
+class InventoryQuickAdjustmentView(
+    ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View
+):
+    """Prepare a one-line draft; preparation intentionally never changes stock."""
+
+    template_name = "inventory/quick_adjustment_form.html"
+
+    def get(self, request, pk):
+        item = get_inventory_item_detail(
+            request.user.business, pk, stores=get_inventory_visible_stores(request.user)
+        )
+        return render(
+            request,
+            self.template_name,
+            {"inventory_item": item, "form": QuickStockAdjustmentForm()},
+        )
+
+    def post(self, request, pk):
+        item = get_inventory_item_detail(
+            request.user.business, pk, stores=get_inventory_visible_stores(request.user)
+        )
+        form = QuickStockAdjustmentForm(request.POST)
+        if not form.is_valid():
+            return render(
+                request,
+                self.template_name,
+                {"inventory_item": item, "form": form},
+                status=422 if request.headers.get("HX-Request") == "true" else 200,
+            )
+        adjustment = prepare_quick_stock_adjustment(
+            inventory_item=item,
+            counted_stock=form.cleaned_data["counted_stock"],
+            notes=form.cleaned_data["notes"],
+            user=request.user,
+        )
+        messages.success(request, "Ajuste preparado. El stock todavía no ha cambiado.")
+        return redirect("inventory:stock_adjustment_detail", pk=adjustment.pk)
 
 
 # ==========================================================
