@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.vary import vary_on_headers
@@ -76,6 +76,14 @@ def _form_response(request, context, status=200, template="cash_register/form.ht
     if _hx(request):
         template = "cash_register/partials/_operation_dialog.html"
     return render(request, template, context, status=status)
+
+
+def _hx_redirect(request, url):
+    if not _hx(request):
+        return redirect(url)
+    response = HttpResponse(status=204)
+    response["HX-Redirect"] = url
+    return response
 
 
 @login_required
@@ -167,7 +175,10 @@ def open_session(request, store_id, cash_register_id=None):
             _service_errors(form, exc, {"cash_session": None})
         else:
             messages.success(request, "Caja abierta correctamente.")
-            return redirect("cash_register:session_detail", store.pk, session.pk)
+            return _hx_redirect(
+                request,
+                reverse("cash_register:session_detail", args=[store.pk, session.pk]),
+            )
     context = {
         "form": form,
         "title": "Abrir caja",
@@ -217,12 +228,16 @@ def _session_action(
             )
         else:
             messages.success(request, success_message)
-            response = redirect("cash_register:session_detail", store.pk, session.pk)
-            if _hx(request):
-                add_hx_trigger(
-                    response, {"nx:close-modal": {"id": "cash-operation-dialog"}}
-                )
-            return response
+            if not _hx(request):
+                return redirect("cash_register:session_detail", store.pk, session.pk)
+            response = HttpResponse(status=204)
+            return add_hx_trigger(
+                response,
+                {
+                    "nx:close-modal": {"id": "cash-operation-dialog"},
+                    "nx:refresh-region": {"selector": "#cash-tab-panel"},
+                },
+            )
     context = {
         "form": form,
         "store": store,
@@ -231,6 +246,7 @@ def _session_action(
         "description": description,
         "submit_label": submit_label,
         "operation_kind": operation_kind,
+        "expected_cents": int(session.expected_cash_amount * 100),
         "cancel_url": reverse(
             "cash_register:session_detail", args=[store.pk, session.pk]
         ),
@@ -241,6 +257,7 @@ def _session_action(
 
 
 @login_required
+@vary_on_headers("HX-Request")
 def cash_in(request, store_id, session_id):
     return _session_action(
         request,
@@ -257,6 +274,7 @@ def cash_in(request, store_id, session_id):
 
 
 @login_required
+@vary_on_headers("HX-Request")
 def cash_out(request, store_id, session_id):
     return _session_action(
         request,
@@ -273,6 +291,7 @@ def cash_out(request, store_id, session_id):
 
 
 @login_required
+@vary_on_headers("HX-Request")
 def adjustment(request, store_id, session_id):
     return _session_action(
         request,
@@ -289,6 +308,7 @@ def adjustment(request, store_id, session_id):
 
 
 @login_required
+@vary_on_headers("HX-Request")
 def review(request, store_id, session_id):
     return _session_action(
         request,
@@ -319,12 +339,43 @@ def close(request, store_id, session_id):
     )
     confirm = request.method == "POST" and request.POST.get("step") == "confirm"
     if confirm:
+        payload_error = None
         try:
             payload = signing.loads(
                 request.POST.get("close_payload", ""), salt="cash-close", max_age=1800
             )
         except signing.BadSignature:
             payload = {}
+            payload_error = (
+                "La revisión de cierre ha caducado o no es válida. Vuelve a prepararla."
+            )
+        expected_binding = {
+            "business_id": request.user.business_id,
+            "store_id": store.pk,
+            "cash_session_id": session.pk,
+            "user_id": request.user.pk,
+        }
+        if not payload_error and any(
+            payload.get(key) != value for key, value in expected_binding.items()
+        ):
+            payload_error = "Esta revisión pertenece a otra caja, sesión o usuario. Vuelve a prepararla."
+        if payload_error:
+            form = CashSessionCloseForm()
+            form.fields.pop("pin")
+            form.add_error(None, payload_error)
+            context = {
+                "form": form,
+                "store": store,
+                "session": session,
+                "title": "Cerrar caja",
+                "description": "Cuenta el efectivo final. Continuar todavía no cierra el turno.",
+                "submit_label": "Continuar",
+                "operation_kind": "close",
+                "cancel_url": reverse(
+                    "cash_register:session_detail", args=[store.pk, session.pk]
+                ),
+            }
+            return _form_response(request, context, 422 if _hx(request) else 200)
         form = CashSessionCloseForm(
             {
                 "counted_amount": payload.get("counted_amount"),
@@ -348,7 +399,7 @@ def close(request, store_id, session_id):
                 )
             except ValidationError as exc:
                 if not session.is_open or "cerrada" in " ".join(exc.messages).lower():
-                    return render(
+                    response = render(
                         request,
                         "cash_register/partials/_close_conflict.html",
                         {
@@ -357,10 +408,36 @@ def close(request, store_id, session_id):
                         },
                         status=409,
                     )
+                    response["X-Netxodo-Allow-Error-Swap"] = "true"
+                    return response
                 _service_errors(form, exc, {"counted_cash_amount": "counted_amount"})
+                context = {
+                    "store": store,
+                    "session": session,
+                    "payload": request.POST.get("close_payload", ""),
+                    "counted_amount": form.data.get("counted_amount"),
+                    "notes": form.data.get("notes", ""),
+                    "difference": form.cleaned_data.get("counted_amount", 0)
+                    - session.expected_cash_amount,
+                    "require_pin": require_pin,
+                    "pin_errors": form["pin"].errors if "pin" in form.fields else (),
+                }
+                return render(
+                    request,
+                    "cash_register/partials/_close_confirm.html"
+                    if _hx(request)
+                    else "cash_register/close_confirm.html",
+                    context,
+                    status=422 if _hx(request) else 200,
+                )
             else:
                 messages.success(request, "Caja cerrada correctamente.")
-                return redirect("cash_register:session_detail", store.pk, session.pk)
+                return _hx_redirect(
+                    request,
+                    reverse(
+                        "cash_register:session_detail", args=[store.pk, session.pk]
+                    ),
+                )
     else:
         form = CashSessionCloseForm(request.POST or None)
         form.fields.pop("pin")
@@ -369,6 +446,10 @@ def close(request, store_id, session_id):
                 {
                     "counted_amount": str(form.cleaned_data["counted_amount"]),
                     "notes": form.cleaned_data["notes"],
+                    "business_id": request.user.business_id,
+                    "store_id": store.pk,
+                    "cash_session_id": session.pk,
+                    "user_id": request.user.pk,
                 },
                 salt="cash-close",
             )
@@ -397,6 +478,7 @@ def close(request, store_id, session_id):
         "description": "Cuenta el efectivo final. Continuar todavía no cierra el turno.",
         "submit_label": "Continuar",
         "operation_kind": "close",
+        "expected_cents": int(session.expected_cash_amount * 100),
         "cancel_url": reverse(
             "cash_register:session_detail", args=[store.pk, session.pk]
         ),

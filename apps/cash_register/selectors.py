@@ -19,25 +19,29 @@ def get_cash_registers_for_store(*, business, store):
         status=CashSession.Status.OPEN,
         closed_at__isnull=True,
     ).select_related("opened_by")
-    closed_sessions = (
+    latest_closed_session = (
         CashSession.objects.filter(
             business=business, store=store, status=CashSession.Status.CLOSED
         )
         .select_related("closed_by")
-        .order_by("-closed_at", "-pk")
+        .order_by("-closed_at", "-pk")[:1]
     )
     registers = CashRegister.objects.filter(
         business=business, store=store
     ).prefetch_related(
         Prefetch("sessions", queryset=open_sessions, to_attr="open_sessions"),
-        Prefetch("sessions", queryset=closed_sessions, to_attr="closed_sessions"),
+        Prefetch(
+            "sessions", queryset=latest_closed_session, to_attr="latest_closed_sessions"
+        ),
     )
     for register in registers:
         register.open_session = (
             register.open_sessions[0] if register.open_sessions else None
         )
         register.latest_closed_session = (
-            register.closed_sessions[0] if register.closed_sessions else None
+            register.latest_closed_sessions[0]
+            if register.latest_closed_sessions
+            else None
         )
     return registers
 

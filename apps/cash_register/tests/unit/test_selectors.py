@@ -66,6 +66,34 @@ class CashRegisterSelectorsTests(TestCase):
         )
         self.assertEqual(registers[0].open_sessions, [self.session])
 
+    def test_register_list_fetches_only_latest_closed_session_without_n_plus_one(self):
+        register = self.session.cash_register
+        older = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            status=CashSession.Status.CLOSED,
+            closed_at="2025-01-01T10:00:00Z",
+            closed_by=self.user,
+        )
+        latest = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            status=CashSession.Status.CLOSED,
+            closed_at="2025-01-02T10:00:00Z",
+            closed_by=self.user,
+        )
+        with self.assertNumQueries(3):
+            registers = list(
+                get_cash_registers_for_store(business=self.business, store=self.store)
+            )
+            self.assertEqual(registers[0].latest_closed_session, latest)
+            self.assertEqual(registers[0].latest_closed_sessions, [latest])
+            self.assertNotEqual(registers[0].latest_closed_session, older)
+
     def test_counts_select_related_counted_by_without_per_count_queries(self):
         for index in range(3):
             CashCount.objects.create(
