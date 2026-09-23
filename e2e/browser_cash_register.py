@@ -102,9 +102,30 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             page.goto(
                 f"{self.live_server_url}/cash-register/stores/{store.pk}/sessions/{open_session.pk}/"
             )
-            for width, height in ((1440, 900), (900, 900), (375, 812)):
+            for width, height in (
+                (1440, 900),
+                (1024, 768),
+                (900, 900),
+                (375, 812),
+            ):
                 page.set_viewport_size({"width": width, "height": height})
                 expect(page.get_by_text("Esperado", exact=True).first).to_be_visible()
+                expect(page.get_by_role("button", name="Nueva venta")).to_be_visible()
+                if 768 <= width <= 1199:
+                    expect(page.locator(".cash-physical-summary")).to_be_visible()
+                    expect(page.locator(".cash-payment-summary")).to_be_visible()
+                    more = page.get_by_text("Más", exact=True)
+                    expect(more).to_be_visible()
+                    more.click()
+                    for action in ("Entrada", "Salida", "Ajuste", "Arqueo"):
+                        expect(
+                            page.locator(".cash-more-actions__menu").get_by_role(
+                                "link", name=action, exact=True
+                            )
+                        ).to_be_visible()
+                    expect(
+                        page.get_by_role("link", name="Cerrar caja", exact=True)
+                    ).to_be_visible()
                 page.get_by_role("link", name="Entrada", exact=True).click()
                 expect(page.get_by_role("dialog")).to_be_visible()
                 expect(page.get_by_label("Importe")).to_be_editable()
