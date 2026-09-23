@@ -20,5 +20,16 @@ const cashDialog = document.getElementById("cash-operation-dialog");
 cashDialog?.addEventListener("close", () => {
   cashDialog.querySelector("#cash-operation-panel")?.replaceChildren();
 });
+const syncHistoryFiltersFromUrl = () => {
+  const form = document.querySelector(".cash-history-filters");
+  if (!form) return;
+  const params = new URLSearchParams(window.location.search);
+  for (const name of ["cash_register", "user", "date_from", "date_to"]) {
+    const field = form.elements.namedItem(name);
+    if (field) field.value = params.get(name) || "";
+  }
+};
 enhanceCountPreview();
+syncHistoryFiltersFromUrl();
 document.body.addEventListener("htmx:afterSwap", (event) => enhanceCountPreview(event.detail.target));
+document.addEventListener("htmx:historyRestore", syncHistoryFiltersFromUrl);
