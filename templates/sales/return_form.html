@@ -1,18 +1,1 @@
-{% extends "base.html" %}
-
-{% block title %}Nueva devolución | Netxodo{% endblock %}
-
-{% block content %}
-<section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
-
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-
-        <button type="submit">
-            Guardar
-        </button>
-    </form>
-</section>
-{% endblock %}
+{% extends "base.html" %}{% load static %}{% block title %}Iniciar devolución | Netxodo{% endblock %}{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-returns.css' %}">{% endblock %}{% block content %}<section class="returns-page return-start"><a class="back-link" href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">← Venta #{{ sale.pk }}</a><header class="returns-header"><div><p class="returns-eyebrow">Nueva devolución</p><h1>Devolución de venta #{{ sale.pk }}</h1><p>{{ store.name }} · {{ sale.created_at|date:"d/m/Y" }}</p></div></header><div class="card return-start-summary"><p>Cliente: <strong>{{ sale.customer|default:"Mostrador" }}</strong></p><p>Total original: <strong>{{ sale.total_amount }} €</strong></p></div><form class="card" method="post">{% csrf_token %}{{ form.non_field_errors }}<div class="form-field"><label for="{{ form.reason.id_for_label }}">Motivo de la devolución</label>{{ form.reason }}{% if form.reason.errors %}<div class="field-error" role="alert">{{ form.reason.errors|striptags }}</div>{% endif %}</div><div class="form-actions"><a class="button button-secondary" href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">Cancelar</a><button class="button" type="submit">Iniciar devolución</button></div></form></section>{% endblock %}

@@ -21,6 +21,7 @@ from apps.payments.models import (
     PaymentStatusChoices,
     PaymentTypeChoices,
 )
+from apps.payments.selectors import get_sale_return_refund_summary
 from apps.sales.models import (
     PaymentStatusChoices as SalePaymentStatusChoices,
     Sale,
@@ -436,25 +437,11 @@ def register_refund(
         cash_session_id=cash_session_id,
     )
     balance = _get_sale_payment_balance(sale)
-    return_refunded = (
-        Payment.objects.filter(
-            sale_return=returned,
-            status=PaymentStatusChoices.COMPLETED,
-            payment_type=PaymentTypeChoices.REFUND,
-        ).aggregate(total=Sum("amount"))["total"]
-        or ZERO
+    refund_summary = get_sale_return_refund_summary(
+        business=business, sale_return=returned
     )
-    debt_reduction = (
-        CustomerAccountEntry.objects.filter(
-            business=business,
-            sale=sale,
-            entry_type=EntryTypeChoices.REFUND,
-            payment__isnull=True,
-            notes=f"Reducción de deuda por devolución #{returned.pk}",
-        ).aggregate(total=Sum("amount"))["total"]
-        or ZERO
-    )
-    monetary_capacity = returned.total_amount - abs(debt_reduction)
+    return_refunded = refund_summary["refunded_total"]
+    monetary_capacity = refund_summary["monetary_capacity"]
     if return_refunded + amount > monetary_capacity:
         raise ValidationError(
             {"amount": "El importe supera la parte monetaria de la devolución."}
@@ -462,9 +449,7 @@ def register_refund(
     # Determine how much money is actually refundable from the sale
     # based on what the customer has paid above the commercial value
     # remaining after returns.
-    monetary_refund_due = max(balance["net_paid"] - balance["effective_total"], ZERO)
-    return_remaining_capacity = monetary_capacity - return_refunded
-    max_refundable = min(monetary_refund_due, return_remaining_capacity)
+    max_refundable = refund_summary["remaining"]
     if amount > max_refundable:
         raise ValidationError(
             {

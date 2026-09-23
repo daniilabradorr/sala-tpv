@@ -14,9 +14,9 @@
       {% if register.open_sessions %}{% with session=register.open_sessions.0 %}
       <dl class="details-grid compact"><div><dt>Abierta por</dt><dd>{{ session.opened_by.get_full_name|default:session.opened_by.email }}</dd></div><div><dt>Desde</dt><dd>{{ session.opened_at|date:"d/m/Y H:i" }}</dd></div><div><dt>Inicial</dt><dd>{{ session.opening_amount|floatformat:2 }} €</dd></div><div><dt>Esperado</dt><dd>{{ session.expected_cash_amount|floatformat:2 }} €</dd></div></dl>
       <div class="actions"><a class="button" href="{% url 'cash_register:session_detail' store.pk session.pk %}">Entrar en caja</a></div>
-      {% endwith %}{% elif register.is_active %}<div class="actions"><a class="button" href="{% url 'cash_register:register_open' store.pk register.pk %}">Abrir caja</a></div>{% else %}<p class="empty-state">Activa la caja para poder abrir una sesión.</p>{% endif %}
+      {% endwith %}{% elif register.is_active %}{% if register.closed_sessions %}{% with latest=register.closed_sessions.0 %}<dl class="details-grid compact"><div><dt>Último cierre</dt><dd>{{ latest.closed_at|date:"d/m/Y H:i" }}</dd></div><div><dt>Diferencia</dt><dd>{{ latest.difference_amount|floatformat:2 }} €</dd></div></dl>{% endwith %}{% endif %}<div class="actions"><a class="button" href="{% url 'cash_register:register_open' store.pk register.pk %}" hx-get="{% url 'cash_register:register_open' store.pk register.pk %}" hx-target="#cash-operation-panel" data-nx-modal-trigger="cash-operation-modal">Abrir caja</a></div>{% else %}<p class="empty-state">Activa la caja para poder abrir una sesión.</p>{% endif %}
     </article>
   {% empty %}<p class="empty-state">No hay cajas configuradas para esta tienda.</p>{% endfor %}
   </div>
-</section>
+</section><dialog id="cash-operation-modal" class="nx-modal" data-nx-modal aria-labelledby="cash-operation-title"><div id="cash-operation-panel"></div></dialog>
 {% endblock %}

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django import forms
 
 from apps.cash_register.models import CashMovement, CashRegister
+from apps.users.models import CustomUser
 
 
 class CashSessionOpenForm(forms.Form):
@@ -61,3 +62,38 @@ class CashCountReviewForm(forms.Form):
 
 class CashSessionCloseForm(CashCountReviewForm):
     pin = forms.CharField(label="PIN", required=False, widget=forms.PasswordInput)
+
+
+class CashSessionCloseConfirmForm(forms.Form):
+    payload = forms.CharField(widget=forms.HiddenInput)
+    pin = forms.CharField(
+        label="PIN de seguridad", required=False, widget=forms.PasswordInput
+    )
+
+    def __init__(self, *args, require_pin=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["pin"].required = require_pin
+
+
+class CashSessionHistoryFilterForm(forms.Form):
+    cash_register = forms.ModelChoiceField(
+        label="Caja", queryset=CashRegister.objects.none(), required=False
+    )
+    user = forms.ModelChoiceField(
+        label="Usuario", queryset=CustomUser.objects.none(), required=False
+    )
+    date_from = forms.DateField(
+        label="Desde", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+    date_to = forms.DateField(
+        label="Hasta", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, business, store, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["cash_register"].queryset = CashRegister.objects.filter(
+            business=business, store=store
+        )
+        self.fields["user"].queryset = CustomUser.objects.filter(
+            business=business, is_active=True
+        ).order_by("first_name", "last_name", "email")

@@ -113,6 +113,28 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             session.expected_cash_amount,
         )
 
+    def test_register_list_prefetches_only_latest_closed_session(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        sessions = []
+        for _ in range(2):
+            session = CashSession.objects.create(
+                business=self.business,
+                store=self.store,
+                cash_register=register,
+                opened_by=self.user,
+            )
+            session.status = CashSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.closed_by = self.user
+            session.counted_cash_amount = session.expected_cash_amount
+            session.save()
+            sessions.append(session)
+        response = self.client.get(
+            reverse("cash_register:register_list", args=[self.store.pk])
+        )
+        rendered = response.context["cash_registers"][0]
+        self.assertEqual(rendered.closed_sessions, [sessions[-1]])
+
     def test_session_detail_lists_only_its_sales_and_opened_by(self):
         register = create_cash_register(business=self.business, store=self.store)
         session = CashSession.objects.create(
@@ -146,6 +168,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         )
         response = self.client.get(
             self.detail_url(store_id=self.store.pk, session_id=session.pk)
+            + "?tab=sales"
         )
         self.assertContains(response, f"#{included.pk}")
         self.assertContains(response, self.user.email)
@@ -419,6 +442,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
 
         response = self.client.get(
             self.detail_url(store_id=self.store.pk, session_id=session.pk)
+            + "?tab=counts"
         )
 
         self.assertContains(response, count.get_count_type_display())
@@ -429,3 +453,40 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertContains(response, "19,00 €")
         self.assertContains(response, "-1,00 €")
         self.assertContains(response, "Arqueo de cambio de turno")
+
+    def test_session_tabs_have_full_and_htmx_contract(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        url = self.detail_url(store_id=self.store.pk, session_id=session.pk)
+        full = self.client.get(url + "?tab=movements")
+        partial = self.client.get(url + "?tab=counts", HTTP_HX_REQUEST="true")
+        self.assertTemplateUsed(full, "cash_register/session_detail.html")
+        self.assertTemplateUsed(partial, "cash_register/partials/_session_tab.html")
+        self.assertIn("HX-Request", full["Vary"])
+        self.assertIn("HX-Request", partial["Vary"])
+        self.assertEqual(partial.context["active_tab"], "counts")
+
+    def test_close_prepare_does_not_mutate_session(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opening_amount="20.00",
+            expected_cash_amount="20.00",
+        )
+        response = self.client.post(
+            reverse("cash_register:close", args=[self.store.pk, session.pk]),
+            {"counted_amount": "19.00", "notes": "Preparar"},
+        )
+        session.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "cash_register/close_confirm.html")
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+        self.assertContains(response, "Confirmar cierre")
