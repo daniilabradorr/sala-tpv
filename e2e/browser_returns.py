@@ -244,7 +244,7 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
             page.get_by_role("link", name="Cancelar", exact=True).click()
             page.get_by_label("PIN de seguridad").fill("1234")
             page.get_by_role("button", name="Cancelar devolución").click()
-            expect(page.get_by_text("Devolución cancelada")).to_be_visible()
+            expect(page.get_by_text("Devolución cancelada", exact=True)).to_be_visible()
             browser.close()
         returned = SaleReturn.objects.get(original_sale=self.sale)
         self.assertEqual(returned.status, SaleReturnStatusChoices.CANCELLED)
