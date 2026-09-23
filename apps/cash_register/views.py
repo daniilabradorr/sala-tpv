@@ -362,15 +362,16 @@ def close(request, store_id, session_id):
         if payload_error:
             form = CashSessionCloseForm()
             form.fields.pop("pin")
-            form.add_error(None, payload_error)
             context = {
                 "form": form,
+                "close_payload_error": payload_error,
                 "store": store,
                 "session": session,
                 "title": "Cerrar caja",
                 "description": "Cuenta el efectivo final. Continuar todavía no cierra el turno.",
                 "submit_label": "Continuar",
                 "operation_kind": "close",
+                "expected_cents": int(session.expected_cash_amount * 100),
                 "cancel_url": reverse(
                     "cash_register:session_detail", args=[store.pk, session.pk]
                 ),

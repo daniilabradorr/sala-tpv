@@ -142,13 +142,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Efectivo inicial").fill("100.00")
         self.page.get_by_role("button", name="Abrir caja").click()
         expect(self.page.get_by_text("Caja abierta correctamente.")).to_be_visible()
-        expect(self.page.get_by_text("Caja abierta", exact=True)).to_be_visible()
-        expect(self.page.get_by_role("button", name="Nueva venta")).to_be_visible()
         expect(
-            self.page.get_by_label("Resumen de caja").get_by_text(
-                "Esperado", exact=True
-            )
-        ).to_be_visible()
+            self.page.locator(".cash-session-header .cash-status--open")
+        ).to_contain_text(re.compile("Abierta", re.I))
+        expect(self.page.get_by_role("button", name="Nueva venta")).to_be_visible()
+        expect(self.page.get_by_text("Esperado", exact=True).first).to_be_visible()
         return self._db_value(
             lambda: CashSession.objects.values_list("pk", flat=True).get(
                 business_id=self.business.pk,

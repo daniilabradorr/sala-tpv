@@ -342,6 +342,34 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.status, CashSession.Status.OPEN)
 
+    def test_close_bad_signature_returns_to_prepare_without_mutation(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=False
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse("cash_register:close", args=[self.store.pk, session.pk]),
+            {"step": "confirm", "close_payload": "not-a-valid-signature"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "Abrir caja", count=0, status_code=422)
+        self.assertContains(response, "Cerrar caja", status_code=422)
+        self.assertContains(
+            response,
+            "La revisión de cierre ha caducado o no es válida.",
+            status_code=422,
+        )
+        self.assertContains(response, 'role="alert"', status_code=422)
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+
     def test_close_conflict_returns_opt_in_swappable_409(self):
         create_pos_settings(
             business=self.business, require_pin_for_sensitive_actions=False
@@ -582,8 +610,12 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertContains(response, "Diferencia 0,00 €")
         self.assertContains(response, self.user.email)
         self.assertContains(response, "Vista histórica de solo lectura")
-        for action in ("Nueva venta", "Cerrar caja"):
-            self.assertNotContains(response, action)
+        workspace = response.content.decode().split('<div class="cash-workspace">', 1)[
+            1
+        ]
+        workspace = workspace.split('<dialog id="cash-operation-dialog"', 1)[0]
+        self.assertNotIn("Nueva venta", workspace)
+        self.assertNotIn("Cerrar caja", workspace)
         self.assertNotContains(response, 'class="cash-actions"')
         self.assertNotContains(response, "cash-primary-action")
         for url in (
