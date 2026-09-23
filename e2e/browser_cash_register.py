@@ -111,12 +111,19 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                 page.set_viewport_size({"width": width, "height": height})
                 expect(page.get_by_text("Esperado", exact=True).first).to_be_visible()
                 expect(page.get_by_role("button", name="Nueva venta")).to_be_visible()
+                more_details = None
+                more_summary = None
                 if 768 <= width <= 1199:
                     expect(page.locator(".cash-physical-summary")).to_be_visible()
                     expect(page.locator(".cash-payment-summary")).to_be_visible()
-                    more = page.get_by_text("Más", exact=True)
-                    expect(more).to_be_visible()
-                    more.click()
+                    more_details = page.locator("details.cash-more-actions")
+                    more_summary = more_details.get_by_text("Más", exact=True)
+                    expect(more_summary).to_be_visible()
+                    if more_details.get_attribute("open") is None:
+                        more_summary.click()
+                    expect(more_details).to_have_attribute("open", "")
+                    for direct_action in page.locator(".cash-direct-action").all():
+                        expect(direct_action).not_to_be_visible()
                     for action in ("Entrada", "Salida", "Ajuste", "Arqueo"):
                         expect(
                             page.locator(".cash-more-actions__menu").get_by_role(
@@ -131,6 +138,9 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                 expect(page.get_by_label("Importe")).to_be_editable()
                 page.get_by_role("button", name="Cancelar").click()
                 expect(page.get_by_role("dialog")).not_to_be_visible()
+                if more_details is not None:
+                    more_summary.click()
+                    expect(more_details).not_to_have_attribute("open", "")
                 page.get_by_role("tab", name="Ventas").click()
                 page.get_by_role("tab", name="Movimientos").click()
                 page.get_by_role("tab", name="Arqueos").click()
