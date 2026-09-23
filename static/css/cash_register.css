@@ -1,4 +1,5 @@
-.cash-workspace { display: grid; gap: 1.25rem; }
+.cash-workspace { display: grid; min-width: 0; gap: 1.25rem; }
+.cash-workspace > * { min-width: 0; max-width: 100%; }
 .cash-session-header, .cash-section, .cash-register-list, .cash-operation { border: 1px solid var(--border); border-radius: 12px; background: var(--nx-surface, #07182b); padding: clamp(1rem, 2.5vw, 1.75rem); }
 .cash-session-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.5rem; border-top: 3px solid var(--nx-blue-bright, #0794f2); }
 .cash-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.25rem; }
@@ -62,3 +63,40 @@
 .cash-operation--close { border-top: 3px solid #d6535d; }
 @media (max-width: 900px) { .cash-session-header, .cash-overview, .cash-operation__layout { grid-template-columns: 1fr; } .cash-actions { min-width: 0; } }
 @media (max-width: 560px) { .cash-actions__secondary, .cash-kpis { grid-template-columns: 1fr; } .cash-actions .button, .cash-operation .button { width: 100%; justify-content: center; } .cash-operation .actions { display: grid; } }
+.register-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:1rem; }
+.register-card { display:grid; gap:.85rem; padding:1.25rem; border:1px solid var(--border); border-top:3px solid var(--nx-blue-bright); border-radius:12px; background:var(--nx-surface); }
+.register-card h2,.register-card p { margin:0; }
+.cash-card-kpis { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; margin:0; }
+.cash-card-kpis div { padding:.75rem; background:var(--nx-surface-muted); }
+.cash-card-kpis dd { margin:.25rem 0 0; font-weight:800; }
+.cash-status--inactive { color:var(--muted); }
+.cash-tabs { display:flex; min-width:0; max-width:100%; gap:.35rem; overflow:auto; border-bottom:1px solid var(--border); }
+.cash-tabs a { min-height:44px; padding:.75rem 1rem; color:var(--muted); text-decoration:none; white-space:nowrap; }
+.cash-tabs a[aria-selected="true"] { color:var(--text); border-bottom:3px solid var(--nx-blue-bright); }
+.cash-dialog { width:min(94vw,620px); }
+.cash-dialog-panel { padding:clamp(1rem,3vw,1.75rem); }
+.cash-dialog-panel header p { color:var(--muted); }
+.form-field { display:grid; gap:.4rem; margin-bottom:1rem; }
+.form-field input,.form-field select,.form-field textarea { width:100%; }
+.field-errors,.form-errors { color:var(--nx-danger); }
+.cash-history-filters { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)) auto; gap:.75rem; align-items:end; margin:1rem 0; }
+.cash-history-filters .form-field { margin:0; }
+.pagination { display:flex; align-items:center; justify-content:center; gap:1rem; margin-top:1rem; }
+.cash-close-action { grid-column:1/-1; margin-top:.4rem; }
+@media(max-width:700px){.cash-history-filters{grid-template-columns:1fr 1fr}.cash-history-filters .button{grid-column:1/-1}.cash-responsive-list table,.cash-responsive-list tbody,.cash-responsive-list tr,.cash-responsive-list td{display:block}.cash-responsive-list tr{padding:.75rem;border-bottom:1px solid var(--border)}.cash-responsive-list td{padding:.25rem}.cash-section table{min-width:0}.cash-overview{grid-template-columns:1fr}.cash-session-header{grid-template-columns:1fr}}
+@media(max-width:420px){.cash-history-filters,.cash-card-kpis{grid-template-columns:1fr}.cash-actions__secondary{grid-template-columns:1fr 1fr}.cash-close-action{grid-column:1/-1}}
+.cash-more-actions { display: none; position: relative; }
+.cash-more-actions summary { cursor: pointer; list-style: none; }
+.cash-more-actions summary::-webkit-details-marker { display: none; }
+.cash-more-actions__menu { position: absolute; z-index: 10; top: calc(100% + .35rem); right: 0; display: grid; min-width: 12rem; padding: .4rem; border: 1px solid var(--border); border-radius: 8px; background: var(--nx-surface); box-shadow: var(--nx-shadow-md); }
+.cash-more-actions__menu a { min-height: 44px; padding: .7rem; border-radius: 6px; color: var(--text); text-decoration: none; }
+.cash-more-actions__menu a:hover, .cash-more-actions__menu a:focus-visible { background: var(--nx-surface-muted); }
+@media (min-width: 768px) and (max-width: 1199px) {
+  .cash-actions__secondary .cash-direct-action { display: none; }
+  .cash-more-actions { display: block; }
+  .cash-more-actions summary, .cash-close-action { width: 100%; justify-content: center; }
+  .cash-close-action { grid-column: auto; margin-top: 0; }
+}
+@media (max-width: 700px) {
+  .cash-responsive-list thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+}

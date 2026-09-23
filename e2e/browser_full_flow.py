@@ -142,13 +142,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Efectivo inicial").fill("100.00")
         self.page.get_by_role("button", name="Abrir caja").click()
         expect(self.page.get_by_text("Caja abierta correctamente.")).to_be_visible()
-        expect(self.page.get_by_text("Caja abierta", exact=True)).to_be_visible()
-        expect(self.page.get_by_role("button", name="Nueva venta")).to_be_visible()
         expect(
-            self.page.get_by_label("Resumen de caja").get_by_text(
-                "Esperado", exact=True
-            )
-        ).to_be_visible()
+            self.page.locator(".cash-session-header .cash-status--open")
+        ).to_contain_text(re.compile("Abierta", re.I))
+        expect(self.page.get_by_role("button", name="Nueva venta")).to_be_visible()
+        expect(self.page.get_by_text("Esperado", exact=True).first).to_be_visible()
         return self._db_value(
             lambda: CashSession.objects.values_list("pk", flat=True).get(
                 business_id=self.business.pk,
@@ -279,24 +277,51 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.step = "review and close cash session"
         base = f"/cash-register/stores/{self.store.pk}/sessions/{session_id}"
         self._goto(f"{base}/")
-        self.page.get_by_role("link", name="Arqueo / Revisión").click()
+        self.page.get_by_role("link", name="Arqueo", exact=True).click()
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
         self.page.get_by_role("button", name="Guardar arqueo").click()
-        self._goto(f"{base}/")
+        expect(self.page.get_by_role("dialog")).not_to_be_visible()
+        expect(self.page.locator("#cash-operation-panel")).to_be_empty()
+        self.page.get_by_role("tab", name="Resumen").click()
         expect(self.page.get_by_text("Efectivo", exact=True)).to_be_visible()
         expect(self.page.get_by_text("Tarjeta", exact=True)).to_be_visible()
+        self.page.get_by_role("tab", name="Movimientos").click()
         expect(self.page.get_by_text("Cobro de venta en efectivo")).to_be_visible()
-        self.page.get_by_role("link", name="Cerrar caja").click()
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "GET" and "/close/" in response.url
+            )
+        ) as close_get:
+            self.page.get_by_role("link", name="Cerrar caja", exact=True).click()
+        self.assertEqual(close_get.value.status, 200)
+        expect(self.page.get_by_role("dialog")).to_be_visible()
+        expect(
+            self.page.get_by_role("heading", name="Cerrar caja", exact=True)
+        ).to_be_visible()
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/close/" in response.url
+            )
+        ) as close_prepare:
+            self.page.get_by_role("button", name="Continuar", exact=True).click()
+        self.assertEqual(close_prepare.value.status, 200)
+        expect(
+            self.page.get_by_role("heading", name="Confirmar cierre", exact=True)
+        ).to_be_visible()
+        expect(self.page.get_by_text("Esperado", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Contado", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Diferencia", exact=True)).to_be_visible()
         self.page.get_by_label("PIN").fill(self.OWNER_PIN)
         self.page.get_by_role("button", name="Cerrar caja").click()
-        cash_summary = self.page.get_by_label("Resumen de caja")
+        expect(self.page.get_by_text("✓ CAJA CERRADA", exact=True)).to_be_visible()
+        cash_summary = self.page.locator(".cash-physical-summary")
         expect(cash_summary.get_by_text("Esperado", exact=True)).to_be_visible()
         expect(cash_summary.get_by_text("Contado", exact=True)).to_be_visible()
-        expect(self.page.get_by_text("Caja cerrada", exact=True)).to_be_visible()
         expect(self.page.get_by_text("Vista histórica de solo lectura")).to_be_visible()
-        expect(self.page.get_by_role("button", name="Nueva venta")).to_have_count(0)
-        expect(self.page.get_by_role("link", name="Cerrar caja")).to_have_count(0)
+        header = self.page.locator(".cash-session-header")
+        expect(header.get_by_role("button", name="Nueva venta")).to_have_count(0)
+        expect(header.get_by_role("link", name="Cerrar caja")).to_have_count(0)
 
     def test_full_browser_erp_happy_path(self):
         flow = self._run_browser_flow()

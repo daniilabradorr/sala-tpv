@@ -77,6 +77,9 @@ export const initHtmxEvents = () => {
   document.body.addEventListener("htmx:beforeSwap", (event) => {
     const status = event.detail.xhr.status;
     if (status === 422) { event.detail.shouldSwap = true; event.detail.isError = false; return; }
+    if (status === 409 && event.detail.xhr.getResponseHeader("X-Netxodo-Allow-Error-Swap") === "true") {
+      event.detail.shouldSwap = true; event.detail.isError = false; return;
+    }
     const messages = {403: "No tienes permiso para realizar esta acción.", 404: "Este recurso ya no está disponible.", 409: "La información ha cambiado. Actualiza los datos antes de continuar."};
     const message = messages[status] || (status >= 500 ? "Se ha producido un error inesperado." : null);
     if (message) { event.detail.shouldSwap = false; feedback(message, "", resolvedRequestSurface(event.detail)); }

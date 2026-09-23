@@ -1,8 +1,10 @@
 from decimal import Decimal
+from datetime import datetime
 import uuid
 
 from django.db import transaction
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.cash_register.models import CashCount, CashSession
 from apps.cash_register.services import register_payment_cash_movement
@@ -65,6 +67,44 @@ class CashRegisterSelectorsTests(TestCase):
             get_cash_registers_for_store(business=self.business, store=self.store)
         )
         self.assertEqual(registers[0].open_sessions, [self.session])
+
+    def test_register_list_fetches_only_latest_closed_session_without_n_plus_one(self):
+        register = self.session.cash_register
+        older = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opened_at=timezone.make_aware(datetime(2025, 1, 1, 9, 0)),
+            opening_amount=Decimal("10.00"),
+            expected_cash_amount=Decimal("10.00"),
+            counted_cash_amount=Decimal("10.00"),
+            difference_amount=Decimal("0.00"),
+            status=CashSession.Status.CLOSED,
+            closed_at=timezone.make_aware(datetime(2025, 1, 1, 10, 0)),
+            closed_by=self.user,
+        )
+        latest = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opened_at=timezone.make_aware(datetime(2025, 1, 2, 9, 0)),
+            opening_amount=Decimal("10.00"),
+            expected_cash_amount=Decimal("10.00"),
+            counted_cash_amount=Decimal("10.00"),
+            difference_amount=Decimal("0.00"),
+            status=CashSession.Status.CLOSED,
+            closed_at=timezone.make_aware(datetime(2025, 1, 2, 10, 0)),
+            closed_by=self.user,
+        )
+        with self.assertNumQueries(3):
+            registers = list(
+                get_cash_registers_for_store(business=self.business, store=self.store)
+            )
+            self.assertEqual(registers[0].latest_closed_session, latest)
+            self.assertEqual(registers[0].latest_closed_sessions, [latest])
+            self.assertNotEqual(registers[0].latest_closed_session, older)
 
     def test_counts_select_related_counted_by_without_per_count_queries(self):
         for index in range(3):

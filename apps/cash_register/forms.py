@@ -61,3 +61,29 @@ class CashCountReviewForm(forms.Form):
 
 class CashSessionCloseForm(CashCountReviewForm):
     pin = forms.CharField(label="PIN", required=False, widget=forms.PasswordInput)
+
+
+class CashHistoryFilterForm(forms.Form):
+    cash_register = forms.ModelChoiceField(
+        label="Caja", required=False, queryset=CashRegister.objects.none()
+    )
+    user = forms.ModelChoiceField(
+        label="Usuario", required=False, queryset=CashRegister.objects.none()
+    )
+    date_from = forms.DateField(
+        label="Desde", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+    date_to = forms.DateField(
+        label="Hasta", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, business, store, **kwargs):
+        from apps.users.models import CustomUser
+
+        super().__init__(*args, **kwargs)
+        self.fields["cash_register"].queryset = CashRegister.objects.filter(
+            business=business, store=store
+        )
+        self.fields["user"].queryset = CustomUser.objects.filter(
+            business=business, opened_cash_sessions__store=store
+        ).distinct()

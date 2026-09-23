@@ -1,3 +1,6 @@
+import json
+
+from django.core import signing
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -163,6 +166,240 @@ class CashRegisterSessionViewIsolationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             CashSession.objects.get(cash_register=register).opened_by, self.user
+        )
+
+    def test_open_hx_success_uses_explicit_navigation_contract(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        response = self.client.post(
+            reverse("cash_register:register_open", args=[self.store.pk, register.pk]),
+            {"cash_register": register.pk, "opening_amount": "100.00"},
+            HTTP_HX_REQUEST="true",
+        )
+        session = CashSession.objects.get(cash_register=register)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            response["HX-Redirect"],
+            self.detail_url(store_id=self.store.pk, session_id=session.pk),
+        )
+        self.assertIn("HX-Request", response.get("Vary", ""))
+
+    def test_open_hx_invalid_renders_partial_with_422_and_vary(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        response = self.client.post(
+            reverse("cash_register:register_open", args=[self.store.pk, register.pk]),
+            {"cash_register": register.pk, "opening_amount": "invalid"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "cash-dialog-panel", status_code=422)
+        self.assertNotContains(response, "<!DOCTYPE html>", status_code=422)
+        self.assertIn("HX-Request", response.get("Vary", ""))
+
+    def test_session_tabs_return_partial_without_shell_and_vary(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        for tab, heading in (
+            ("summary", "Resumen del cajón"),
+            ("sales", "Ventas del turno"),
+            ("movements", "Movimientos de efectivo"),
+            ("counts", "Arqueos"),
+        ):
+            response = self.client.get(
+                self.detail_url(store_id=self.store.pk, session_id=session.pk)
+                + f"?tab={tab}",
+                HTTP_HX_REQUEST="true",
+            )
+            self.assertContains(response, heading)
+            self.assertContains(response, 'id="cash-tab-panel"')
+            self.assertNotContains(response, "<!DOCTYPE html>")
+            self.assertIn("HX-Request", response.get("Vary", ""))
+
+    def test_cash_in_hx_success_closes_dialog_and_refreshes_tab(self):
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            expected_cash_amount="100.00",
+        )
+        url = reverse("cash_register:cash_in", args=[self.store.pk, session.pk])
+        get_response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertContains(get_response, "Entrada de efectivo")
+        self.assertIn("HX-Request", get_response.get("Vary", ""))
+        response = self.client.post(
+            url, {"amount": "50.00", "reason": "Cambio"}, HTTP_HX_REQUEST="true"
+        )
+        self.assertEqual(response.status_code, 204)
+        events = json.loads(response["HX-Trigger"])
+        self.assertEqual(events["nx:close-modal"]["id"], "cash-operation-dialog")
+        self.assertEqual(events["nx:refresh-region"]["selector"], "#cash-tab-panel")
+        session.refresh_from_db()
+        self.assertEqual(str(session.expected_cash_amount), "150.00")
+
+    def test_close_prepare_does_not_mutate_and_hx_confirm_redirects(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=False
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            expected_cash_amount="125.00",
+        )
+        url = reverse("cash_register:close", args=[self.store.pk, session.pk])
+        prepare = self.client.post(
+            url,
+            {"counted_amount": "124.00", "notes": "Fin"},
+            HTTP_HX_REQUEST="true",
+        )
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+        self.assertContains(prepare, "Confirmar cierre")
+        payload = prepare.context["payload"]
+        response = self.client.post(
+            url,
+            {"step": "confirm", "close_payload": payload},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            response["HX-Redirect"],
+            self.detail_url(store_id=self.store.pk, session_id=session.pk),
+        )
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.CLOSED)
+        self.assertEqual(str(session.difference_amount), "-1.00")
+
+    def test_close_invalid_pin_remains_on_confirmation_step(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=True
+        )
+        self.user.set_pin("1234")
+        self.user.save()
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            expected_cash_amount="20.00",
+        )
+        url = reverse("cash_register:close", args=[self.store.pk, session.pk])
+        prepare = self.client.post(url, {"counted_amount": "19.00", "notes": "Control"})
+        response = self.client.post(
+            url,
+            {
+                "step": "confirm",
+                "close_payload": prepare.context["payload"],
+                "pin": "9999",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "Confirmar cierre", status_code=422)
+        self.assertContains(response, "PIN indicado no es válido", status_code=422)
+        self.assertContains(response, "19,00 €", status_code=422)
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+
+    def test_close_signed_payload_is_bound_to_route_and_user(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=False
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        payload = signing.dumps(
+            {
+                "counted_amount": "0.00",
+                "notes": "",
+                "business_id": self.business.pk,
+                "store_id": self.store.pk,
+                "cash_session_id": session.pk + 1,
+                "user_id": self.user.pk,
+            },
+            salt="cash-close",
+        )
+        response = self.client.post(
+            reverse("cash_register:close", args=[self.store.pk, session.pk]),
+            {"step": "confirm", "close_payload": payload},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "pertenece a otra caja", status_code=422)
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+
+    def test_close_bad_signature_returns_to_prepare_without_mutation(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=False
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        response = self.client.post(
+            reverse("cash_register:close", args=[self.store.pk, session.pk]),
+            {"step": "confirm", "close_payload": "not-a-valid-signature"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "Abrir caja", count=0, status_code=422)
+        self.assertContains(response, "Cerrar caja", status_code=422)
+        self.assertContains(
+            response,
+            "La revisión de cierre ha caducado o no es válida.",
+            status_code=422,
+        )
+        self.assertContains(response, 'role="alert"', status_code=422)
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+
+    def test_close_conflict_returns_opt_in_swappable_409(self):
+        create_pos_settings(
+            business=self.business, require_pin_for_sensitive_actions=False
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        url = reverse("cash_register:close", args=[self.store.pk, session.pk])
+        prepare = self.client.post(url, {"counted_amount": "0.00", "notes": ""})
+        session.status = CashSession.Status.CLOSED
+        session.closed_at = timezone.now()
+        session.closed_by = self.user
+        session.counted_cash_amount = "0.00"
+        session.save()
+        response = self.client.post(
+            url,
+            {"step": "confirm", "close_payload": prepare.context["payload"]},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response["X-Netxodo-Allow-Error-Swap"], "true")
+        self.assertContains(response, "Esta caja ya ha sido cerrada.", status_code=409)
+        self.assertContains(
+            response,
+            "Otro usuario completó la operación antes que tú.",
+            status_code=409,
         )
 
     def test_contextual_register_open_rejects_manipulated_register(self):
@@ -364,15 +601,28 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             self.detail_url(store_id=self.store.pk, session_id=session.pk)
         )
 
-        self.assertContains(response, "Caja cerrada")
-        self.assertContains(response, "25,00 €", count=3)
+        session.refresh_from_db()
+        self.assertEqual(session.status, CashSession.Status.CLOSED)
+        self.assertContains(response, "✓ CAJA CERRADA")
+        self.assertContains(response, "Inicial 25,00 €")
+        self.assertContains(response, "Esperado 25,00 €")
+        self.assertContains(response, "Contado 25,00 €")
+        self.assertContains(response, "Diferencia 0,00 €")
+        self.assertContains(response, self.user.email)
         self.assertContains(response, "Vista histórica de solo lectura")
+        workspace = response.content.decode().split('<div class="cash-workspace">', 1)[
+            1
+        ]
+        workspace = workspace.split('<dialog id="cash-operation-dialog"', 1)[0]
+        self.assertNotIn("Nueva venta", workspace)
+        self.assertNotIn("Cerrar caja", workspace)
         self.assertNotContains(response, 'class="cash-actions"')
         self.assertNotContains(response, "cash-primary-action")
         for url in (
             reverse("cash_register:cash_in", args=[self.store.pk, session.pk]),
             reverse("cash_register:cash_out", args=[self.store.pk, session.pk]),
             reverse("cash_register:adjustment", args=[self.store.pk, session.pk]),
+            reverse("cash_register:review", args=[self.store.pk, session.pk]),
             reverse("cash_register:close", args=[self.store.pk, session.pk]),
         ):
             self.assertNotContains(response, f'href="{url}"')
@@ -419,10 +669,11 @@ class CashRegisterSessionViewIsolationTests(TestCase):
 
         response = self.client.get(
             self.detail_url(store_id=self.store.pk, session_id=session.pk)
+            + "?tab=counts"
         )
 
         self.assertContains(response, count.get_count_type_display())
-        rendered_at = timezone.localtime(count.created_at).strftime("%d/%m/%Y %H:%M")
+        rendered_at = timezone.localtime(count.created_at).strftime("%H:%M")
         self.assertContains(response, rendered_at)
         self.assertContains(response, self.user.email)
         self.assertContains(response, "20,00 €")
