@@ -8,7 +8,7 @@ function bindQuantity(root = document) {
       const current = Number.isFinite(input.valueAsNumber)
         ? input.valueAsNumber
         : 0;
-      const maximum = Number.parseFloat(input.max);
+      const maximum = Number.parseFloat(input.dataset.availableMax);
       if (!Number.isFinite(delta) || !Number.isFinite(maximum)) return;
       input.valueAsNumber = Math.max(
         0,

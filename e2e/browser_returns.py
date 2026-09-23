@@ -170,7 +170,11 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
             page.get_by_label("PIN de seguridad").fill("1234")
             page.get_by_role("button", name="Completar devolución").click()
             expect(page.get_by_text("✓ Devolución completada")).to_be_visible()
-            expect(page.get_by_text("Reembolso")).to_be_visible()
+            refund_progress = page.locator(".refund-progress")
+            expect(refund_progress.get_by_text("Reembolso", exact=True)).to_be_visible()
+            expect(
+                refund_progress.get_by_text("Sin reembolso monetario pendiente")
+            ).to_be_visible()
             expect(page.get_by_text("Documento rectificativo")).to_be_visible()
             browser.close()
         returned = SaleReturn.objects.get(original_sale=self.sale)
@@ -230,13 +234,13 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         self.assertEqual(StockMovement.objects.count(), movement_count)
 
     def test_cancel_draft_has_no_operational_side_effects(self):
+        movement_count = StockMovement.objects.count()
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 900, "height": 900})
             self._login(page)
             self._create_draft(page, "Cancelar prueba")
             self._assert_interactive_workspace(page)
-            movement_count = StockMovement.objects.count()
             page.get_by_role("link", name="Cancelar", exact=True).click()
             page.get_by_label("PIN de seguridad").fill("1234")
             page.get_by_role("button", name="Cancelar devolución").click()
