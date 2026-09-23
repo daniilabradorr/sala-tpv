@@ -111,7 +111,9 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
     def _assert_interactive_workspace(self, page):
         row = page.locator(".return-line").filter(has_text="Coca-Cola 33cl")
         expect(row).to_be_visible()
-        expect(row.locator('[data-label="Vendido"]')).to_contain_text("2.000")
+        expect(row.locator('[data-label="Vendido"]')).to_contain_text(
+            re.compile(r"2[,.]000")
+        )
         expect(row.locator('[data-label="Devuelto"]')).to_be_visible()
         expect(row.locator('[data-label="Disponible"]')).to_be_visible()
         quantity = row.get_by_label("Cantidad a devolver de Coca-Cola 33cl")
@@ -194,9 +196,15 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
             self._login(page)
             self._create_draft(page, "Segunda unidad")
             row = page.locator(".return-line").filter(has_text="Coca-Cola 33cl")
-            expect(row.locator('[data-label="Vendido"]')).to_contain_text("2.000")
-            expect(row.locator('[data-label="Devuelto"]')).to_contain_text("1.000")
-            expect(row.locator('[data-label="Disponible"]')).to_contain_text("1.000")
+            expect(row.locator('[data-label="Vendido"]')).to_contain_text(
+                re.compile(r"2[,.]000")
+            )
+            expect(row.locator('[data-label="Devuelto"]')).to_contain_text(
+                re.compile(r"1[,.]000")
+            )
+            expect(row.locator('[data-label="Disponible"]')).to_contain_text(
+                re.compile(r"1[,.]000")
+            )
             row.get_by_label("Cantidad a devolver de Coca-Cola 33cl").fill("2")
             row.get_by_role("button", name="Actualizar").click()
             expect(page.get_by_role("alert")).to_contain_text("supera")

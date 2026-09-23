@@ -1348,7 +1348,7 @@ class SaleViewsIntegrationTests(TestCase):
             {"quantity": "1.000", "restock": "on"},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "sales:return_detail.html")
+        self.assertTemplateUsed(response, "sales/return_detail.html")
         self.assertEqual(return_doc.lines.count(), 1)
         self.assertEqual(return_doc.lines.get().original_line, first_line)
 
@@ -1483,7 +1483,7 @@ class SaleViewsIntegrationTests(TestCase):
             )
         )
         self.assertContains(response, "Efectivo histórico")
-        self.assertContains(response, "12.10")
+        self.assertContains(response, "12,10")
         self.assertEqual(
             list(response.context["refund_summary"]["payments"]), [payment]
         )
