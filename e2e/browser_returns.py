@@ -108,6 +108,9 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         page.get_by_role("button", name="Iniciar devolución").click()
         return page.url
 
+    def _assert_numeric_input_value(self, locator, expected):
+        self.assertEqual(Decimal(locator.input_value()), Decimal(str(expected)))
+
     def _assert_interactive_workspace(self, page):
         row = page.locator(".return-line").filter(has_text="Coca-Cola 33cl")
         expect(row).to_be_visible()
@@ -120,10 +123,11 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         expect(quantity).to_be_editable()
         quantity.fill("0")
         row.get_by_role("button", name="Sumar una unidad de Coca-Cola 33cl").click()
-        expect(quantity).to_have_value("1")
+        self._assert_numeric_input_value(quantity, "1.000")
         row.get_by_role("button", name="Restar una unidad de Coca-Cola 33cl").click()
-        expect(quantity).to_have_value("0")
+        self._assert_numeric_input_value(quantity, "0.000")
         row.get_by_role("button", name="Sumar una unidad de Coca-Cola 33cl").click()
+        self._assert_numeric_input_value(quantity, "1.000")
         expect(row.get_by_label("Devolver al stock disponible")).to_be_checked()
         old_workspace = page.locator("#return-workspace").element_handle()
         self.assertIsNotNone(old_workspace)
@@ -153,11 +157,11 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         )
         expect(minus_button).to_have_attribute("data-bound", "true")
         expect(plus_button).to_have_attribute("data-bound", "true")
-        expect(swapped_quantity).to_have_value("1")
+        self._assert_numeric_input_value(swapped_quantity, "1.000")
         minus_button.click()
-        expect(swapped_quantity).to_have_value("0")
+        self._assert_numeric_input_value(swapped_quantity, "0.000")
         plus_button.click()
-        expect(swapped_quantity).to_have_value("1")
+        self._assert_numeric_input_value(swapped_quantity, "1.000")
         self.assertLessEqual(
             page.evaluate("document.documentElement.scrollWidth"),
             page.evaluate("document.documentElement.clientWidth"),
