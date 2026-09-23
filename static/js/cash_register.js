@@ -16,5 +16,9 @@ const enhanceCountPreview = (root = document) => {
     output.textContent = `${difference < 0 ? "Faltan " : difference > 0 ? "Sobran " : "Diferencia "}${new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(Math.abs(difference) / 100)}`;
   });
 };
+const cashDialog = document.getElementById("cash-operation-dialog");
+cashDialog?.addEventListener("close", () => {
+  cashDialog.querySelector("#cash-operation-panel")?.replaceChildren();
+});
 enhanceCountPreview();
 document.body.addEventListener("htmx:afterSwap", (event) => enhanceCountPreview(event.detail.target));

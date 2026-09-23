@@ -281,14 +281,31 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
         self.page.get_by_role("button", name="Guardar arqueo").click()
         expect(self.page.get_by_role("dialog")).not_to_be_visible()
+        expect(self.page.locator("#cash-operation-panel")).to_be_empty()
         self.page.get_by_role("tab", name="Resumen").click()
         expect(self.page.get_by_text("Efectivo", exact=True)).to_be_visible()
         expect(self.page.get_by_text("Tarjeta", exact=True)).to_be_visible()
         self.page.get_by_role("tab", name="Movimientos").click()
         expect(self.page.get_by_text("Cobro de venta en efectivo")).to_be_visible()
-        self.page.get_by_role("link", name="Cerrar caja").click()
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "GET" and "/close/" in response.url
+            )
+        ) as close_get:
+            self.page.get_by_role("link", name="Cerrar caja", exact=True).click()
+        self.assertEqual(close_get.value.status, 200)
+        expect(self.page.get_by_role("dialog")).to_be_visible()
+        expect(
+            self.page.get_by_role("heading", name="Cerrar caja", exact=True)
+        ).to_be_visible()
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
-        self.page.get_by_role("button", name="Continuar").click()
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/close/" in response.url
+            )
+        ) as close_prepare:
+            self.page.get_by_role("button", name="Continuar", exact=True).click()
+        self.assertEqual(close_prepare.value.status, 200)
         expect(
             self.page.get_by_role("heading", name="Confirmar cierre", exact=True)
         ).to_be_visible()

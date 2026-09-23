@@ -118,7 +118,7 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                 viewport_metrics = page.evaluate(
                     """() => {
                       const viewport = document.documentElement.clientWidth;
-                      const overflowing = [...document.querySelectorAll("*")]
+                      const metrics = [...document.querySelectorAll("*")]
                         .map((el) => {
                           const rect = el.getBoundingClientRect();
                           return {
@@ -129,21 +129,48 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                             right: rect.right,
                             width: rect.width,
                             scrollWidth: el.scrollWidth,
+                            clientWidth: el.clientWidth,
                           };
-                        })
-                        .filter((item) => item.right > viewport + 1 || item.left < -1)
-                        .slice(0, 10);
+                        });
+                      const dimensions = (selector) => {
+                        const element = document.querySelector(selector);
+                        return element ? {
+                          scrollWidth: element.scrollWidth,
+                          clientWidth: element.clientWidth,
+                        } : null;
+                      };
                       return {
                         viewport,
                         documentWidth: document.documentElement.scrollWidth,
-                        overflowing,
+                        bodyWidth: document.body.scrollWidth,
+                        rightOverflowing: metrics
+                          .filter((item) => item.right > viewport + 1)
+                          .slice(0, 20),
+                        leftOverflowing: metrics
+                          .filter((item) => item.left < -1)
+                          .slice(0, 10),
+                        surfaces: {
+                          erpWorkspace: dimensions(".erp-workspace"),
+                          siteMain: dimensions(".site-main"),
+                          contentContainer: dimensions(".content-container"),
+                          cashWorkspace: dimensions(".cash-workspace"),
+                          cashTabs: dimensions(".cash-tabs"),
+                          cashTabPanel: dimensions("#cash-tab-panel"),
+                          cashDialog: dimensions("#cash-operation-dialog"),
+                          cashOperationPanel: dimensions("#cash-operation-panel"),
+                        },
                       };
                     }"""
                 )
                 self.assertLessEqual(
                     viewport_metrics["documentWidth"],
                     viewport_metrics["viewport"],
-                    viewport_metrics["overflowing"],
+                    {
+                        "right": viewport_metrics["rightOverflowing"],
+                        "left_offcanvas": viewport_metrics["leftOverflowing"],
+                        "surfaces": viewport_metrics["surfaces"],
+                        "bodyWidth": viewport_metrics["bodyWidth"],
+                    },
                 )
 
             page.set_viewport_size({"width": 1440, "height": 900})
@@ -170,10 +197,28 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             page.get_by_label("Efectivo contado").fill("123")
             expect(page.get_by_text("Faltan 2,00 €", exact=True)).to_be_visible()
             page.get_by_role("button", name="Guardar arqueo").click()
+            expect(page.get_by_role("dialog")).not_to_be_visible()
+            expect(page.locator("#cash-operation-panel")).to_be_empty()
 
-            page.get_by_role("link", name="Cerrar caja", exact=True).click()
+            with page.expect_response(
+                lambda response: (
+                    response.request.method == "GET" and "/close/" in response.url
+                )
+            ) as close_get:
+                page.get_by_role("link", name="Cerrar caja", exact=True).click()
+            self.assertEqual(close_get.value.status, 200)
+            expect(page.get_by_role("dialog")).to_be_visible()
+            expect(
+                page.get_by_role("heading", name="Cerrar caja", exact=True)
+            ).to_be_visible()
             page.get_by_label("Efectivo contado").fill("124")
-            page.get_by_role("button", name="Continuar").click()
+            with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and "/close/" in response.url
+                )
+            ) as close_prepare:
+                page.get_by_role("button", name="Continuar", exact=True).click()
+            self.assertEqual(close_prepare.value.status, 200)
             expect(
                 page.get_by_role("heading", name="Confirmar cierre", exact=True)
             ).to_be_visible()
@@ -282,17 +327,50 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             self._login(second, user, "Cash-Conflict-123!")
 
             first.goto(detail_url)
-            first.get_by_role("link", name="Cerrar caja", exact=True).click()
+            with first.expect_response(
+                lambda response: (
+                    response.request.method == "GET" and "/close/" in response.url
+                )
+            ) as first_close_get:
+                first.get_by_role("link", name="Cerrar caja", exact=True).click()
+            self.assertEqual(first_close_get.value.status, 200)
+            expect(
+                first.get_by_role("heading", name="Cerrar caja", exact=True)
+            ).to_be_visible()
             first.get_by_label("Efectivo contado").fill("100")
-            first.get_by_role("button", name="Continuar").click()
+            with first.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and "/close/" in response.url
+                )
+            ) as first_prepare:
+                first.get_by_role("button", name="Continuar", exact=True).click()
+            self.assertEqual(first_prepare.value.status, 200)
             expect(
                 first.get_by_role("heading", name="Confirmar cierre", exact=True)
             ).to_be_visible()
 
             second.goto(detail_url)
-            second.get_by_role("link", name="Cerrar caja", exact=True).click()
+            with second.expect_response(
+                lambda response: (
+                    response.request.method == "GET" and "/close/" in response.url
+                )
+            ) as second_close_get:
+                second.get_by_role("link", name="Cerrar caja", exact=True).click()
+            self.assertEqual(second_close_get.value.status, 200)
+            expect(
+                second.get_by_role("heading", name="Cerrar caja", exact=True)
+            ).to_be_visible()
             second.get_by_label("Efectivo contado").fill("100")
-            second.get_by_role("button", name="Continuar").click()
+            with second.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and "/close/" in response.url
+                )
+            ) as second_prepare:
+                second.get_by_role("button", name="Continuar", exact=True).click()
+            self.assertEqual(second_prepare.value.status, 200)
+            expect(
+                second.get_by_role("heading", name="Confirmar cierre", exact=True)
+            ).to_be_visible()
             second.get_by_role("button", name="Cerrar caja").click()
             expect(second.get_by_text("✓ CAJA CERRADA", exact=True)).to_be_visible()
 
@@ -310,7 +388,9 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             ).to_be_visible()
             expect(
                 first.get_by_text(
-                    "Otro usuario completó la operación antes que tú.", exact=True
+                    "Otro usuario completó la operación antes que tú. "
+                    "Hemos actualizado la información.",
+                    exact=True,
                 )
             ).to_be_visible()
             expect(first.get_by_role("link", name="Ver caja")).to_be_visible()
