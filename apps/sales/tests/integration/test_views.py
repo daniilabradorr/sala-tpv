@@ -84,7 +84,12 @@ TEST_TEMPLATES = [
                             "{% for return_doc in returns %}{{ return_doc.pk }} {% endfor %}"
                         ),
                         "sales/return_detail.html": (
-                            "{{ return_doc.pk }} {% for line in lines %}{{ line.pk }} {% endfor %}"
+                            "{% include 'sales/partials/_return_workspace.html' %}"
+                        ),
+                        "sales/partials/_return_workspace.html": (
+                            "workspace {{ return_doc.pk }} {{ return_doc.total_amount }} "
+                            "{% for row in workspace_rows %}{{ row.original.product_name }} "
+                            "{{ row.returned }} {{ row.available }} {{ row.form.errors }}{% endfor %}"
                         ),
                         "sales/return_form.html": "{{ form.errors }}",
                         "sales/return_line_form.html": "{{ form.errors }}",
@@ -1214,3 +1219,62 @@ class SaleViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(return_line.restock)
+
+    def test_return_create_get_does_not_create_a_draft(self):
+        self.login_as(self.owner)
+        sale, _ = self.create_open_sale_with_line()
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+
+        response = self.client.get(
+            reverse(
+                "sales:return_create",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(SaleReturn.objects.filter(original_sale=sale).exists())
+
+    def test_inline_return_line_has_full_and_htmx_contract(self):
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+            reason="Prueba inline",
+        )
+        url = reverse(
+            "sales:return_line_inline",
+            kwargs={
+                "store_id": self.store.pk,
+                "return_pk": return_doc.pk,
+                "original_line_pk": sale_line.pk,
+            },
+        )
+
+        response = self.client.post(
+            url, {"quantity": "1.000", "restock": "on"}, HTTP_HX_REQUEST="true"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_return_workspace.html")
+        self.assertIn("HX-Request", response["Vary"])
+        line = return_doc.lines.get()
+        self.assertEqual(line.quantity, Decimal("1.000"))
+        self.assertTrue(line.restock)
+        return_doc.refresh_from_db()
+        self.assertGreater(return_doc.total_amount, Decimal("0.00"))
+
+        invalid = self.client.post(
+            url, {"quantity": "3.000", "restock": "on"}, HTTP_HX_REQUEST="true"
+        )
+        self.assertEqual(invalid.status_code, 422)
+        line.refresh_from_db()
+        self.assertEqual(line.quantity, Decimal("1.000"))
+
+        removed = self.client.post(url, {"quantity": "0.000"}, HTTP_HX_REQUEST="true")
+        self.assertEqual(removed.status_code, 200)
+        self.assertFalse(return_doc.lines.exists())

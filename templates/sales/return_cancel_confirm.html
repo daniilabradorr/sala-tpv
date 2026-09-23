@@ -1,18 +1,1 @@
-{% extends "base.html" %}
-
-{% block title %}Cancelar devolución | Netxodo{% endblock %}
-
-{% block content %}
-<section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
-
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-
-        <button type="submit">
-            Guardar
-        </button>
-    </form>
-</section>
-{% endblock %}
+{% extends "base.html" %}{% load static %}{% block title %}Cancelar devolución | Netxodo{% endblock %}{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-returns.css' %}">{% endblock %}{% block content %}<section class="returns-page return-confirm"><a class="back-link" href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">← Volver</a><form class="card" method="post" data-nx-critical-form>{% csrf_token %}<h1>Cancelar devolución</h1><p>Se descartará esta devolución en borrador. La venta original no se modificará.</p>{{ form.non_field_errors }}{% if form.pin.field.required %}<div class="form-field"><label for="{{ form.pin.id_for_label }}">PIN de seguridad</label>{{ form.pin }}{% if form.pin.errors %}<div class="field-error" role="alert">{{ form.pin.errors|striptags }}</div>{% endif %}</div>{% endif %}<div class="form-actions"><a class="button button-secondary" href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">Volver</a><button class="button destructive" type="submit" data-processing-label="Procesando…">Cancelar devolución</button></div></form></section>{% endblock %}
