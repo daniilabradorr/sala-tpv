@@ -954,6 +954,7 @@ class SaleReturnWorkspaceLineForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.original_line = original_line
         self.available_quantity = available_quantity
+        self.fields["quantity"].widget.attrs["max"] = format(available_quantity, "f")
 
     def clean_quantity(self):
         quantity = self.cleaned_data["quantity"]

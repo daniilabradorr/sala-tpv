@@ -129,6 +129,19 @@ class BrowserReturnsTests(StaticLiveServerTestCase):
         expect(page.locator(".return-total strong")).to_have_text(
             re.compile(r"2[,.]42 €")
         )
+        # The workspace was replaced by HTMX: exercise controls from the new DOM.
+        swapped_row = page.locator(".return-line").filter(has_text="Coca-Cola 33cl")
+        swapped_quantity = swapped_row.get_by_label(
+            "Cantidad a devolver de Coca-Cola 33cl"
+        )
+        swapped_row.get_by_role(
+            "button", name="Restar una unidad de Coca-Cola 33cl"
+        ).click()
+        expect(swapped_quantity).to_have_value("0")
+        swapped_row.get_by_role(
+            "button", name="Sumar una unidad de Coca-Cola 33cl"
+        ).click()
+        expect(swapped_quantity).to_have_value("1")
         self.assertLessEqual(
             page.evaluate("document.documentElement.scrollWidth"),
             page.evaluate("document.documentElement.clientWidth"),

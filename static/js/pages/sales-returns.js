@@ -4,9 +4,16 @@ function bindQuantity(root = document) {
     button.dataset.bound = "true";
     button.addEventListener("click", () => {
       const input = button.closest(".quantity-control").querySelector("input");
-      const step = Number(button.dataset.quantityStep);
-      const maximum = Number(button.closest(".return-line").querySelector('[data-label="Disponible"] strong')?.textContent || 0);
-      input.value = Math.max(0, Math.min(maximum, Number(input.value || 0) + step));
+      const delta = Number.parseFloat(button.dataset.quantityStep);
+      const current = Number.isFinite(input.valueAsNumber)
+        ? input.valueAsNumber
+        : 0;
+      const maximum = Number.parseFloat(input.max);
+      if (!Number.isFinite(delta) || !Number.isFinite(maximum)) return;
+      input.valueAsNumber = Math.max(
+        0,
+        Math.min(maximum, current + delta),
+      );
       input.focus();
     });
   });

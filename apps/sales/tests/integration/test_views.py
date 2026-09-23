@@ -1335,6 +1335,8 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(len(restock_ids), len(set(restock_ids)))
         self.assertIn(str(first_line.pk), quantity_ids[0])
         self.assertIn(str(second_line.pk), quantity_ids[1])
+        self.assertEqual(rows[0]["form"]["quantity"].field.widget.attrs["max"], "2.000")
+        self.assertEqual(rows[1]["form"]["quantity"].field.widget.attrs["max"], "2.000")
 
         response = self.client.post(
             reverse(
