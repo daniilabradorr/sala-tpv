@@ -140,7 +140,9 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 billing_key = page.locator(
                     '[name="billing_idempotency_key"]'
                 ).input_value()
+                dialog.get_by_role("radio", name="Tarjeta").check()
                 external_reference = page.locator('[name="external_reference"]')
+                expect(external_reference).to_be_visible()
                 external_reference.evaluate(
                     "element => element.removeAttribute('maxlength')"
                 )
@@ -152,10 +154,12 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                         and "/checkout/" in response.url
                     )
                 ) as response_info:
-                    page.get_by_role("button", name="Confirmar cobro").click()
+                    page.get_by_role(
+                        "button", name=re.compile(r"^CONFIRMAR COBRO", re.I)
+                    ).click()
                 self.assertEqual(response_info.value.status, 422)
                 expect(dialog).to_be_visible()
-                expect(dialog.locator(".errorlist:visible")).not_to_have_count(0)
+                expect(dialog.locator(".field-error:visible")).not_to_have_count(0)
                 expect(dialog.locator('[name="external_reference"]')).to_have_value(
                     invalid_reference
                 )
@@ -175,7 +179,9 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 self.assertTrue(snapshots["stayedOpen"])
                 self.assertFalse(snapshots["after"]["processing"])
                 expect(
-                    dialog.get_by_role("button", name="Confirmar cobro")
+                    dialog.get_by_role(
+                        "button", name=re.compile(r"^CONFIRMAR COBRO", re.I)
+                    )
                 ).to_be_enabled()
                 self.assertFalse(page.locator("#nx-feedback").is_visible())
                 self.assertTrue(
