@@ -97,6 +97,16 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         expect(dialog.get_by_role("heading", name="COBRAR")).to_be_visible()
         return dialog
 
+    def _pending_amount(self, dialog):
+        raw_amount = dialog.locator("[data-checkout]").get_attribute("data-pending")
+        self.assertIsNotNone(raw_amount)
+        return Decimal(raw_amount.replace(",", "."))
+
+    @staticmethod
+    def _money(value):
+        amount = value.quantize(Decimal("0.01"))
+        return f"{amount:.2f}".replace(".", ",") + " €"
+
     def test_card_checkout_completes_with_dominant_new_sale_action(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
@@ -122,10 +132,16 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
+            pending = self._pending_amount(dialog)
+            received = Decimal("20.00")
             dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
-            dialog.get_by_label("Entregado por el cliente").fill("20")
-            expect(dialog.locator("[data-cash-change]")).to_have_text("9,10 €")
+            cash_received = dialog.get_by_label("Entregado por el cliente")
+            cash_received.fill(f"{received:.2f}")
+            expect(dialog.locator("[data-cash-change]")).to_have_text(
+                self._money(received - pending)
+            )
             dialog.get_by_role("button", name="EXACTO").click()
+            expect(cash_received).to_have_value(f"{pending:.2f}")
             expect(dialog.locator("[data-cash-change]")).to_have_text("0,00 €")
             dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
             expect(
@@ -142,15 +158,20 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
+            pending = self._pending_amount(dialog)
+            first_amount = Decimal("5.00")
+            second_amount = pending - first_amount
             dialog.get_by_role("radio", name="Pago dividido").check()
             parts = dialog.locator("[data-split-part]:visible")
             expect(parts).to_have_count(2)
             parts.nth(0).get_by_label("Método").select_option(label="Efectivo")
-            parts.nth(0).get_by_label("Importe").fill("5.00")
+            parts.nth(0).get_by_label("Importe").fill(f"{first_amount:.2f}")
             parts.nth(0).get_by_label("Entregado (efectivo)").fill("10.00")
             parts.nth(1).get_by_label("Método").select_option(label="Tarjeta")
-            parts.nth(1).get_by_label("Importe").fill("5.90")
-            expect(dialog.locator("[data-split-assigned]")).to_have_text("10,90 €")
+            parts.nth(1).get_by_label("Importe").fill(f"{second_amount:.2f}")
+            expect(dialog.locator("[data-split-assigned]")).to_have_text(
+                self._money(pending)
+            )
             expect(dialog.locator("[data-split-remaining]")).to_have_text("0,00 €")
             dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
             expect(
