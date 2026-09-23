@@ -1568,9 +1568,15 @@ def _return_workspace_context(
     """Construye el workspace exclusivamente desde lecturas autoritativas."""
     business = _get_business(request)
     return_doc = get_sale_return_detail(business=business, pk=return_doc.pk)
-    draft_by_original = {line.original_line_id: line for line in return_doc.lines.all()}
+    return_lines = list(return_doc.lines.all())
+    draft_by_original = {line.original_line_id: line for line in return_lines}
     rows = []
-    for original in return_doc.original_sale.lines.select_related("product").all():
+    original_lines = (
+        return_doc.original_sale.lines.select_related("product").all()
+        if return_doc.is_editable
+        else []
+    )
+    for original in original_lines:
         returned = get_completed_returned_quantity_for_line(
             business=business, original_line=original
         )
@@ -1584,6 +1590,7 @@ def _return_workspace_context(
             else SaleReturnWorkspaceLineForm(
                 original_line=original,
                 available_quantity=available,
+                auto_id=f"id_return_{original.pk}_%s",
                 initial={
                     "quantity": draft_line.quantity if draft_line else 0,
                     "restock": draft_line.restock if draft_line else affects_stock,
@@ -1620,6 +1627,7 @@ def _return_workspace_context(
         "lines": return_doc.lines.all(),
         "sale": return_doc.original_sale,
         "workspace_rows": rows,
+        "historical_lines": return_lines if not return_doc.is_editable else [],
         "is_editable": return_doc.is_editable,
         "is_completed": return_doc.is_completed,
         "is_cancelled": return_doc.is_cancelled,
@@ -1799,6 +1807,7 @@ class SaleReturnWorkspaceLineView(
             request.POST,
             original_line=original,
             available_quantity=available,
+            auto_id=f"id_return_{original.pk}_%s",
         )
         existing = return_doc.lines.filter(original_line=original).first()
         if form.is_valid():

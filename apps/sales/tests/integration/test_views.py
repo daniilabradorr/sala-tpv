@@ -1,6 +1,7 @@
 """Tests de integración HTTP para las views del módulo sales."""
 
 import json
+import uuid
 
 from decimal import Decimal
 from unittest.mock import patch
@@ -13,6 +14,12 @@ from django.utils import timezone
 from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Category
 from apps.inventory.models import StockMovement
+from apps.payments.models import (
+    Payment,
+    PaymentMethod,
+    PaymentStatusChoices,
+    PaymentTypeChoices,
+)
 from apps.sales.models import Sale, SaleReturn, SaleStatusChoices
 from apps.sales.services import add_sale_line, complete_sale, open_sale
 from apps.sales.tests.factories import (
@@ -88,8 +95,14 @@ TEST_TEMPLATES = [
                         ),
                         "sales/partials/_return_workspace.html": (
                             "workspace {{ return_doc.pk }} {{ return_doc.total_amount }} "
-                            "{% for row in workspace_rows %}{{ row.original.product_name }} "
-                            "{{ row.returned }} {{ row.available }} {{ row.form.errors }}{% endfor %}"
+                            "{% for row in workspace_rows %}<label for='{{ row.form.quantity.id_for_label }}'>"
+                            "{{ row.original.product_name }}</label>{{ row.form.quantity }} "
+                            "{{ row.returned }} {{ row.available }} {{ row.form.non_field_errors }} "
+                            "{{ row.form.quantity.errors }} {{ row.form.restock.errors }}{% endfor %}"
+                            "{% for line in historical_lines %}{{ line.original_line.product_name }} "
+                            "{{ line.quantity }} {{ line.amount }} {{ line.restock }}{% endfor %}"
+                            "{% for payment in refund_summary.payments %}"
+                            "{{ payment.method.name }} {{ payment.amount }}{% endfor %}"
                         ),
                         "sales/return_form.html": "{{ form.errors }}",
                         "sales/return_line_form.html": "{{ form.errors }}",
@@ -1278,3 +1291,199 @@ class SaleViewsIntegrationTests(TestCase):
         removed = self.client.post(url, {"quantity": "0.000"}, HTTP_HX_REQUEST="true")
         self.assertEqual(removed.status_code, 200)
         self.assertFalse(return_doc.lines.exists())
+
+    def test_inline_rows_have_unique_ids_and_only_targeted_row_changes(self):
+        self.login_as(self.owner)
+        second_product = create_sales_product(
+            business=self.business,
+            tax=self.tax,
+            name="Producto segundo",
+            base_price=Decimal("4.00"),
+        )
+        create_sales_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=second_product,
+            current_stock=Decimal("10.000"),
+        )
+        sale, first_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        second_line = add_sale_line(
+            business=self.business,
+            sale=sale,
+            product=second_product,
+            quantity=Decimal("2.000"),
+            user=self.owner,
+        )
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+        )
+
+        detail = self.client.get(
+            reverse(
+                "sales:return_detail",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            )
+        )
+        rows = detail.context["workspace_rows"]
+        quantity_ids = [row["form"]["quantity"].id_for_label for row in rows]
+        restock_ids = [row["form"]["restock"].id_for_label for row in rows]
+        self.assertEqual(len(quantity_ids), len(set(quantity_ids)))
+        self.assertEqual(len(restock_ids), len(set(restock_ids)))
+        self.assertIn(str(first_line.pk), quantity_ids[0])
+        self.assertIn(str(second_line.pk), quantity_ids[1])
+
+        response = self.client.post(
+            reverse(
+                "sales:return_line_inline",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "return_pk": return_doc.pk,
+                    "original_line_pk": first_line.pk,
+                },
+            ),
+            {"quantity": "1.000", "restock": "on"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales:return_detail.html")
+        self.assertEqual(return_doc.lines.count(), 1)
+        self.assertEqual(return_doc.lines.get().original_line, first_line)
+
+    @patch("apps.sales.views.add_sale_return_line")
+    def test_inline_service_error_is_visible_and_preserves_value(self, mocked_add):
+        mocked_add.side_effect = ValidationError("Conflicto concurrente visible.")
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line(quantity=Decimal("2.000"))
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+        )
+        response = self.client.post(
+            reverse(
+                "sales:return_line_inline",
+                kwargs={
+                    "store_id": self.store.pk,
+                    "return_pk": return_doc.pk,
+                    "original_line_pk": sale_line.pk,
+                },
+            ),
+            {"quantity": "1.500", "restock": "on"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertTemplateUsed(response, "sales/partials/_return_workspace.html")
+        self.assertContains(response, "Conflicto concurrente visible.", status_code=422)
+        row = response.context["workspace_rows"][0]
+        self.assertEqual(row["form"]["quantity"].value(), "1.500")
+        self.assertFalse(return_doc.lines.exists())
+
+    def test_completed_and_cancelled_details_only_expose_their_own_lines(self):
+        self.login_as(self.owner)
+        other_products = []
+        for index in range(2):
+            product = create_sales_product(
+                business=self.business,
+                tax=self.tax,
+                name=f"No devuelto {index}",
+                base_price=Decimal("3.00"),
+            )
+            create_sales_inventory_item(
+                business=self.business,
+                store=self.store,
+                product=product,
+                current_stock=Decimal("10.000"),
+            )
+            other_products.append(product)
+        sale, returned_line = self.create_open_sale_with_line()
+        for product in other_products:
+            add_sale_line(
+                business=self.business,
+                sale=sale,
+                product=product,
+                quantity=Decimal("1.000"),
+                user=self.owner,
+            )
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+
+        for status in ("completed", "cancelled"):
+            return_doc = create_sale_return(
+                business=self.business,
+                store=self.store,
+                original_sale=sale,
+                created_by=self.owner,
+                status=status,
+            )
+            own_line = create_sale_return_line(
+                business=self.business,
+                return_doc=return_doc,
+                original_line=returned_line,
+                quantity=Decimal("1.000"),
+                amount=Decimal("12.10"),
+                restock=status == "completed",
+            )
+            response = self.client.get(
+                reverse(
+                    "sales:return_detail",
+                    kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+                )
+            )
+            self.assertEqual(response.context["workspace_rows"], [])
+            self.assertEqual(response.context["historical_lines"], [own_line])
+            self.assertNotContains(response, "No devuelto")
+
+    def test_completed_detail_exposes_historical_refund_payments(self):
+        self.login_as(self.owner)
+        sale, sale_line = self.create_open_sale_with_line()
+        complete_sale(business=self.business, sale=sale, closed_by=self.owner)
+        return_doc = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=sale,
+            created_by=self.owner,
+            status="completed",
+        )
+        create_sale_return_line(
+            business=self.business,
+            return_doc=return_doc,
+            original_line=sale_line,
+            quantity=Decimal("1.000"),
+        )
+        method = PaymentMethod.objects.create(
+            business=self.business,
+            name="Efectivo histórico",
+            code="cash",
+            is_active=True,
+            allows_refund=True,
+        )
+        register = self.create_cash_register()
+        session = self.create_cash_session(register=register)
+        payment = Payment.objects.create(
+            business=self.business,
+            store=self.store,
+            sale=sale,
+            sale_return=return_doc,
+            method=method,
+            cash_session=session,
+            payment_type=PaymentTypeChoices.REFUND,
+            amount=Decimal("12.10"),
+            status=PaymentStatusChoices.COMPLETED,
+            processed_by=self.owner,
+            idempotency_key=uuid.uuid4(),
+        )
+        response = self.client.get(
+            reverse(
+                "sales:return_detail",
+                kwargs={"store_id": self.store.pk, "return_pk": return_doc.pk},
+            )
+        )
+        self.assertContains(response, "Efectivo histórico")
+        self.assertContains(response, "12.10")
+        self.assertEqual(
+            list(response.context["refund_summary"]["payments"]), [payment]
+        )
