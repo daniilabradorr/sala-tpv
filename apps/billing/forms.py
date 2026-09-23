@@ -150,6 +150,11 @@ class SaleReturnRectificationForm(forms.Form):
             store=sale.store,
             cash_register=sale.cash_register,
         )
+        series_ids = list(
+            self.fields["series"].queryset.values_list("pk", flat=True)[:2]
+        )
+        if len(series_ids) == 1:
+            self.initial.setdefault("series", series_ids[0])
         if candidate.document_type == BillingDocumentTypeChoices.F2:
             substitutions = list(
                 candidate.incoming_relations.filter(
@@ -174,6 +179,13 @@ class SaleReturnRectificationForm(forms.Form):
                     store=sale.store,
                     cash_register=sale.cash_register,
                 )
+                companion_ids = list(
+                    self.fields["companion_f3_series"].queryset.values_list(
+                        "pk", flat=True
+                    )[:2]
+                )
+                if len(companion_ids) == 1:
+                    self.initial.setdefault("companion_f3_series", companion_ids[0])
 
     def clean(self):
         cleaned_data = super().clean()

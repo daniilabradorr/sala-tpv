@@ -1,26 +1,24 @@
-{% extends "base.html" %}
-
+{% extends "base.html" %}{% load static %}
 {% block title %}Devoluciones | Netxodo{% endblock %}
-
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/sales-returns.css' %}">{% endblock %}
 {% block content %}
-<section class="card">
-    <h1>{{ title|default:"Devoluciones" }}</h1>
-
-    <form method="get">
-        {{ form.as_p }}
-        <button type="submit">Filtrar</button>
-    </form>
-
-    <section>
-        {% for return_doc in returns %}
-            <p>
-                <a href="{% url 'sales:return_detail' store_id=store.pk return_pk=return_doc.pk %}">
-                    Devoluci&oacute;n {{ return_doc.pk }} - {{ return_doc.total_amount }} EUR
-                </a>
-            </p>
-        {% empty %}
-            <p>No hay devoluciones.</p>
-        {% endfor %}
-    </section>
+<section class="returns-page">
+  <header class="returns-header"><div><p class="returns-eyebrow">Ventas</p><h1>Devoluciones</h1><p>Consulta borradores y operaciones históricas.</p></div></header>
+  <form class="return-filters card" method="get">
+    <div class="filter-search"><label for="{{ form.query.id_for_label }}">Buscar</label>{{ form.query }}</div>
+    {% for field in form %}{% if field.name != 'query' %}<div><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<span class="field-error" role="alert">{{ field.errors|striptags }}</span>{% endif %}</div>{% endif %}{% endfor %}
+    <div class="filter-actions"><button class="button" type="submit">Aplicar filtros</button><a class="button button-secondary" href="{% url 'sales:return_list' store_id=store.pk %}">Limpiar filtros</a></div>
+  </form>
+  {% if returns %}
+    <div class="returns-table-wrap">
+      <table class="returns-table">
+        <thead><tr><th scope="col">#</th><th scope="col">Venta</th><th scope="col">Fecha</th><th scope="col">Cliente</th><th scope="col">Usuario</th><th scope="col">Estado</th><th scope="col">Total</th></tr></thead>
+        <tbody>{% for item in returns %}<tr>
+          <td data-label="#"><a class="return-row-link" href="{% url 'sales:return_detail' store_id=store.pk return_pk=item.pk %}" aria-label="Ver devolución #{{ item.pk }}">{{ item.pk }}</a></td>
+          <td data-label="Venta">#{{ item.original_sale_id }}</td><td data-label="Fecha"><time>{{ item.created_at|date:"d/m/Y" }}</time></td><td data-label="Cliente">{{ item.original_sale.customer|default:"Mostrador" }}</td><td data-label="Usuario">{{ item.created_by }}</td><td data-label="Estado"><span class="badge status-{{ item.status }}">{{ item.get_status_display }}</span></td><td data-label="Total"><strong>{{ item.total_amount }} €</strong></td>
+        </tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  {% else %}<div class="empty-state card">{% if request.GET %}<h2>No hay resultados con estos filtros.</h2><a class="button button-secondary" href="{% url 'sales:return_list' store_id=store.pk %}">Limpiar filtros</a>{% else %}<h2>No hay devoluciones todavía.</h2><p>Las devoluciones se crean desde una venta completada.</p>{% endif %}</div>{% endif %}
 </section>
 {% endblock %}

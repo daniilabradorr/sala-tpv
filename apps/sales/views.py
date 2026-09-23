@@ -34,7 +34,7 @@ from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import get_cash_session_detail
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
-from apps.payments.selectors import get_sale_payments
+from apps.payments.selectors import get_sale_payments, get_sale_return_refund_summary
 from apps.sales.forms import (
     CheckoutForm,
     CheckoutPaymentFormSet,
@@ -49,6 +49,7 @@ from apps.sales.forms import (
     SaleReturnCreateForm,
     SaleReturnFilterForm,
     SaleReturnLineCreateForm,
+    SaleReturnWorkspaceLineForm,
     SaleReturnLineUpdateForm,
     SaleReturnCompleteForm,
 )
@@ -60,6 +61,7 @@ from apps.sales.checkout import (
 )
 from apps.sales.selectors import (
     get_sale_open_cash_initial,
+    get_completed_returned_quantity_for_line,
     get_returnable_sale_lines,
     get_sale_detail,
     get_sale_line_detail,
@@ -1560,55 +1562,112 @@ class SaleReturnListView(
 # ==========================================================
 
 
+def _return_workspace_context(
+    *, request, return_doc, store, line_form=None, error_line_id=None
+):
+    """Construye el workspace exclusivamente desde lecturas autoritativas."""
+    business = _get_business(request)
+    return_doc = get_sale_return_detail(business=business, pk=return_doc.pk)
+    return_lines = list(return_doc.lines.all())
+    draft_by_original = {line.original_line_id: line for line in return_lines}
+    rows = []
+    original_lines = (
+        return_doc.original_sale.lines.select_related("product").all()
+        if return_doc.is_editable
+        else []
+    )
+    for original in original_lines:
+        returned = get_completed_returned_quantity_for_line(
+            business=business, original_line=original
+        )
+        available = max(original.quantity - returned, 0)
+        draft_line = draft_by_original.get(original.pk)
+        product = original.product
+        affects_stock = bool(product and not product.is_service and product.track_stock)
+        form = (
+            line_form
+            if error_line_id == original.pk
+            else SaleReturnWorkspaceLineForm(
+                original_line=original,
+                available_quantity=available,
+                auto_id=f"id_return_{original.pk}_%s",
+                initial={
+                    "quantity": draft_line.quantity if draft_line else 0,
+                    "restock": draft_line.restock if draft_line else affects_stock,
+                },
+            )
+        )
+        rows.append(
+            {
+                "original": original,
+                "returned": returned,
+                "available": available,
+                "draft_line": draft_line,
+                "affects_stock": affects_stock,
+                "form": form,
+            }
+        )
+    rectification = (
+        billing_documents_for_sale_return(business=business, sale_return=return_doc)
+        .filter(
+            status=BillingDocumentStatusChoices.ISSUED,
+            document_type__in=[
+                BillingDocumentTypeChoices.R1,
+                BillingDocumentTypeChoices.R2,
+                BillingDocumentTypeChoices.R3,
+                BillingDocumentTypeChoices.R4,
+                BillingDocumentTypeChoices.R5,
+            ],
+        )
+        .first()
+    )
+    return {
+        "store": store,
+        "return_doc": return_doc,
+        "lines": return_doc.lines.all(),
+        "sale": return_doc.original_sale,
+        "workspace_rows": rows,
+        "historical_lines": return_lines if not return_doc.is_editable else [],
+        "is_editable": return_doc.is_editable,
+        "is_completed": return_doc.is_completed,
+        "is_cancelled": return_doc.is_cancelled,
+        "complete_form": SaleReturnCompleteForm(
+            return_doc=return_doc, user=request.user
+        ),
+        "rectification": rectification,
+        "show_rectification_action": return_doc.is_completed and rectification is None,
+        "refund_summary": get_sale_return_refund_summary(
+            business=business, sale_return=return_doc
+        ),
+    }
+
+
+def _render_return_workspace(request, context, *, status=200):
+    template = (
+        "sales/partials/_return_workspace.html"
+        if request.headers.get("HX-Request") == "true"
+        else "sales/return_detail.html"
+    )
+    response = render(request, template, context, status=status)
+    patch_vary_headers(response, ("HX-Request",))
+    return response
+
+
 class SaleReturnDetailView(
     SaleReturnObjectMixin,
     StoreAccessRequiredMixin,
     BusinessRequiredMixin,
     View,
 ):
-    """Muestra una devolución y sus líneas."""
-
-    template_name = "sales/return_detail.html"
+    """Workspace editable o detalle histórico de una devolución."""
 
     def get(self, request, store_id, return_pk):
         return_doc = self.get_sale_return()
-        has_rectification = (
-            billing_documents_for_sale_return(
-                business=_get_business(request), sale_return=return_doc
-            )
-            .filter(
-                status=BillingDocumentStatusChoices.ISSUED,
-                document_type__in=[
-                    BillingDocumentTypeChoices.R1,
-                    BillingDocumentTypeChoices.R2,
-                    BillingDocumentTypeChoices.R3,
-                    BillingDocumentTypeChoices.R4,
-                    BillingDocumentTypeChoices.R5,
-                ],
-            )
-            .exists()
-        )
-        complete_form = SaleReturnCompleteForm(
-            return_doc=return_doc,
-            user=request.user,
-        )
-
-        return render(
+        return _render_return_workspace(
             request,
-            self.template_name,
-            {
-                "store": self.store,
-                "return_doc": return_doc,
-                "lines": return_doc.lines.all(),
-                "sale": return_doc.original_sale,
-                "is_editable": return_doc.is_editable,
-                "is_completed": return_doc.is_completed,
-                "is_cancelled": return_doc.is_cancelled,
-                "complete_form": complete_form,
-                "show_rectification_action": (
-                    return_doc.is_completed and not has_rectification
-                ),
-            },
+            _return_workspace_context(
+                request=request, return_doc=return_doc, store=self.store
+            ),
         )
 
 
@@ -1633,6 +1692,10 @@ class SaleReturnCreateView(
 
         if not sale.is_completed:
             raise PermissionDenied("Solo pueden devolverse ventas completadas.")
+        if not get_returnable_sale_lines(business=business, sale=sale).exists():
+            raise PermissionDenied(
+                "Esta venta ya no tiene productos disponibles para devolver."
+            )
 
         form = SaleReturnCreateForm(
             business=business,
@@ -1656,6 +1719,10 @@ class SaleReturnCreateView(
 
         if not sale.is_completed:
             raise PermissionDenied("Solo pueden devolverse ventas completadas.")
+        if not get_returnable_sale_lines(business=business, sale=sale).exists():
+            raise PermissionDenied(
+                "Esta venta ya no tiene productos disponibles para devolver."
+            )
 
         form = SaleReturnCreateForm(
             request.POST,
@@ -1713,6 +1780,76 @@ class SaleReturnCreateView(
 # ==========================================================
 # Añadir línea de devolución
 # ==========================================================
+
+
+class SaleReturnWorkspaceLineView(
+    SaleReturnObjectMixin,
+    CanSellInStoreMixin,
+    BusinessRequiredMixin,
+    View,
+):
+    """Crea, actualiza o retira una selección sin abandonar el workspace."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, store_id, return_pk, original_line_pk):
+        business, store = self.get_business_and_store()
+        return_doc = self.get_sale_return()
+        _ensure_return_editable(return_doc)
+        original = get_sale_line_detail(business=business, pk=original_line_pk)
+        if original.sale_id != return_doc.original_sale_id:
+            raise Http404
+        returned = get_completed_returned_quantity_for_line(
+            business=business, original_line=original
+        )
+        available = max(original.quantity - returned, 0)
+        form = SaleReturnWorkspaceLineForm(
+            request.POST,
+            original_line=original,
+            available_quantity=available,
+            auto_id=f"id_return_{original.pk}_%s",
+        )
+        existing = return_doc.lines.filter(original_line=original).first()
+        if form.is_valid():
+            quantity = form.cleaned_data["quantity"]
+            try:
+                if quantity == 0 and existing:
+                    delete_sale_return_line(
+                        business=business,
+                        return_doc=return_doc,
+                        line=existing,
+                        user=request.user,
+                    )
+                elif quantity > 0 and existing:
+                    update_sale_return_line(
+                        business=business,
+                        return_doc=return_doc,
+                        line=existing,
+                        quantity=quantity,
+                        restock=form.cleaned_data["restock"],
+                        user=request.user,
+                    )
+                elif quantity > 0:
+                    add_sale_return_line(
+                        business=business,
+                        return_doc=return_doc,
+                        original_line=original,
+                        quantity=quantity,
+                        restock=form.cleaned_data["restock"],
+                        user=request.user,
+                    )
+            except ValidationError as error:
+                _add_service_errors_to_form(form, error)
+        context = _return_workspace_context(
+            request=request,
+            return_doc=return_doc,
+            store=store,
+            line_form=form if form.errors else None,
+            error_line_id=original.pk if form.errors else None,
+        )
+        return _render_return_workspace(
+            request, context, status=422 if form.errors else 200
+        )
 
 
 class SaleReturnLineAddView(

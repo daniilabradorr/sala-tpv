@@ -937,6 +937,36 @@ class SaleReturnCreateForm(forms.Form):
 # ==========================================================
 
 
+class SaleReturnWorkspaceLineForm(forms.Form):
+    """Entrada inline; los services conservan la autoridad del dominio."""
+
+    quantity = forms.DecimalField(
+        label="Cantidad a devolver",
+        max_digits=14,
+        decimal_places=3,
+        min_value=Decimal("0.000"),
+    )
+    restock = forms.BooleanField(
+        label="Devolver al stock disponible", required=False, initial=True
+    )
+
+    def __init__(self, *args, original_line, available_quantity, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.original_line = original_line
+        self.available_quantity = available_quantity
+        self.fields["quantity"].widget.attrs["data-available-max"] = format(
+            available_quantity, "f"
+        )
+
+    def clean_quantity(self):
+        quantity = self.cleaned_data["quantity"]
+        if quantity > self.available_quantity:
+            raise ValidationError(
+                f"La cantidad supera lo que todavía puede devolverse ({self.available_quantity})."
+            )
+        return quantity
+
+
 class SaleReturnLineCreateForm(forms.Form):
     """Formulario para añadir una línea devuelta."""
 

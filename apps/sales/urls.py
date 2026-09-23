@@ -80,6 +80,11 @@ urlpatterns = [
         name="return_detail",
     ),
     path(
+        "stores/<int:store_id>/returns/<int:return_pk>/lines/<int:original_line_pk>/inline/",
+        views.SaleReturnWorkspaceLineView.as_view(),
+        name="return_line_inline",
+    ),
+    path(
         "stores/<int:store_id>/returns/<int:return_pk>/lines/add/",
         views.SaleReturnLineAddView.as_view(),
         name="return_line_add",
