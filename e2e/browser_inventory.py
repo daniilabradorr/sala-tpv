@@ -1,12 +1,14 @@
 """Real Chromium coverage for the FE-14 inventory workspace."""
 
 from decimal import Decimal
+import re
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
 from apps.inventory.models import StockAdjustment, StockMovement
+from apps.inventory.services import increase_stock
 from apps.inventory.tests.factories import (
     create_business,
     create_inventory_item,
@@ -67,16 +69,23 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             page.get_by_label("Buscar producto o SKU").fill("AG-001")
             page.get_by_role("button", name="Filtrar").click()
             expect(page.get_by_text("Agua 50cl")).to_be_visible()
-            page.get_by_label("Ámbito de tienda").select_option("all")
+            with page.expect_response(
+                lambda response: (
+                    "/inventory/" in response.url and "store=all" in response.url
+                )
+            ) as response_info:
+                page.get_by_label("Ámbito de tienda").select_option("all")
+            self.assertEqual(response_info.value.status, 200)
+            expect(page).to_have_url(re.compile(r"store=all"))
             expect(page.get_by_role("columnheader", name="Tienda")).to_be_visible()
-            expect(page.get_by_text("Centro")).to_be_visible()
-            expect(page.get_by_text("Norte")).to_be_visible()
+            expect(page.get_by_role("cell", name="Centro")).to_be_visible()
+            expect(page.get_by_role("cell", name="Norte")).to_be_visible()
             page.go_back()
             expect(page.get_by_label("Ámbito de tienda")).to_have_value(str(store.pk))
             page.go_forward()
             expect(page.get_by_label("Ámbito de tienda")).to_have_value("all")
             expect(page.get_by_label("Buscar producto o SKU")).to_have_value("AG-001")
-            page.get_by_text("Agua 50cl").click()
+            page.get_by_text("Agua 50cl").first.click()
             page.get_by_role("tab", name="Movimientos").click()
             page.get_by_role("tab", name="Ajustes").click()
             page.get_by_role("tab", name="Resumen").click()
@@ -108,7 +117,19 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
                     expect(filters).to_be_visible()
                     filters.click()
                     expect(page.get_by_role("dialog")).to_be_visible()
-                    page.get_by_role("button", name="Cerrar filtros").click()
+                    page.get_by_label("Buscar producto o SKU").fill("NO-RESULT")
+                    with page.expect_response(
+                        lambda response: (
+                            "/inventory/" in response.url
+                            and "search=NO-RESULT" in response.url
+                        )
+                    ):
+                        page.get_by_role("button", name="Filtrar").click()
+                    expect(page).to_have_url(re.compile(r"search=NO-RESULT"))
+                    expect(
+                        page.get_by_text("No hay resultados con estos filtros.")
+                    ).to_be_visible()
+                    expect(page.get_by_role("dialog")).not_to_be_visible()
                 self.assertLessEqual(
                     page.evaluate("document.documentElement.scrollWidth"),
                     page.evaluate("document.documentElement.clientWidth"),
@@ -158,3 +179,69 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
         movement = StockMovement.objects.get(inventory_item=item)
         self.assertEqual(item.current_stock, Decimal("48"))
         self.assertEqual(movement.movement_type, StockMovement.TYPE_INITIAL)
+
+    def test_stale_stock_full_page_conflict(self):
+        business = create_business("Conflict Browser", "conflict-browser")
+        store = create_inventory_store(
+            business=business, name="Centro", code="CONFLICT"
+        )
+        owner = create_inventory_owner(business=business, password=self.password)
+        product = create_inventory_product(business=business, name="Producto conflicto")
+        item = create_inventory_item(
+            business=business,
+            store=store,
+            product=product,
+            current_stock=Decimal("10"),
+        )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login(page, owner)
+            page.goto(f"{self.live_server_url}/inventory/items/{item.pk}/adjust/")
+            page.get_by_label("Stock contado físicamente").fill("12")
+            page.get_by_role("button", name="Preparar ajuste").click()
+            expect(page.get_by_text("Confirmar modificará el stock")).to_be_visible()
+            review_url = page.url
+            browser.close()
+
+        adjustment = StockAdjustment.objects.get(business=business)
+        increase_stock(
+            inventory_item=item,
+            quantity=Decimal("2"),
+            movement_type=StockMovement.TYPE_ADJUSTMENT_IN,
+            user=owner,
+            reason="Operación concurrente real",
+        )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login(page, owner)
+            page.goto(review_url)
+            page.get_by_label(
+                "Confirmo que quiero aplicar este ajuste de stock"
+            ).check()
+            with page.expect_response(
+                lambda response: response.status == 409 and "/confirm/" in response.url
+            ):
+                page.get_by_role("button", name="Confirmar ajuste").click()
+            expect(
+                page.get_by_role(
+                    "heading",
+                    name="El stock ha cambiado desde que preparaste este ajuste.",
+                )
+            ).to_be_visible()
+            expect(page.get_by_text("preparado con 10,000")).to_be_visible()
+            expect(page.get_by_text("stock actual 12,000")).to_be_visible()
+            expect(page.locator("[data-app-shell]")).to_be_visible()
+            browser.close()
+
+        item.refresh_from_db()
+        adjustment.refresh_from_db()
+        self.assertEqual(item.current_stock, Decimal("12"))
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertEqual(
+            StockMovement.objects.filter(inventory_item=item).count(),
+            1,
+        )
