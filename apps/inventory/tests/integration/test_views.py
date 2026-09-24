@@ -1061,3 +1061,24 @@ class InventoryStoreScopingIntegrationTests(TestCase):
         self.assertTemplateUsed(full, "inventory/item_detail.html")
         self.assertTemplateUsed(partial, "inventory/partials/_item_tab.html")
         self.assertIn("HX-Request", partial.headers["Vary"])
+
+    def test_all_stores_hx_response_renders_store_column_and_both_stores(self):
+        self.item_a1.product.sku = "AG-001"
+        self.item_a1.product.save(update_fields=["sku", "updated_at"])
+        self.item_a2.product.sku = "AG-001"
+        self.item_a2.product.save(update_fields=["sku", "updated_at"])
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("inventory:dashboard"),
+            {"store": "all", "tab": "stock", "search": "AG-001"},
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "inventory/partials/_workspace.html")
+        self.assertIs(response.context["is_all_stores"], True)
+        self.assertContains(response, '<th scope="col">Tienda</th>', html=True)
+        self.assertContains(response, self.store_a1.name)
+        self.assertContains(response, self.store_a2.name)
+        self.assertIn("HX-Request", response.headers["Vary"])

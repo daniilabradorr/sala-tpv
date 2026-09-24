@@ -69,22 +69,59 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             page.get_by_label("Buscar producto o SKU").fill("AG-001")
             page.get_by_role("button", name="Filtrar").click()
             expect(page.get_by_text("Agua 50cl")).to_be_visible()
+            page.evaluate(
+                """() => {
+                  window.__inventoryWorkspaceSwapped = false;
+                  document.body.addEventListener("htmx:afterSwap", (event) => {
+                    if (event.detail.target?.id === "inventory-workspace") {
+                      window.__inventoryWorkspaceSwapped = true;
+                    }
+                  });
+                }"""
+            )
             with page.expect_response(
                 lambda response: (
                     "/inventory/" in response.url and "store=all" in response.url
                 )
             ) as response_info:
                 page.get_by_label("Ámbito de tienda").select_option("all")
-            self.assertEqual(response_info.value.status, 200)
+            response = response_info.value
+            self.assertEqual(response.status, 200)
+            body = response.text()
+            self.assertIn('id="inventory-workspace"', body)
+            self.assertIn("Todas las tiendas", body)
+            self.assertIn('scope="col">Tienda', body)
+            self.assertIn("Centro", body)
+            self.assertIn("Norte", body)
             expect(page).to_have_url(re.compile(r"store=all"))
+            page.wait_for_function("window.__inventoryWorkspaceSwapped === true")
+            self.assertEqual(page.locator("#inventory-workspace").count(), 1)
+            expect(
+                page.locator("#inventory-workspace th", has_text="Tienda")
+            ).to_be_visible()
             expect(page.get_by_role("columnheader", name="Tienda")).to_be_visible()
+            expect(page.get_by_label("Ámbito de tienda")).to_have_value("all")
+            expect(page.get_by_text("Todas las tiendas", exact=True)).to_be_visible()
             expect(page.get_by_role("cell", name="Centro")).to_be_visible()
             expect(page.get_by_role("cell", name="Norte")).to_be_visible()
             page.go_back()
+            expect(page).to_have_url(re.compile(rf"store={store.pk}"))
             expect(page.get_by_label("Ámbito de tienda")).to_have_value(str(store.pk))
+            expect(page.get_by_role("columnheader", name="Tienda")).to_have_count(0)
+            expect(
+                page.locator("#inventory-workspace tbody a", has_text="Agua 50cl")
+            ).to_have_count(1)
+            expect(page.get_by_role("cell", name="Norte")).to_have_count(0)
             page.go_forward()
+            expect(page).to_have_url(re.compile(r"store=all"))
             expect(page.get_by_label("Ámbito de tienda")).to_have_value("all")
             expect(page.get_by_label("Buscar producto o SKU")).to_have_value("AG-001")
+            expect(page.get_by_role("columnheader", name="Tienda")).to_be_visible()
+            expect(page.get_by_role("cell", name="Centro")).to_be_visible()
+            expect(page.get_by_role("cell", name="Norte")).to_be_visible()
+            expect(
+                page.locator("#inventory-workspace tbody a", has_text="Agua 50cl")
+            ).to_have_count(2)
             page.get_by_text("Agua 50cl").first.click()
             page.get_by_role("tab", name="Movimientos").click()
             page.get_by_role("tab", name="Ajustes").click()
