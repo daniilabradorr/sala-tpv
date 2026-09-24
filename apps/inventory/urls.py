@@ -16,6 +16,7 @@ from apps.inventory.views import (
     StockAdjustmentLineDeleteView,
     StockAdjustmentLineUpdateView,
     StockAdjustmentListView,
+    StockAdjustmentReviewView,
     StockMovementDetailView,
     StockMovementListView,
 )
@@ -67,6 +68,11 @@ urlpatterns = [
         "adjustments/<int:pk>/",
         StockAdjustmentDetailView.as_view(),
         name="stock_adjustment_detail",
+    ),
+    path(
+        "adjustments/<int:pk>/review/",
+        StockAdjustmentReviewView.as_view(),
+        name="stock_adjustment_review",
     ),
     # Líneas de ajuste
     path(

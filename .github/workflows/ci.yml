@@ -353,6 +353,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
         run: >-
           uv run python manage.py test
+          e2e.browser_inventory
           e2e.browser_cash_register
           e2e.browser_full_flow
           e2e.browser_responsive_shell

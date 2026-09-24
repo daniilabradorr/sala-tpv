@@ -20,3 +20,9 @@ if (quickForm) {
     preview.textContent = Number.isFinite(difference) ? `${difference > 0 ? "+" : ""}${difference.toFixed(3)}` : "—";
   });
 }
+function prepareInventoryFilterDrawer(root = document) {
+  const drawer = root.querySelector("#inventory-filter-drawer");
+  if (drawer && window.matchMedia("(max-width: 600px)").matches && drawer.open) drawer.close();
+}
+prepareInventoryFilterDrawer();
+document.addEventListener("htmx:afterSwap", (event) => prepareInventoryFilterDrawer(event.target));
