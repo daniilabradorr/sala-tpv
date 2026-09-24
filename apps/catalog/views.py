@@ -3,9 +3,10 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.decorators import method_decorator
+from django.views.decorators.vary import vary_on_headers
 from django.views import View
 from django.views.generic import (
-    TemplateView,
     ListView,
     DetailView,
     CreateView,
@@ -22,6 +23,11 @@ from apps.catalog.forms import (
     ProductUpdateForm,
 )
 from apps.catalog.services import delete_category, delete_product, delete_tax
+from apps.catalog.selectors import get_category_rows, get_products_for_catalog
+from apps.inventory.selectors import (
+    get_inventory_items_for_business,
+    get_inventory_visible_stores,
+)
 from apps.core.media.services import remove_media, replace_media
 from apps.users.mixins import (
     ManagerOrOwnerRequiredMixin,
@@ -62,11 +68,7 @@ def _apply_media_form(*, business, entity, form, entity_kind):
         remove_media(business=business, entity=entity, field_name="image")
 
 
-class CatalogDashboardView(
-    PageTitleMixin,
-    BusinessRequiredMixin,
-    TemplateView,
-):
+class CatalogDashboardView(BusinessRequiredMixin, View):
     """
     Dashboard principal del módulo catálogo.
 
@@ -81,8 +83,8 @@ class CatalogDashboardView(
     - productos sin impuesto específico
     """
 
-    template_name = "catalog/dashboard.html"
-    page_title = "Dashboard del catálogo"
+    def get(self, request, *args, **kwargs):
+        return redirect("catalog:product_list")
 
 
 # ==========================
@@ -90,6 +92,7 @@ class CatalogDashboardView(
 # ==========================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class CategoryListView(
     PageTitleMixin,
     BusinessScopedQuerysetMixin,
@@ -107,12 +110,20 @@ class CategoryListView(
     page_title = "Listado de categorías"
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .select_related("business", "parent")
-            .order_by("sort_order", "name")
+        return Category.objects.none()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["q"] = self.request.GET.get("q", "").strip()
+        context["category_rows"] = get_category_rows(
+            self.request.user.business, context["q"]
         )
+        return context
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return ["catalog/categories/partials/_category_results.html"]
+        return [self.template_name]
 
 
 class CategoryDetailView(
@@ -616,6 +627,7 @@ class TaxDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
 # ==========================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class ProductListView(
     PageTitleMixin,
     BusinessScopedQuerysetMixin,
@@ -631,19 +643,29 @@ class ProductListView(
     template_name = "catalog/products/product_list.html"
     context_object_name = "products"
     page_title = "Listado de productos"
+    paginate_by = 25
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .select_related("business", "category", "tax")
-            .order_by(
-                "category__sort_order",
-                "category__name",
-                "sort_order",
-                "name",
-            )
-        )
+        return get_products_for_catalog(self.request.user.business, self.request.GET)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["categories"] = Category.objects.filter(
+            business=self.request.user.business
+        ).order_by("sort_order", "name")
+        context["filters"] = {
+            key: self.request.GET.get(key, "")
+            for key in ("q", "category", "type", "status", "stock")
+        }
+        query = self.request.GET.copy()
+        query.pop("page", None)
+        context["filter_query"] = query.urlencode()
+        return context
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return ["catalog/products/partials/_product_results.html"]
+        return [self.template_name]
 
 
 class ProductDetailView(
@@ -664,6 +686,19 @@ class ProductDetailView(
 
     def get_queryset(self):
         return super().get_queryset().select_related("business", "category", "tax")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        product = context["product"]
+        context["inventory_items"] = []
+        if not product.is_service and product.track_stock:
+            stores = get_inventory_visible_stores(self.request.user)
+            context["inventory_items"] = get_inventory_items_for_business(
+                self.request.user.business,
+                filters={"product": product},
+                stores=stores,
+            )
+        return context
 
 
 class ProductCreateView(

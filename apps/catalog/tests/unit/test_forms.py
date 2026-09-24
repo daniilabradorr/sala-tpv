@@ -304,14 +304,12 @@ class ProductFormTests(TestCase):
 
         self.assertEqual(product.business, self.business)
 
-    def test_product_create_form_does_not_expose_business_is_active_or_track_stock(
-        self,
-    ):
+    def test_product_create_form_exposes_status_and_stock_but_not_business(self):
         form = ProductCreateForm(business=self.business)
 
         self.assertNotIn("business", form.fields)
-        self.assertNotIn("is_active", form.fields)
-        self.assertNotIn("track_stock", form.fields)
+        self.assertIn("is_active", form.fields)
+        self.assertIn("track_stock", form.fields)
 
     def test_product_update_form_exposes_is_active_and_track_stock(self):
         product = create_product(
@@ -372,7 +370,7 @@ class ProductFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("tax", form.errors)
 
-    def test_product_create_form_uses_model_default_track_stock(self):
+    def test_product_create_form_accepts_track_stock(self):
         form = ProductCreateForm(
             data=self.valid_product_data(),
             business=self.business,
@@ -381,7 +379,7 @@ class ProductFormTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors.as_data())
         product = form.save()
 
-        self.assertTrue(product.track_stock)
+        self.assertFalse(product.track_stock)
 
     def test_product_create_form_service_forces_no_stock(self):
         form = ProductCreateForm(

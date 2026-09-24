@@ -333,7 +333,7 @@ class ProductBaseForm(ManagedImageModelForm):
     - tax solo muestra impuestos activos del negocio.
     - sku se puede dejar vacío y se genera automáticamente.
     - barcode se puede dejar vacío y se genera automáticamente solo en productos físicos.
-    - is_active y track_stock en la creacion no se ponen,se dejan como default, en el update si.
+    - El estado y el control de stock se configuran tanto al crear como al editar.
     """
 
     class Meta:
@@ -349,6 +349,8 @@ class ProductBaseForm(ManagedImageModelForm):
             "unit",
             "sort_order",
             "is_service",
+            "track_stock",
+            "is_active",
         ]
 
         widgets = {
@@ -412,6 +414,8 @@ class ProductBaseForm(ManagedImageModelForm):
                     "class": "form-check-input",
                 }
             ),
+            "track_stock": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
 
         help_texts = {
@@ -425,6 +429,8 @@ class ProductBaseForm(ManagedImageModelForm):
             "unit": "Unidad de venta.",
             "sort_order": "Orden visual dentro de la categoría. Los números más bajos aparecen antes.",
             "is_service": "Marca si no es un producto físico.",
+            "track_stock": "Inventory gestionará las existencias por tienda.",
+            "is_active": "Permite usar el artículo en las operaciones actuales.",
         }
 
     def __init__(self, *args, business=None, **kwargs):
@@ -529,6 +535,8 @@ class ProductCreateForm(ProductBaseForm):
             "unit",
             "sort_order",
             "is_service",
+            "track_stock",
+            "is_active",
         ]
 
 

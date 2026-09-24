@@ -140,11 +140,33 @@ class CatalogViewsIntegrationTests(TestCase):
 
         response = self.client.get(reverse("catalog:dashboard"))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "catalog/dashboard.html")
-        self.assertContains(response, "Ver categorías")
-        self.assertContains(response, "Ver impuestos")
-        self.assertContains(response, "Ver productos")
+        self.assertRedirects(response, reverse("catalog:product_list"))
+
+    def test_product_list_searches_and_filters_server_side(self):
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("catalog:product_list"),
+            {
+                "q": "PRD000001",
+                "category": self.category.pk,
+                "type": "physical",
+                "status": "active",
+                "stock": "tracked",
+            },
+        )
+        self.assertContains(response, self.product.name)
+        self.assertNotContains(response, self.other_product.name)
+
+    def test_product_list_htmx_returns_results_partial_and_varies(self):
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("catalog:product_list"), HTTP_HX_REQUEST="true"
+        )
+        self.assertTemplateUsed(
+            response, "catalog/products/partials/_product_results.html"
+        )
+        self.assertNotContains(response, "<html")
+        self.assertIn("HX-Request", response.headers["Vary"])
 
     def test_category_list_only_shows_categories_from_current_business(self):
         self.login_as(self.cashier)
