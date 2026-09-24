@@ -129,7 +129,9 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             ).to_be_visible()
             expect(page.get_by_role("columnheader", name="Tienda")).to_be_visible()
             expect(page.get_by_label("Ámbito de tienda")).to_have_value("all")
-            expect(page.get_by_text("Todas las tiendas", exact=True)).to_be_visible()
+            expect(
+                page.locator("#inventory-workspace .inventory-header > div > p")
+            ).to_have_text("Todas las tiendas")
             expect(page.get_by_role("cell", name="Centro")).to_be_visible()
             expect(page.get_by_role("cell", name="Norte")).to_be_visible()
             page.go_back()
