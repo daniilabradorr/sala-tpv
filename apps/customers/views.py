@@ -1,4 +1,3 @@
-from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -8,8 +7,6 @@ from django.http import QueryDict
 from django.shortcuts import redirect, render
 from django.views.decorators.vary import vary_on_headers
 from django.utils.decorators import method_decorator
-from django.utils.dateparse import parse_date
-from django.utils import timezone
 from django.views import View
 from django.views.generic import ListView, DetailView
 
@@ -32,6 +29,8 @@ from apps.sales.selectors import get_sales_for_business
 from apps.billing.selectors import billing_documents_for_customer
 from apps.stores.selectors import get_stores_available_for_user
 from apps.users.helpers import can_sell_in_store
+from apps.core.shell import resolve_active_store
+from apps.sales.forms import SaleFilterForm
 
 
 def _get_business(request):
@@ -104,13 +103,17 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
             user=self.request.user, only_active=False
         )
         store_ids = list(stores.values_list("pk", flat=True))
-        operational_store = next(
-            (
-                store
-                for store in get_stores_available_for_user(user=self.request.user)
-                if can_sell_in_store(self.request.user, store)
-            ),
-            None,
+        _, active_store = resolve_active_store(self.request, user=self.request.user)
+        sellable_stores = [
+            store
+            for store in get_stores_available_for_user(user=self.request.user)
+            if can_sell_in_store(self.request.user, store)
+        ]
+        operational_store = (
+            active_store
+            if active_store is not None
+            and can_sell_in_store(self.request.user, active_store)
+            else next(iter(sellable_stores), None)
         )
         tab = self.request.GET.get("tab", "summary")
         if tab not in {"summary", "sales", "account", "documents"}:
@@ -124,18 +127,20 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
             }
         )
         if tab == "sales":
+            has_filters = any(
+                self.request.GET.get(key)
+                for key in ("period", "status", "date_from", "date_to")
+            )
+            filter_form = SaleFilterForm(
+                self.request.GET if has_filters else None, business=business
+            )
+            valid_filters = filter_form.cleaned_data if filter_form.is_valid() else {}
             period = self.request.GET.get("period", "")
-            period_start = {
-                "today": timezone.localdate(),
-                "7d": timezone.localdate() - timedelta(days=6),
-                "30d": timezone.localdate() - timedelta(days=29),
-            }.get(period)
             filters = {
                 "customer": self.object,
-                "status": self.request.GET.get("status", ""),
-                "date_from": period_start
-                or parse_date(self.request.GET.get("date_from", "")),
-                "date_to": parse_date(self.request.GET.get("date_to", "")),
+                "status": valid_filters.get("status", ""),
+                "date_from": valid_filters.get("date_from"),
+                "date_to": valid_filters.get("date_to"),
             }
             sales = get_sales_for_business(business=business, filters=filters).filter(
                 store_id__in=store_ids
@@ -150,6 +155,7 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
                     "sales_period": period,
                     "date_from": self.request.GET.get("date_from", ""),
                     "date_to": self.request.GET.get("date_to", ""),
+                    "sales_filter_errors": filter_form.errors,
                 }
             )
             query = QueryDict(mutable=True)
@@ -170,7 +176,7 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
             context["pending_sales"] = get_customer_pending_debt_sales(
                 business=business,
                 customer=self.object,
-                stores=get_stores_available_for_user(user=self.request.user),
+                stores=sellable_stores,
             )
         elif tab == "documents":
             docs = (

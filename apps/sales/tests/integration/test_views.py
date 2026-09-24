@@ -306,6 +306,34 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(Sale.objects.count(), 1)
         self.assertTrue(sale.lines.filter(pk=line.pk).exists())
 
+    @patch("apps.sales.views.update_sale_header")
+    def test_quick_customer_create_rolls_back_customer_when_selection_fails(
+        self, mocked_update
+    ):
+        mocked_update.side_effect = ValidationError("La venta ha cambiado.")
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        original_customer = sale.customer
+        customer_count = self.business.customers.count()
+        response = self.client.post(
+            reverse(
+                "sales:quick_customer_create",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {
+                "customer_type": "person",
+                "name": "Debe hacer rollback",
+                "country_code": "ES",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "La venta ha cambiado.", status_code=422)
+        self.assertEqual(self.business.customers.count(), customer_count)
+        sale.refresh_from_db()
+        self.assertEqual(sale.customer, original_customer)
+        self.assertTrue(sale.lines.filter(pk=line.pk).exists())
+
     def test_open_sale_uses_workspace_with_scoped_search_and_htmx_grid(self):
         self.login_as(self.owner)
         sale, _line = self.create_open_sale_with_line()

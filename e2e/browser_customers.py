@@ -1,5 +1,8 @@
 """Browser coverage for the FE-16 customer workspace and TPV quick create."""
 
+import re
+from decimal import Decimal
+
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
@@ -7,6 +10,11 @@ from playwright.sync_api import expect, sync_playwright
 from apps.customers.tests.factories import create_account
 from apps.sales.services import open_sale
 from apps.sales.tests.factories import create_pos_settings
+from apps.sales.tests.factories import create_sale
+from apps.sales.models import SaleStatusChoices
+from apps.payments.services import register_sale_on_account
+from apps.payments.models import PaymentMethod
+from apps.cash_register.models import CashRegister, CashSession
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_business, create_store, create_user
 
@@ -35,6 +43,27 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
         account.customer.name = "Ana Browser"
         account.customer.save()
         sale = open_sale(business=business, store=store, opened_by=owner)
+        debt_sale = create_sale(
+            business=business,
+            store=store,
+            opened_by=owner,
+            customer=account.customer,
+            status=SaleStatusChoices.COMPLETED,
+            total_amount=Decimal("100.00"),
+        )
+        register_sale_on_account(business=business, sale_id=debt_sale.pk, user=owner)
+        method = PaymentMethod.objects.create(
+            business=business, name="Tarjeta E2E", code="card"
+        )
+        register = CashRegister.objects.create(
+            business=business, store=store, name="Caja E2E", code="E2E"
+        )
+        cash_session = CashSession.objects.create(
+            business=business,
+            store=store,
+            cash_register=register,
+            opened_by=owner,
+        )
 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
@@ -48,11 +77,25 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Filtros").click()
             expect(page.locator("#customer-filters")).to_have_attribute("open", "")
             page.get_by_role("button", name="Cerrar filtros").click()
-            page.get_by_text("Ana Browser").first.click()
+            page.locator(".customer-cards").get_by_role(
+                "link", name="Ana Browser", exact=False
+            ).click()
             page.get_by_role("tab", name="Cuenta").click()
             expect(page.get_by_role("tab", name="Cuenta")).to_have_attribute(
                 "aria-selected", "true"
             )
+            expect(page.get_by_text("Pendiente: 100,00 €")).to_be_visible()
+            page.get_by_role("link", name="Cobrar esta venta").click()
+            page.locator('[name="amount"]').fill("30.00")
+            page.locator('[name="method"]').select_option(str(method.pk))
+            page.locator('[name="cash_session"]').select_option(str(cash_session.pk))
+            page.get_by_role("button", name="Cobrar").click()
+            expect(page).to_have_url(
+                re.compile(rf"/customers/{account.customer_id}/\?tab=account$")
+            )
+            expect(page.get_by_text("Debe 70,00 €")).to_be_visible()
+            expect(page.get_by_text("Pendiente: 70,00 €")).to_be_visible()
+            expect(page.get_by_text("Pago #")).to_be_visible()
             self.assertTrue(
                 page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             )

@@ -20,6 +20,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views import View
 from decimal import Decimal
+from django.db import transaction
 
 from apps.core.htmx import add_hx_trigger
 from apps.customers.forms import CustomerCreateForm
@@ -858,19 +859,20 @@ class SaleQuickCustomerCreateView(
         form = CustomerCreateForm(request.POST, business=business)
         if form.is_valid():
             try:
-                customer, _ = CustomerService.create_customer(
-                    business=business,
-                    customer_data=form.cleaned_data,
-                    credit_limit=Decimal("0.00"),
-                    is_blocked=False,
-                )
-                sale = update_sale_header(
-                    business=business,
-                    sale=sale,
-                    customer=customer,
-                    document_type_requested=sale.document_type_requested,
-                    updated_by=request.user,
-                )
+                with transaction.atomic():
+                    customer, _ = CustomerService.create_customer(
+                        business=business,
+                        customer_data=form.cleaned_data,
+                        credit_limit=Decimal("0.00"),
+                        is_blocked=False,
+                    )
+                    sale = update_sale_header(
+                        business=business,
+                        sale=sale,
+                        customer=customer,
+                        document_type_requested=sale.document_type_requested,
+                        updated_by=request.user,
+                    )
             except ValidationError as error:
                 _add_service_errors_to_form(form, error)
             else:

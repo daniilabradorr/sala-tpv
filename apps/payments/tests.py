@@ -8,6 +8,7 @@ from django.db import connections
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
+from django.urls import reverse
 
 from apps.audit.constants import AuditEventType
 from apps.audit.exceptions import AuditValidationError
@@ -117,6 +118,56 @@ class PaymentsTests(TestCase):
             store=self.store,
         )
         self.assertFalse(invalid.is_valid())
+
+    def test_payment_view_preserves_validated_customer_return_context(self):
+        customer = create_sales_customer(business=self.business)
+        self.sale.customer = customer
+        self.sale.save(update_fields=["customer", "updated_at"])
+        self.client.force_login(self.user)
+        url = reverse(
+            "payments:create",
+            kwargs={"store_id": self.store.pk, "sale_id": self.sale.pk},
+        )
+
+        normal = self.client.get(url)
+        self.assertFalse(normal.context["is_debt_collection"])
+        debt = self.client.get(url, {"customer_return": customer.pk})
+        self.assertTrue(debt.context["is_debt_collection"])
+
+        invalid = self.client.post(
+            url,
+            {
+                "customer_return": customer.pk,
+                "method": self.card.pk,
+                "amount": "0",
+                "cash_session": self.session.pk,
+                "idempotency_key": uuid.uuid4(),
+            },
+        )
+        self.assertEqual(invalid.status_code, 200)
+        self.assertTrue(invalid.context["is_debt_collection"])
+        self.assertEqual(invalid.context["customer_return"], str(customer.pk))
+
+        manipulated = self.client.get(url, {"customer_return": customer.pk + 999})
+        self.assertFalse(manipulated.context["is_debt_collection"])
+
+        response = self.client.post(
+            url,
+            {
+                "customer_return": customer.pk,
+                "method": self.card.pk,
+                "amount": "30.00",
+                "cash_session": self.session.pk,
+                "idempotency_key": uuid.uuid4(),
+                "external_reference": "",
+                "notes": "",
+            },
+        )
+        self.assertRedirects(
+            response,
+            f"{reverse('customers:customer_detail', args=[customer.pk])}?tab=account",
+            fetch_redirect_response=False,
+        )
 
     def create_session(self, *, business=None, store=None, open=True):
         business = business or self.business
