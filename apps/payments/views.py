@@ -90,6 +90,9 @@ class PaymentCreateView(_BasePaymentView):
                 self.add_error(form, error)
             else:
                 messages.success(request, "Cobro registrado correctamente.")
+                customer_return = request.POST.get("customer_return")
+                if customer_return and str(sale.customer_id) == customer_return:
+                    return redirect(f"/customers/{sale.customer_id}/?tab=account")
                 return redirect(
                     "sales:sale_detail", store_id=sale.store_id, sale_pk=sale.pk
                 )

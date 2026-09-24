@@ -579,6 +579,15 @@ class SaleOpenView(
             if locked_session
             else get_sale_open_cash_initial(business=business, store=store)
         )
+        customer_id = request.GET.get("customer")
+        if customer_id and customer_id.isdigit():
+            from apps.customers.models import Customer
+
+            customer = Customer.objects.filter(
+                pk=customer_id, business=business, is_active=True
+            ).first()
+            if customer is not None:
+                initial["customer"] = customer
 
         form = SaleOpenForm(
             business=business,

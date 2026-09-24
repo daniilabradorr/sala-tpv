@@ -73,6 +73,17 @@ class CustomerViewTests(TestCase):
         self.assertNotContains(response, self.account.customer.name)
         self.assertNotContains(response, self.other_account.customer.name)
 
+    def test_list_htmx_returns_only_results_and_varies(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("customers:customer_list"),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="customer-results"', count=1)
+        self.assertNotContains(response, "<html")
+        self.assertIn("HX-Request", response.headers["Vary"])
+
     def test_permissions_and_post_actions(self):
         self.client.force_login(self.cashier)
         for name in ["customer_update", "customer_account_settings"]:

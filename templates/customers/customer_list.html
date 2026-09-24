@@ -1,18 +1,15 @@
-{% extends "base.html" %}
+{% extends "base.html" %}{% load static %}
 {% block title %}Clientes | Netxodo{% endblock %}
-{% block content %}
-<section class="erp-page">
-    <header class="erp-header"><div><p class="erp-eyebrow">Clientes</p><h1>Clientes</h1><p class="erp-subtitle">Personas y empresas asociadas a tus ventas.</p></div><a class="button" href="{% url 'customers:customer_create' %}">Nuevo cliente</a></header>
-    <form method="get" class="erp-toolbar">
-        <div class="form-field"><label for="q">Buscar</label><input id="q" class="form-control" name="q" value="{{ query }}" placeholder="Nombre, NIF, teléfono o email"></div>
-        <div class="form-field"><label for="status">Estado</label><select id="status" class="form-select" name="status"><option value="active" {% if status == "active" %}selected{% endif %}>Activos</option><option value="inactive" {% if status == "inactive" %}selected{% endif %}>Inactivos</option><option value="all" {% if status == "all" %}selected{% endif %}>Todos</option></select></div>
-        <div class="form-field"><label for="customer_type">Tipo</label><select id="customer_type" class="form-select" name="customer_type"><option value="">Todos</option>{% for value, label in customer_type_choices %}<option value="{{ value }}" {% if customer_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-        <button class="button button-secondary" type="submit">Filtrar</button>
-    </form>
-    <div class="table-scroll"><table><thead><tr><th scope="col">Nombre / razón social</th><th scope="col">NIF</th><th scope="col">Contacto</th><th scope="col">Estado</th><th scope="col" class="number-cell">Saldo</th><th scope="col" class="actions-cell">Acciones</th></tr></thead><tbody>
-    {% for customer in customers %}<tr><td>{{ customer.name }}<br><small>{{ customer.get_customer_type_display }}</small></td><td>{{ customer.tax_identifier|default:"—" }}</td><td>{{ customer.email|default:customer.phone|default:"—" }}</td><td><span class="badge {% if customer.is_active %}badge-active{% else %}badge-inactive{% endif %}">{% if customer.is_active %}Activo{% else %}Inactivo{% endif %}</span></td><td class="number-cell">{% if customer.account %}{{ customer.account.balance }} EUR{% else %}—{% endif %}</td><td class="actions-cell"><a href="{% url 'customers:customer_detail' customer.pk %}">Ver</a></td></tr>
-    {% empty %}<tr><td colspan="6"><div class="erp-empty"><strong>No hay clientes con estos filtros.</strong><p>Añade un cliente para asociarlo a ventas, facturas y cuenta de crédito.</p><a class="button" href="{% url 'customers:customer_create' %}">Añadir cliente</a></div></td></tr>{% endfor %}
-    </tbody></table></div>
-    {% if is_paginated %}<nav class="pagination" aria-label="Paginación">{% if page_obj.has_previous %}<a class="button button-secondary" href="?q={{ query|urlencode }}&status={{ status|urlencode }}&customer_type={{ customer_type|urlencode }}&page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page_obj.number }} de {{ paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="button button-secondary" href="?q={{ query|urlencode }}&status={{ status|urlencode }}&customer_type={{ customer_type|urlencode }}&page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
-</section>
-{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/customers.css' %}">{% endblock %}
+{% block content %}<section class="customers-page erp-page">
+<header class="erp-header"><div><p class="erp-eyebrow">Customer workspace</p><h1>Clientes</h1><p class="erp-subtitle">Una ficha global para todas las tiendas del negocio.</p></div><a class="button" href="{% url 'customers:customer_create' %}">+ Nuevo cliente</a></header>
+<div class="customer-kpis" aria-label="Resumen de clientes"><article><span>Clientes activos</span><strong>{{ kpis.active }}</strong></article><article><span>Con saldo pendiente</span><strong>{{ kpis.with_debt }}</strong></article><article><span>Saldo pendiente total</span><strong>{{ kpis.debt_total|floatformat:2 }} €</strong></article></div>
+<button class="button button-secondary mobile-filter-button" type="button" data-nx-drawer-trigger="customer-filters" aria-controls="customer-filters">Filtros</button>
+<form id="customer-filters" class="erp-toolbar customer-filters" method="get" hx-get="{% url 'customers:customer_list' %}" hx-target="#customer-results" hx-swap="outerHTML" hx-push-url="true" data-nx-drawer>
+<button class="drawer-close" type="button" data-nx-drawer-close aria-label="Cerrar filtros">×</button>
+<div class="form-field customer-search"><label for="q">Buscar clientes</label><input id="q" name="q" value="{{ query }}" placeholder="Nombre, NIF, teléfono o email…" hx-trigger="keyup changed delay:350ms, search"></div>
+<div class="form-field"><label for="customer_type">Tipo</label><select id="customer_type" name="customer_type"><option value="">Todos</option>{% for value,label in customer_type_choices %}<option value="{{ value }}" {% if customer_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+<div class="form-field"><label for="status">Estado</label><select id="status" name="status"><option value="all" {% if status == 'all' %}selected{% endif %}>Todos</option><option value="active" {% if status == 'active' %}selected{% endif %}>Activos</option><option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactivos</option></select></div>
+<div class="form-field"><label for="account_state">Cuenta</label><select id="account_state" name="account_state"><option value="">Todas</option><option value="debt" {% if account_state == 'debt' %}selected{% endif %}>Con deuda</option><option value="settled" {% if account_state == 'settled' %}selected{% endif %}>Al día</option><option value="credit" {% if account_state == 'credit' %}selected{% endif %}>Saldo a favor</option></select></div>
+<button class="button button-secondary" type="submit">Aplicar</button></form>
+{% include "customers/partials/_customer_results.html" %}</section>{% endblock %}

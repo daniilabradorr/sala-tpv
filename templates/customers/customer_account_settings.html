@@ -18,17 +18,11 @@
         <dt>Crédito disponible</dt><dd>{{ customer.account.available_credit }}</dd>
     </dl>
 
-    <form method="post" novalidate>
+    <form method="post" novalidate class="customer-settings-form">
         {% csrf_token %}
         {{ form.non_field_errors }}
-        {% for field in form %}
-            <div class="form-group">
-                {{ field.label_tag }}
-                {{ field }}
-                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
-                {{ field.errors }}
-            </div>
-        {% endfor %}
+        {% include 'customers/partials/_field.html' with field=form.credit_limit %}
+        {% include 'customers/partials/_field.html' with field=form.is_blocked %}
         <button class="btn" type="submit">Guardar</button>
         <a class="btn" href="{% url 'customers:customer_detail' customer.pk %}">Cancelar</a>
     </form>
