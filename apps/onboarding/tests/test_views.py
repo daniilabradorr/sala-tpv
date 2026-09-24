@@ -37,10 +37,25 @@ class OnboardingViewTests(TestCase):
         session = dict(self.client.session)
         serialized = repr(session)
         self.assertNotIn(password, serialized)
-        self.assertNotIn(pin, serialized)
+        self.assertNotIn(password, session.values())
+        self.assertNotIn(pin, session.values())
         for key in session:
             self.assertNotIn("password", key.lower())
             self.assertNotIn("pin", key.lower())
+        onboarding_result = session.get("onboarding_result")
+        if onboarding_result is not None:
+            self.assertSetEqual(
+                set(onboarding_result),
+                {
+                    "business_id",
+                    "business_name",
+                    "store_id",
+                    "store_name",
+                    "owner_first_name",
+                },
+            )
+            self.assertNotIn(password, onboarding_result.values())
+            self.assertNotIn(pin, onboarding_result.values())
 
     def test_get_and_invalid_post_never_create_partial_resources(self):
         response = self.client.get(reverse("onboarding:start"))

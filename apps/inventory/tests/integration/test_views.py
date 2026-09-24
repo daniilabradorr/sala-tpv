@@ -1063,10 +1063,24 @@ class InventoryStoreScopingIntegrationTests(TestCase):
         self.assertIn("HX-Request", partial.headers["Vary"])
 
     def test_all_stores_hx_response_renders_store_column_and_both_stores(self):
-        self.item_a1.product.sku = "AG-001"
-        self.item_a1.product.save(update_fields=["sku", "updated_at"])
-        self.item_a2.product.sku = "AG-001"
-        self.item_a2.product.save(update_fields=["sku", "updated_at"])
+        shared_product = create_inventory_product(
+            business=self.business,
+            name="Agua compartida",
+        )
+        shared_product.sku = "AG-001"
+        shared_product.save(update_fields=["sku", "updated_at"])
+        create_inventory_item(
+            business=self.business,
+            store=self.store_a1,
+            product=shared_product,
+            current_stock=Decimal("10"),
+        )
+        create_inventory_item(
+            business=self.business,
+            store=self.store_a2,
+            product=shared_product,
+            current_stock=Decimal("4"),
+        )
         self.login_as(self.owner)
 
         response = self.client.get(
@@ -1082,3 +1096,4 @@ class InventoryStoreScopingIntegrationTests(TestCase):
         self.assertContains(response, self.store_a1.name)
         self.assertContains(response, self.store_a2.name)
         self.assertIn("HX-Request", response.headers["Vary"])
+        self.assertContains(response, 'hx-sync="#inventory-workspace:replace"')

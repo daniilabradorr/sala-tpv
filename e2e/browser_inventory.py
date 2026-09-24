@@ -67,8 +67,36 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             expect(page.get_by_role("heading", name="Inventario")).to_be_visible()
             expect(page.get_by_text("Productos controlados")).to_be_visible()
             page.get_by_label("Buscar producto o SKU").fill("AG-001")
-            page.get_by_role("button", name="Filtrar").click()
+            page.evaluate(
+                """() => {
+                  window.__inventoryFilterSwapped = false;
+                  document.body.addEventListener("htmx:afterSwap", (event) => {
+                    if (event.detail.target?.id === "inventory-workspace") {
+                      window.__inventoryFilterSwapped = true;
+                    }
+                  });
+                }"""
+            )
+            with page.expect_response(
+                lambda response: (
+                    "/inventory/" in response.url and "search=AG-001" in response.url
+                )
+            ) as filter_response:
+                page.get_by_role("button", name="Filtrar").click()
+            self.assertEqual(filter_response.value.status, 200)
+            expect(page).to_have_url(re.compile(r"search=AG-001"))
+            page.wait_for_function("window.__inventoryFilterSwapped === true")
             expect(page.get_by_text("Agua 50cl")).to_be_visible()
+            sync_values = page.locator(
+                '[hx-target="#inventory-workspace"]'
+            ).evaluate_all(
+                """elements => elements.map((element) =>
+                  element.closest("#inventory-workspace")?.getAttribute("hx-sync"))"""
+            )
+            self.assertTrue(sync_values)
+            self.assertTrue(
+                all(value == "#inventory-workspace:replace" for value in sync_values)
+            )
             page.evaluate(
                 """() => {
                   window.__inventoryWorkspaceSwapped = false;
