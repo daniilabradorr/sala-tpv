@@ -8,7 +8,7 @@
       <label><input type="radio" name="customer_mode" value="counter" {% if not sale.customer %}checked{% endif %}> <span>Mostrador</span></label>
       <label><input type="radio" name="customer_mode" value="customer" {% if sale.customer %}checked{% endif %}> <span>Cliente</span></label>
     </div></fieldset>
-    <div class="customer-field"><label for="id_customer">Cliente</label>{{ header_form.customer }}<small>Necesario para factura.</small></div>
+    <div class="customer-field"><label for="id_customer">Cliente</label>{{ header_form.customer }}<small>Necesario para factura.</small><button type="button" class="button button-secondary" data-nx-modal-trigger="quick-customer-dialog" hx-get="{% url 'sales:quick_customer_create' store.pk sale.pk %}" hx-target="#quick-customer-panel" hx-swap="innerHTML">Nuevo cliente</button></div>
     <fieldset><legend>Documento</legend><div class="segments">
       <label><input type="radio" name="document_type_requested" value="ticket" {% if sale.document_type_requested == 'ticket' %}checked{% endif %}> <span>Ticket</span></label>
       <label><input type="radio" name="document_type_requested" value="invoice" {% if sale.document_type_requested == 'invoice' %}checked{% endif %}> <span>Factura</span></label>

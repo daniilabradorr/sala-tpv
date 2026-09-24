@@ -354,6 +354,7 @@ jobs:
         run: >-
           uv run python manage.py test
           e2e.browser_catalog
+          e2e.browser_customers
           e2e.browser_inventory
           e2e.browser_cash_register
           e2e.browser_full_flow
