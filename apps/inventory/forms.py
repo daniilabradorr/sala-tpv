@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from django import forms
 
-from apps.catalog.models import Product
+from apps.catalog.models import Category, Product
 from apps.inventory.models import (
     InventoryItem,
     StockAdjustment,
@@ -44,6 +44,36 @@ def _decimal_attrs(step="0.001", min_value="0"):
 
 class InventoryItemFilterForm(forms.Form):
     """Formulario de filtros para el listado de inventario."""
+
+    search = forms.CharField(
+        label="Buscar producto o SKU",
+        required=False,
+        widget=forms.SearchInput(
+            attrs={"class": "form-control", "placeholder": "Buscar producto o SKU…"}
+        ),
+    )
+    stock_status = forms.ChoiceField(
+        label="Estado de stock",
+        required=False,
+        choices=[
+            ("", "Todos"),
+            ("normal", "Normal"),
+            ("low", "Stock bajo"),
+            ("out", "Sin stock"),
+        ],
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    category = forms.ModelChoiceField(
+        label="Categoría",
+        queryset=Category.objects.none(),
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    location = forms.CharField(
+        label="Ubicación",
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
 
     store = forms.ModelChoiceField(
         label="Tienda",
@@ -103,6 +133,9 @@ class InventoryItemFilterForm(forms.Form):
             business=self.business,
             is_service=False,
             track_stock=True,
+        ).order_by("name")
+        self.fields["category"].queryset = Category.objects.filter(
+            business=self.business
         ).order_by("name")
 
 
@@ -1042,6 +1075,23 @@ class StockAdjustmentLineForm(forms.ModelForm):
             line.save()
 
         return line
+
+
+class QuickStockAdjustmentForm(forms.Form):
+    """Physical count input; the system snapshot is always read server-side."""
+
+    counted_stock = forms.DecimalField(
+        label="Stock contado físicamente",
+        min_value=Decimal("0.000"),
+        max_digits=14,
+        decimal_places=3,
+        widget=forms.NumberInput(attrs={**_decimal_attrs(), "inputmode": "decimal"}),
+    )
+    notes = forms.CharField(
+        label="Notas",
+        required=False,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
 
 
 class StockAdjustmentConfirmForm(forms.Form):

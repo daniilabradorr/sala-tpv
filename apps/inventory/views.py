@@ -9,16 +9,26 @@ Regla general:
 - Las views NO crean StockMovement directamente.
 """
 
+from decimal import Decimal
+
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.vary import vary_on_headers
+from django.utils.decorators import method_decorator
 from django.views import View
+
+from apps.core.htmx import add_hx_trigger
+from apps.core.shell import resolve_active_store
 
 from apps.inventory.forms import (
     InitialStockForm,
     InventoryItemCreateForm,
     InventoryItemFilterForm,
     InventoryItemUpdateForm,
+    QuickStockAdjustmentForm,
     StockAdjustmentConfirmForm,
     StockAdjustmentCreateForm,
     StockAdjustmentFilterForm,
@@ -27,9 +37,9 @@ from apps.inventory.forms import (
 )
 from apps.inventory.selectors import (
     get_inventory_dashboard_data,
-    get_inventory_item_adjustment_lines,
+    get_inventory_item_adjustments,
     get_inventory_item_detail,
-    get_inventory_item_latest_movements,
+    get_inventory_item_movements,
     get_inventory_items_for_business,
     get_inventory_visible_stores,
     get_stock_adjustment_detail,
@@ -46,6 +56,7 @@ from apps.inventory.services import (
     create_inventory_item,
     create_stock_adjustment,
     delete_stock_adjustment_line,
+    prepare_quick_stock_adjustment,
     update_inventory_item_settings,
     update_stock_adjustment_line,
 )
@@ -101,6 +112,7 @@ def _add_form_error_messages(request, form):
 # ==========================================================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class InventoryDashboardView(BusinessRequiredMixin, View):
     """Dashboard principal de inventario para el negocio actual."""
 
@@ -111,9 +123,41 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
     def get(self, request):
         """Renderiza el resumen del dashboard de inventario."""
 
+        visible_stores = get_inventory_visible_stores(request.user)
+        _shell_stores, active_store = resolve_active_store(request, user=request.user)
+        requested_store = request.GET.get("store")
+        can_all = request.user.is_superuser or is_owner_or_manager(request.user)
+        is_all_stores = requested_store == "all" and can_all
+        if requested_store and requested_store != "all":
+            selected_store = (
+                visible_stores.filter(pk=requested_store).first()
+                if requested_store.isdecimal()
+                else None
+            )
+            if selected_store is None:
+                raise Http404("Tienda no disponible")
+        elif is_all_stores:
+            selected_store = None
+        else:
+            selected_store = (
+                visible_stores.filter(pk=active_store.pk).first()
+                if active_store
+                else visible_stores.first()
+            )
+        scoped_stores = (
+            visible_stores
+            if is_all_stores
+            else visible_stores.filter(pk=selected_store.pk)
+            if selected_store
+            else visible_stores.none()
+        )
+        tab = request.GET.get("tab", "stock")
+        if tab not in {"stock", "movements", "adjustments"}:
+            tab = "stock"
+
         dashboard_data = get_inventory_dashboard_data(
             request.user.business,
-            stores=get_inventory_visible_stores(request.user),
+            stores=scoped_stores,
             latest_movements_limit=self.latest_movements_limit,
             latest_adjustments_limit=self.latest_adjustments_limit,
         )
@@ -121,7 +165,79 @@ class InventoryDashboardView(BusinessRequiredMixin, View):
         dashboard_data["can_manage_inventory"] = request.user.is_superuser or (
             is_owner_or_manager(request.user)
         )
-        return render(request, self.template_name, dashboard_data)
+        dashboard_data.update(
+            {
+                "visible_stores": visible_stores,
+                "selected_store": selected_store,
+                "is_all_stores": is_all_stores,
+                "can_all_stores": can_all,
+                "tab": tab,
+            }
+        )
+        if tab == "stock":
+            filter_data = request.GET.copy()
+            for workspace_key in ("tab", "store", "page"):
+                filter_data.pop(workspace_key, None)
+            form = InventoryItemFilterForm(
+                filter_data or None,
+                business=request.user.business,
+                stores=scoped_stores,
+            )
+            filters = form.cleaned_data if form.is_valid() else {}
+            page = Paginator(
+                get_inventory_items_for_business(
+                    request.user.business, filters=filters, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update(
+                {"form": form, "page_obj": page, "inventory_items": page}
+            )
+        elif tab == "movements":
+            filter_data = request.GET.copy()
+            for workspace_key in ("tab", "store", "page"):
+                filter_data.pop(workspace_key, None)
+            form = StockMovementFilterForm(
+                filter_data or None,
+                business=request.user.business,
+                stores=scoped_stores,
+            )
+            filters = form.cleaned_data if form.is_valid() else {}
+            page = Paginator(
+                get_stock_movements_for_business(
+                    request.user.business, filters=filters, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update(
+                {"form": form, "page_obj": page, "stock_movements": page}
+            )
+        else:
+            filter_data = request.GET.copy()
+            for workspace_key in ("tab", "store", "page"):
+                filter_data.pop(workspace_key, None)
+            form = StockAdjustmentFilterForm(
+                filter_data or None,
+                business=request.user.business,
+                stores=scoped_stores,
+            )
+            filters = form.cleaned_data if form.is_valid() else {}
+            page = Paginator(
+                get_stock_adjustments_for_business(
+                    request.user.business, filters=filters, stores=scoped_stores
+                ),
+                25,
+            ).get_page(request.GET.get("page"))
+            dashboard_data.update(
+                {"form": form, "page_obj": page, "stock_adjustments": page}
+            )
+        query = request.GET.copy()
+        query.pop("page", None)
+        dashboard_data["query_string"] = query.urlencode()
+        template = (
+            "inventory/partials/_workspace.html" if request.htmx else self.template_name
+        )
+        return render(request, template, dashboard_data)
 
 
 # ==========================================================
@@ -170,6 +286,7 @@ class InventoryItemListView(BusinessRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class InventoryItemDetailView(BusinessRequiredMixin, View):
     """Vista de detalle de un item de inventario."""
 
@@ -184,34 +301,43 @@ class InventoryItemDetailView(BusinessRequiredMixin, View):
             stores=get_inventory_visible_stores(request.user),
         )
 
-        latest_movements = get_inventory_item_latest_movements(
-            business=request.user.business,
-            inventory_item=inventory_item,
-        )
-
-        adjustment_lines = get_inventory_item_adjustment_lines(
-            business=request.user.business,
-            inventory_item=inventory_item,
-        )
+        tab = request.GET.get("tab", "summary")
+        if tab not in {"summary", "movements", "adjustments"}:
+            tab = "summary"
 
         context = {
             "inventory_item": inventory_item,
-            "latest_movements": latest_movements,
-            "adjustment_lines": adjustment_lines,
+            "tab": tab,
             "can_manage_inventory": request.user.is_superuser
             or request.user.role in {"owner", "manager"},
             "can_load_initial_stock": (
                 inventory_item.is_active
                 and inventory_item.current_stock == 0
-                and not latest_movements
+                and not inventory_item.movements.exists()
                 and (
                     request.user.is_superuser
                     or request.user.role in {"owner", "manager"}
                 )
             ),
         }
-
-        return render(request, self.template_name, context)
+        if tab == "movements":
+            context["page_obj"] = Paginator(
+                get_inventory_item_movements(
+                    business=request.user.business, inventory_item=inventory_item
+                ),
+                20,
+            ).get_page(request.GET.get("page"))
+        elif tab == "adjustments":
+            context["page_obj"] = Paginator(
+                get_inventory_item_adjustments(
+                    business=request.user.business, inventory_item=inventory_item
+                ),
+                20,
+            ).get_page(request.GET.get("page"))
+        template = (
+            "inventory/partials/_item_tab.html" if request.htmx else self.template_name
+        )
+        return render(request, template, context)
 
 
 class InventoryItemCreateView(
@@ -435,6 +561,45 @@ class InventoryInitialStockView(
         )
 
 
+class InventoryQuickAdjustmentView(
+    ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View
+):
+    """Prepare a one-line draft; preparation intentionally never changes stock."""
+
+    template_name = "inventory/quick_adjustment_form.html"
+
+    def get(self, request, pk):
+        item = get_inventory_item_detail(
+            request.user.business, pk, stores=get_inventory_visible_stores(request.user)
+        )
+        return render(
+            request,
+            self.template_name,
+            {"inventory_item": item, "form": QuickStockAdjustmentForm()},
+        )
+
+    def post(self, request, pk):
+        item = get_inventory_item_detail(
+            request.user.business, pk, stores=get_inventory_visible_stores(request.user)
+        )
+        form = QuickStockAdjustmentForm(request.POST)
+        if not form.is_valid():
+            return render(
+                request,
+                self.template_name,
+                {"inventory_item": item, "form": form},
+                status=422 if request.htmx else 200,
+            )
+        adjustment = prepare_quick_stock_adjustment(
+            inventory_item=item,
+            counted_stock=form.cleaned_data["counted_stock"],
+            notes=form.cleaned_data["notes"],
+            user=request.user,
+        )
+        messages.success(request, "Ajuste preparado. El stock todavía no ha cambiado.")
+        return redirect("inventory:stock_adjustment_review", pk=adjustment.pk)
+
+
 # ==========================================================
 # Movimientos de stock
 # ==========================================================
@@ -549,6 +714,7 @@ class StockAdjustmentListView(BusinessRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentDetailView(BusinessRequiredMixin, View):
     """Vista de detalle de un ajuste de stock."""
 
@@ -582,6 +748,47 @@ class StockAdjustmentDetailView(BusinessRequiredMixin, View):
             or request.user.role in {"owner", "manager"},
         }
 
+        template = (
+            "inventory/partials/_adjustment_lines.html"
+            if request.htmx and request.GET.get("fragment") == "lines"
+            else self.template_name
+        )
+        return render(request, template, context)
+
+
+class StockAdjustmentReviewView(
+    ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View
+):
+    """Read-only review step before the critical confirmation."""
+
+    template_name = "inventory/stock_adjustment_review.html"
+
+    def get(self, request, pk):
+        adjustment = get_stock_adjustment_detail(
+            business=request.user.business,
+            pk=pk,
+            stores=get_inventory_visible_stores(request.user),
+        )
+        if not adjustment.is_draft:
+            return redirect("inventory:stock_adjustment_detail", pk=adjustment.pk)
+        lines = list(get_stock_adjustment_lines(stock_adjustment=adjustment))
+        context = {
+            "stock_adjustment": adjustment,
+            "lines": lines,
+            "line_count": len(lines),
+            "changed_count": sum(line.difference != 0 for line in lines),
+            "incoming": sum(
+                (line.difference for line in lines if line.difference > 0),
+                Decimal("0.000"),
+            ),
+            "outgoing": abs(
+                sum(
+                    (line.difference for line in lines if line.difference < 0),
+                    Decimal("0.000"),
+                )
+            ),
+            "confirm_form": StockAdjustmentConfirmForm(adjustment=adjustment),
+        }
         return render(request, self.template_name, context)
 
 
@@ -652,6 +859,7 @@ class StockAdjustmentCreateView(
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineCreateView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -668,6 +876,8 @@ class StockAdjustmentLineCreateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         form = StockAdjustmentLineForm(
             business=request.user.business,
@@ -679,7 +889,12 @@ class StockAdjustmentLineCreateView(
             "form": form,
         }
 
-        return render(request, self.template_name, context)
+        template = (
+            "inventory/partials/_adjustment_line_form.html"
+            if request.htmx
+            else self.template_name
+        )
+        return render(request, template, context)
 
     def post(self, request, adjustment_pk):
         """Procesa el formulario para crear una nueva línea."""
@@ -688,6 +903,8 @@ class StockAdjustmentLineCreateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         form = StockAdjustmentLineForm(
             request.POST,
@@ -701,7 +918,17 @@ class StockAdjustmentLineCreateView(
                 "stock_adjustment": stock_adjustment,
                 "form": form,
             }
-            return render(request, self.template_name, context)
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
+            return render(
+                request,
+                template,
+                context,
+                status=422 if request.htmx else 200,
+            )
 
         try:
             add_stock_adjustment_line(
@@ -716,19 +943,38 @@ class StockAdjustmentLineCreateView(
                 "stock_adjustment": stock_adjustment,
                 "form": form,
             }
-            return render(request, self.template_name, context)
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
+            return render(
+                request,
+                template,
+                context,
+                status=422 if request.htmx else 200,
+            )
 
         messages.success(
             request,
             "Línea de ajuste creada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {
+                    "nx:close-modal": {"id": "inventory-line-dialog"},
+                    "nx:refresh-region": {"selector": "#adjustment-lines"},
+                },
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineUpdateView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -745,6 +991,8 @@ class StockAdjustmentLineUpdateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         line = get_object_or_404(
             stock_adjustment.lines.select_related(
@@ -766,7 +1014,12 @@ class StockAdjustmentLineUpdateView(
             "form": form,
         }
 
-        return render(request, self.template_name, context)
+        template = (
+            "inventory/partials/_adjustment_line_form.html"
+            if request.htmx
+            else self.template_name
+        )
+        return render(request, template, context)
 
     def post(self, request, adjustment_pk, line_pk):
         """Procesa cambios de una línea de ajuste."""
@@ -775,6 +1028,8 @@ class StockAdjustmentLineUpdateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         line = get_object_or_404(
             stock_adjustment.lines.select_related(
@@ -798,7 +1053,17 @@ class StockAdjustmentLineUpdateView(
                 "stock_adjustment_line": line,
                 "form": form,
             }
-            return render(request, self.template_name, context)
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
+            return render(
+                request,
+                template,
+                context,
+                status=422 if request.htmx else 200,
+            )
 
         try:
             update_stock_adjustment_line(
@@ -814,19 +1079,38 @@ class StockAdjustmentLineUpdateView(
                 "stock_adjustment_line": line,
                 "form": form,
             }
-            return render(request, self.template_name, context)
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
+            return render(
+                request,
+                template,
+                context,
+                status=422 if request.htmx else 200,
+            )
 
         messages.success(
             request,
             "Línea de ajuste actualizada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {
+                    "nx:close-modal": {"id": "inventory-line-dialog"},
+                    "nx:refresh-region": {"selector": "#adjustment-lines"},
+                },
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineDeleteView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -861,12 +1145,18 @@ class StockAdjustmentLineDeleteView(
             "Línea de ajuste eliminada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {"nx:refresh-region": {"selector": "#adjustment-lines"}},
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentConfirmView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -904,6 +1194,27 @@ class StockAdjustmentConfirmView(
                 user=request.user,
             )
         except ValidationError as error:
+            if any("stock ha cambiado" in message for message in error.messages):
+                adjustment.refresh_from_db()
+                conflict_lines = [
+                    line
+                    for line in get_stock_adjustment_lines(adjustment)
+                    if line.inventory_item.current_stock != line.system_stock
+                ]
+                template = (
+                    "inventory/partials/_adjustment_conflict.html"
+                    if request.htmx
+                    else "inventory/stock_adjustment_conflict.html"
+                )
+                response = render(
+                    request,
+                    template,
+                    {"stock_adjustment": adjustment, "conflict_lines": conflict_lines},
+                    status=409,
+                )
+                if request.htmx:
+                    response["X-Netxodo-Allow-Error-Swap"] = "true"
+                return response
             _add_validation_error_message(request, error)
             return redirect(
                 "inventory:stock_adjustment_detail",

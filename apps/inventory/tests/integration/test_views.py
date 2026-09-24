@@ -1,12 +1,20 @@
 """Tests de integracion para vistas de inventory."""
 
 from decimal import Decimal
+import json
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.formats import number_format
 
+from apps.catalog.models import Category
 from apps.inventory.models import InventoryItem, StockAdjustment, StockMovement
-from apps.inventory.services import add_stock_adjustment_line, create_stock_adjustment
+from apps.inventory.services import (
+    add_stock_adjustment_line,
+    cancel_stock_adjustment,
+    confirm_stock_adjustment,
+    create_stock_adjustment,
+)
 from apps.inventory.tests.factories import (
     create_business,
     create_inventory_cashier,
@@ -462,6 +470,268 @@ class InventoryViewsIntegrationTests(TestCase):
         )
         self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
 
+    def test_quick_adjustment_prepares_draft_without_changing_stock(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("3.000"),
+        )
+        self.login_as(self.owner)
+        url = reverse("inventory:item_adjust", kwargs={"pk": item.pk})
+
+        get_response = self.client.get(url)
+        invalid_response = self.client.post(
+            url, {"counted_stock": "-1"}, HTTP_HX_REQUEST="true"
+        )
+        valid_response = self.client.post(
+            url, {"counted_stock": "6.000", "notes": "Recuento"}
+        )
+
+        item.refresh_from_db()
+        adjustment = StockAdjustment.objects.get(store=self.store)
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(invalid_response.status_code, 422)
+        self.assertRedirects(
+            valid_response,
+            reverse("inventory:stock_adjustment_review", kwargs={"pk": adjustment.pk}),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertEqual(adjustment.lines.get().counted_stock, Decimal("6.000"))
+        self.assertEqual(item.current_stock, Decimal("3.000"))
+        self.assertFalse(StockMovement.objects.filter(inventory_item=item).exists())
+
+    def test_stale_adjustment_returns_contextual_hx_conflict(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("10.000"),
+        )
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=item,
+            counted_stock=Decimal("12.000"),
+        )
+        item.current_stock = Decimal("8.000")
+        item.save(update_fields=["current_stock", "updated_at"])
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("inventory:stock_adjustment_confirm", kwargs={"pk": adjustment.pk}),
+            {"confirm": "on"},
+            HTTP_HX_REQUEST="true",
+        )
+
+        adjustment.refresh_from_db()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.headers["X-Netxodo-Allow-Error-Swap"], "true")
+        self.assertContains(response, "stock ha cambiado", status_code=409)
+        self.assertContains(
+            response, number_format(Decimal("10.000"), decimal_pos=3), status_code=409
+        )
+        self.assertContains(
+            response, number_format(Decimal("8.000"), decimal_pos=3), status_code=409
+        )
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(StockMovement.objects.filter(inventory_item=item).exists())
+
+    def test_stale_adjustment_full_conflict_keeps_app_shell(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("10.000"),
+        )
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=item,
+            counted_stock=Decimal("12.000"),
+        )
+        item.current_stock = Decimal("8.000")
+        item.save(update_fields=["current_stock", "updated_at"])
+        self.login_as(self.owner)
+
+        response = self.client.post(
+            reverse("inventory:stock_adjustment_confirm", kwargs={"pk": adjustment.pk}),
+            {"confirm": "on"},
+        )
+
+        adjustment.refresh_from_db()
+        self.assertEqual(response.status_code, 409)
+        self.assertTemplateUsed(response, "inventory/stock_adjustment_conflict.html")
+        self.assertContains(response, "data-app-shell", status_code=409)
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(StockMovement.objects.filter(inventory_item=item).exists())
+
+    def test_adjustment_line_full_and_hx_contracts(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("3.000"),
+        )
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+        self.login_as(self.owner)
+        url = reverse(
+            "inventory:stock_adjustment_line_create",
+            kwargs={"adjustment_pk": adjustment.pk},
+        )
+
+        full_get = self.client.get(url)
+        hx_get = self.client.get(url, HTTP_HX_REQUEST="true")
+        invalid_hx = self.client.post(url, {}, HTTP_HX_REQUEST="true")
+        valid_hx = self.client.post(
+            url,
+            {"inventory_item": item.pk, "counted_stock": "4.000", "notes": "OK"},
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(full_get.status_code, 200)
+        self.assertTemplateUsed(full_get, "inventory/stock_adjustment_line_form.html")
+        self.assertEqual(hx_get.status_code, 200)
+        self.assertTemplateUsed(hx_get, "inventory/partials/_adjustment_line_form.html")
+        self.assertIn("HX-Request", hx_get.headers["Vary"])
+        self.assertEqual(invalid_hx.status_code, 422)
+        self.assertTemplateUsed(
+            invalid_hx, "inventory/partials/_adjustment_line_form.html"
+        )
+        self.assertEqual(valid_hx.status_code, 204)
+        events = json.loads(valid_hx.headers["HX-Trigger"])
+        self.assertEqual(events["nx:close-modal"]["id"], "inventory-line-dialog")
+        self.assertEqual(events["nx:refresh-region"]["selector"], "#adjustment-lines")
+        line = adjustment.lines.get()
+        update_url = reverse(
+            "inventory:stock_adjustment_line_update",
+            kwargs={"adjustment_pk": adjustment.pk, "line_pk": line.pk},
+        )
+        self.assertEqual(
+            self.client.get(update_url, HTTP_HX_REQUEST="true").status_code, 200
+        )
+        update_hx = self.client.post(
+            update_url,
+            {"inventory_item": item.pk, "counted_stock": "5.000", "notes": "Edit"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(update_hx.status_code, 204)
+        line.refresh_from_db()
+        self.assertEqual(line.counted_stock, Decimal("5.000"))
+        delete_hx = self.client.post(
+            reverse(
+                "inventory:stock_adjustment_line_delete",
+                kwargs={"adjustment_pk": adjustment.pk, "line_pk": line.pk},
+            ),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(delete_hx.status_code, 204)
+        self.assertFalse(adjustment.lines.exists())
+
+    def test_review_does_not_mutate_stock_or_status(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("3.000"),
+        )
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=item,
+            counted_stock=Decimal("6.000"),
+        )
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("inventory:stock_adjustment_review", kwargs={"pk": adjustment.pk})
+        )
+
+        item.refresh_from_db()
+        adjustment.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(item.current_stock, Decimal("3.000"))
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(StockMovement.objects.filter(inventory_item=item).exists())
+
+    def test_confirmed_and_cancelled_adjustments_are_read_only(self):
+        item = create_inventory_item(
+            business=self.business,
+            store=self.store,
+            product=self.product,
+            current_stock=Decimal("3.000"),
+        )
+        confirmed = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.owner,
+        )
+        add_stock_adjustment_line(
+            adjustment=confirmed,
+            inventory_item=item,
+            counted_stock=Decimal("4.000"),
+        )
+        confirm_stock_adjustment(adjustment=confirmed, user=self.owner)
+        cancelled = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_OTHER,
+            user=self.owner,
+        )
+        cancel_stock_adjustment(adjustment=cancelled, user=self.owner)
+        self.login_as(self.owner)
+
+        for adjustment in (confirmed, cancelled):
+            with self.subTest(status=adjustment.status):
+                response = self.client.get(
+                    reverse(
+                        "inventory:stock_adjustment_detail",
+                        kwargs={"pk": adjustment.pk},
+                    )
+                )
+                self.assertNotContains(response, "Añadir producto")
+                self.assertNotContains(response, "Editar")
+                self.assertNotContains(response, "Eliminar")
+                self.assertNotContains(response, "Revisar ajuste")
+                self.assertNotContains(response, "Confirmar ajuste")
+                self.assertNotContains(response, "Cancelar ajuste")
+                review = self.client.get(
+                    reverse(
+                        "inventory:stock_adjustment_review",
+                        kwargs={"pk": adjustment.pk},
+                    )
+                )
+                self.assertRedirects(
+                    review,
+                    reverse(
+                        "inventory:stock_adjustment_detail",
+                        kwargs={"pk": adjustment.pk},
+                    ),
+                    fetch_redirect_response=False,
+                )
+
 
 @override_settings(LOGIN_URL="/users/login/")
 class InventoryStoreScopingIntegrationTests(TestCase):
@@ -742,3 +1012,88 @@ class InventoryStoreScopingIntegrationTests(TestCase):
         for endpoint in endpoints:
             with self.subTest(endpoint=endpoint):
                 self.assertEqual(self.client.get(endpoint).status_code, 405)
+
+    def test_all_stores_keeps_search_and_stock_status_filters(self):
+        self.item_a1.product.name = "ABC encontrado"
+        self.item_a1.product.sku = "ABC-001"
+        self.item_a1.product.save(update_fields=["name", "sku", "updated_at"])
+        self.item_a2.minimum_stock = Decimal("5")
+        self.item_a2.save(update_fields=["minimum_stock", "updated_at"])
+        self.login_as(self.owner)
+
+        search = self.client.get(
+            reverse("inventory:dashboard"),
+            {"store": "all", "search": "ABC"},
+        )
+        self.assertSequenceEqual(
+            list(search.context["inventory_items"]), [self.item_a1]
+        )
+        low = self.client.get(
+            reverse("inventory:dashboard"),
+            {"store": "all", "stock_status": "low"},
+        )
+        self.assertSequenceEqual(list(low.context["inventory_items"]), [self.item_a2])
+
+    def test_all_stores_keeps_category_filter(self):
+        category = Category.objects.create(business=self.business, name="Bebidas")
+        self.item_a1.product.category = category
+        self.item_a1.product.save(update_fields=["category", "updated_at"])
+        self.login_as(self.manager)
+
+        response = self.client.get(
+            reverse("inventory:dashboard"),
+            {"store": "all", "category": category.pk},
+        )
+
+        self.assertSequenceEqual(
+            list(response.context["inventory_items"]), [self.item_a1]
+        )
+
+    def test_item_detail_tabs_return_full_page_and_hx_partial(self):
+        self._movement(self.item_a1)
+        self.login_as(self.owner)
+        url = reverse("inventory:item_detail", kwargs={"pk": self.item_a1.pk})
+
+        full = self.client.get(url, {"tab": "movements"})
+        partial = self.client.get(url, {"tab": "movements"}, HTTP_HX_REQUEST="true")
+
+        self.assertContains(full, "Inventario")
+        self.assertTemplateUsed(full, "inventory/item_detail.html")
+        self.assertTemplateUsed(partial, "inventory/partials/_item_tab.html")
+        self.assertIn("HX-Request", partial.headers["Vary"])
+
+    def test_all_stores_hx_response_renders_store_column_and_both_stores(self):
+        shared_product = create_inventory_product(
+            business=self.business,
+            name="Agua compartida",
+        )
+        shared_product.sku = "AG-001"
+        shared_product.save(update_fields=["sku", "updated_at"])
+        create_inventory_item(
+            business=self.business,
+            store=self.store_a1,
+            product=shared_product,
+            current_stock=Decimal("10"),
+        )
+        create_inventory_item(
+            business=self.business,
+            store=self.store_a2,
+            product=shared_product,
+            current_stock=Decimal("4"),
+        )
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("inventory:dashboard"),
+            {"store": "all", "tab": "stock", "search": "AG-001"},
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "inventory/partials/_workspace.html")
+        self.assertIs(response.context["is_all_stores"], True)
+        self.assertContains(response, '<th scope="col">Tienda</th>', html=True)
+        self.assertContains(response, self.store_a1.name)
+        self.assertContains(response, self.store_a2.name)
+        self.assertIn("HX-Request", response.headers["Vary"])
+        self.assertContains(response, 'hx-sync="#inventory-workspace:replace"')

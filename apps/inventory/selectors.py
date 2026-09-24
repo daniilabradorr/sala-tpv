@@ -9,7 +9,7 @@ Regla:
 - Siempre filtramos por business.
 """
 
-from django.db.models import F
+from django.db.models import Count, F, Q
 from django.shortcuts import get_object_or_404
 
 from apps.inventory.models import (
@@ -67,9 +67,11 @@ def get_inventory_dashboard_data(
 
     if business is None:
         return {
+            "controlled_products": 0,
             "total_products_with_stock": 0,
             "low_stock_products": 0,
             "out_of_stock_products": 0,
+            "healthy_stock_products": 0,
             "latest_movements": [],
             "latest_adjustments": [],
         }
@@ -113,15 +115,18 @@ def get_inventory_dashboard_data(
     ]
 
     return {
-        "total_products_with_stock": inventory_items.filter(
-            available__gt=0,
-        ).count(),
+        "controlled_products": inventory_items.count(),
+        # Backwards-compatible key for callers predating the workspace.
+        "total_products_with_stock": inventory_items.count(),
         "low_stock_products": inventory_items.filter(
             available__gt=0,
             available__lte=F("minimum_stock"),
         ).count(),
         "out_of_stock_products": inventory_items.filter(
             available__lte=0,
+        ).count(),
+        "healthy_stock_products": inventory_items.filter(
+            available__gt=F("minimum_stock"),
         ).count(),
         "latest_movements": latest_movements,
         "latest_adjustments": latest_adjustments,
@@ -149,6 +154,7 @@ def get_inventory_items_for_business(business, filters=None, stores=None):
             "business",
             "store",
             "product",
+            "product__category",
         )
         .annotate(
             available=F("current_stock") - F("reserved_stock"),
@@ -165,6 +171,25 @@ def get_inventory_items_for_business(business, filters=None, stores=None):
     is_active = filters.get("is_active")
     low_stock = filters.get("low_stock")
     out_of_stock = filters.get("out_of_stock")
+    search = filters.get("search")
+    stock_status = filters.get("stock_status")
+    category = filters.get("category")
+    location = filters.get("location")
+
+    if search:
+        queryset = queryset.filter(
+            Q(product__name__icontains=search) | Q(product__sku__icontains=search)
+        )
+    if category:
+        queryset = queryset.filter(product__category=category)
+    if location:
+        queryset = queryset.filter(location__icontains=location)
+    if stock_status == "normal":
+        queryset = queryset.filter(available__gt=F("minimum_stock"))
+    elif stock_status == "low":
+        queryset = queryset.filter(available__gt=0, available__lte=F("minimum_stock"))
+    elif stock_status == "out":
+        queryset = queryset.filter(available__lte=0)
 
     if store:
         queryset = queryset.filter(store=store)
@@ -259,6 +284,38 @@ def get_inventory_item_latest_movements(
     )
 
 
+def get_inventory_item_movements(*, business, inventory_item):
+    """Return the complete, optimized movement history for pagination."""
+
+    return (
+        StockMovement.objects.filter(
+            business=business,
+            inventory_item=inventory_item,
+        )
+        .select_related(
+            "product",
+            "store",
+            "created_by",
+            "sale",
+            "sale_return",
+            "purchase",
+            "purchase_receipt",
+            "stock_adjustment_line__adjustment",
+        )
+        .order_by("-occurred_at", "-created_at")
+    )
+
+
+def get_inventory_item_adjustments(*, business, inventory_item):
+    """Return adjustment lines for one item without loading unrelated history."""
+
+    return (
+        inventory_item.adjustment_lines.filter(adjustment__business=business)
+        .select_related("adjustment", "adjustment__created_by", "product")
+        .order_by("-created_at")
+    )
+
+
 def get_inventory_item_adjustment_lines(
     *,
     business,
@@ -303,6 +360,11 @@ def get_stock_movements_for_business(business, filters=None, stores=None):
             "store",
             "created_by",
             "stock_adjustment_line",
+            "stock_adjustment_line__adjustment",
+            "sale",
+            "sale_return",
+            "purchase",
+            "purchase_receipt",
         )
         .order_by("-occurred_at", "-created_at")
     )
@@ -346,6 +408,11 @@ def get_stock_movement_detail(business, pk, stores=None):
         "store",
         "created_by",
         "stock_adjustment_line",
+        "stock_adjustment_line__adjustment",
+        "sale",
+        "sale_return",
+        "purchase",
+        "purchase_receipt",
     )
     queryset = _scope_to_stores(queryset, stores)
     return get_object_or_404(
@@ -378,6 +445,7 @@ def get_stock_adjustments_for_business(business, filters=None, stores=None):
             "created_by",
             "confirmed_by",
         )
+        .annotate(line_count=Count("lines"))
         .order_by("-created_at")
     )
     queryset = _scope_to_stores(queryset, stores)
