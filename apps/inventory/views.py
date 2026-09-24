@@ -14,12 +14,13 @@ from decimal import Decimal
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.vary import vary_on_headers
 from django.utils.decorators import method_decorator
 from django.views import View
 
+from apps.core.htmx import add_hx_trigger
 from apps.core.shell import resolve_active_store
 
 from apps.inventory.forms import (
@@ -713,6 +714,7 @@ class StockAdjustmentListView(BusinessRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentDetailView(BusinessRequiredMixin, View):
     """Vista de detalle de un ajuste de stock."""
 
@@ -746,7 +748,12 @@ class StockAdjustmentDetailView(BusinessRequiredMixin, View):
             or request.user.role in {"owner", "manager"},
         }
 
-        return render(request, self.template_name, context)
+        template = (
+            "inventory/partials/_adjustment_lines.html"
+            if request.htmx and request.GET.get("fragment") == "lines"
+            else self.template_name
+        )
+        return render(request, template, context)
 
 
 class StockAdjustmentReviewView(
@@ -762,6 +769,8 @@ class StockAdjustmentReviewView(
             pk=pk,
             stores=get_inventory_visible_stores(request.user),
         )
+        if not adjustment.is_draft:
+            return redirect("inventory:stock_adjustment_detail", pk=adjustment.pk)
         lines = list(get_stock_adjustment_lines(stock_adjustment=adjustment))
         context = {
             "stock_adjustment": adjustment,
@@ -850,6 +859,7 @@ class StockAdjustmentCreateView(
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineCreateView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -866,6 +876,8 @@ class StockAdjustmentLineCreateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         form = StockAdjustmentLineForm(
             business=request.user.business,
@@ -877,12 +889,12 @@ class StockAdjustmentLineCreateView(
             "form": form,
         }
 
-        return render(
-            request,
-            self.template_name,
-            context,
-            status=422 if request.htmx else 200,
+        template = (
+            "inventory/partials/_adjustment_line_form.html"
+            if request.htmx
+            else self.template_name
         )
+        return render(request, template, context)
 
     def post(self, request, adjustment_pk):
         """Procesa el formulario para crear una nueva línea."""
@@ -891,6 +903,8 @@ class StockAdjustmentLineCreateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         form = StockAdjustmentLineForm(
             request.POST,
@@ -904,9 +918,14 @@ class StockAdjustmentLineCreateView(
                 "stock_adjustment": stock_adjustment,
                 "form": form,
             }
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
             return render(
                 request,
-                self.template_name,
+                template,
                 context,
                 status=422 if request.htmx else 200,
             )
@@ -924,9 +943,14 @@ class StockAdjustmentLineCreateView(
                 "stock_adjustment": stock_adjustment,
                 "form": form,
             }
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
             return render(
                 request,
-                self.template_name,
+                template,
                 context,
                 status=422 if request.htmx else 200,
             )
@@ -936,12 +960,21 @@ class StockAdjustmentLineCreateView(
             "Línea de ajuste creada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {
+                    "nx:close-modal": {"id": "inventory-line-dialog"},
+                    "nx:refresh-region": {"selector": "#adjustment-lines"},
+                },
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineUpdateView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -958,6 +991,8 @@ class StockAdjustmentLineUpdateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         line = get_object_or_404(
             stock_adjustment.lines.select_related(
@@ -979,12 +1014,12 @@ class StockAdjustmentLineUpdateView(
             "form": form,
         }
 
-        return render(
-            request,
-            self.template_name,
-            context,
-            status=422 if request.htmx else 200,
+        template = (
+            "inventory/partials/_adjustment_line_form.html"
+            if request.htmx
+            else self.template_name
         )
+        return render(request, template, context)
 
     def post(self, request, adjustment_pk, line_pk):
         """Procesa cambios de una línea de ajuste."""
@@ -993,6 +1028,8 @@ class StockAdjustmentLineUpdateView(
             business=request.user.business,
             pk=adjustment_pk,
         )
+        if not stock_adjustment.is_draft:
+            raise Http404("El ajuste ya no se puede editar")
 
         line = get_object_or_404(
             stock_adjustment.lines.select_related(
@@ -1016,9 +1053,14 @@ class StockAdjustmentLineUpdateView(
                 "stock_adjustment_line": line,
                 "form": form,
             }
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
             return render(
                 request,
-                self.template_name,
+                template,
                 context,
                 status=422 if request.htmx else 200,
             )
@@ -1037,9 +1079,14 @@ class StockAdjustmentLineUpdateView(
                 "stock_adjustment_line": line,
                 "form": form,
             }
+            template = (
+                "inventory/partials/_adjustment_line_form.html"
+                if request.htmx
+                else self.template_name
+            )
             return render(
                 request,
-                self.template_name,
+                template,
                 context,
                 status=422 if request.htmx else 200,
             )
@@ -1049,12 +1096,21 @@ class StockAdjustmentLineUpdateView(
             "Línea de ajuste actualizada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {
+                    "nx:close-modal": {"id": "inventory-line-dialog"},
+                    "nx:refresh-region": {"selector": "#adjustment-lines"},
+                },
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentLineDeleteView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -1089,12 +1145,18 @@ class StockAdjustmentLineDeleteView(
             "Línea de ajuste eliminada correctamente.",
         )
 
+        if request.htmx:
+            return add_hx_trigger(
+                HttpResponse(status=204),
+                {"nx:refresh-region": {"selector": "#adjustment-lines"}},
+            )
         return redirect(
             "inventory:stock_adjustment_detail",
             pk=stock_adjustment.pk,
         )
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class StockAdjustmentConfirmView(
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
@@ -1139,9 +1201,14 @@ class StockAdjustmentConfirmView(
                     for line in get_stock_adjustment_lines(adjustment)
                     if line.inventory_item.current_stock != line.system_stock
                 ]
+                template = (
+                    "inventory/partials/_adjustment_conflict.html"
+                    if request.htmx
+                    else "inventory/stock_adjustment_conflict.html"
+                )
                 response = render(
                     request,
-                    "inventory/partials/_adjustment_conflict.html",
+                    template,
                     {"stock_adjustment": adjustment, "conflict_lines": conflict_lines},
                     status=409,
                 )

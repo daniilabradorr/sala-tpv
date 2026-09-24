@@ -71,3 +71,5 @@
   .inventory-filter-heading { align-items: center; display: flex; justify-content: space-between; }
   .inventory-filter-drawer[open] { background: var(--nx-surface); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-lg) var(--nx-radius-lg) 0 0; box-shadow: var(--nx-shadow-md); height: auto; margin: auto 0 0; max-height: 90dvh; max-width: 100vw; overflow: auto; padding: var(--nx-space-5); position: fixed; width: 100vw; }
 }
+.inventory-product { align-items: center; display: flex; gap: var(--nx-space-3); }
+.inventory-product__thumb { border-radius: var(--nx-radius-md); height: 2.5rem; object-fit: cover; width: 2.5rem; }

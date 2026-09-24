@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% load static %}{% block title %}Conflicto · {{ stock_adjustment.code }}{% endblock %}{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/inventory.css' %}">{% endblock %}{% block content %}{% include "inventory/partials/_adjustment_conflict.html" %}{% endblock %}

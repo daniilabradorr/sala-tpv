@@ -6,7 +6,7 @@ from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
-from apps.inventory.models import StockAdjustment
+from apps.inventory.models import StockAdjustment, StockMovement
 from apps.inventory.tests.factories import (
     create_business,
     create_inventory_item,
@@ -25,6 +25,12 @@ from apps.inventory.tests.factories import (
 )
 class InventoryBrowserTests(StaticLiveServerTestCase):
     password = "Inventory-E2E-123!"
+
+    def _login(self, page, owner):
+        page.goto(f"{self.live_server_url}/users/login/")
+        page.get_by_label("Correo electrónico").fill(owner.email)
+        page.get_by_label("Contraseña").fill(self.password)
+        page.get_by_role("button", name="Iniciar sesión").click()
 
     def test_workspace_filters_detail_quick_adjustment_and_responsive(self):
         business = create_business("Inventory Browser", "inventory-browser")
@@ -54,16 +60,22 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900})
-            page.goto(f"{self.live_server_url}/users/login/")
-            page.get_by_label("Correo electrónico").fill(owner.email)
-            page.get_by_label("Contraseña").fill(self.password)
-            page.get_by_role("button", name="Iniciar sesión").click()
+            self._login(page, owner)
             page.goto(f"{self.live_server_url}/inventory/?store={store.pk}")
             expect(page.get_by_role("heading", name="Inventario")).to_be_visible()
             expect(page.get_by_text("Productos controlados")).to_be_visible()
             page.get_by_label("Buscar producto o SKU").fill("AG-001")
             page.get_by_role("button", name="Filtrar").click()
             expect(page.get_by_text("Agua 50cl")).to_be_visible()
+            page.get_by_label("Ámbito de tienda").select_option("all")
+            expect(page.get_by_role("columnheader", name="Tienda")).to_be_visible()
+            expect(page.get_by_text("Centro")).to_be_visible()
+            expect(page.get_by_text("Norte")).to_be_visible()
+            page.go_back()
+            expect(page.get_by_label("Ámbito de tienda")).to_have_value(str(store.pk))
+            page.go_forward()
+            expect(page.get_by_label("Ámbito de tienda")).to_have_value("all")
+            expect(page.get_by_label("Buscar producto o SKU")).to_have_value("AG-001")
             page.get_by_text("Agua 50cl").click()
             page.get_by_role("tab", name="Movimientos").click()
             page.get_by_role("tab", name="Ajustes").click()
@@ -74,8 +86,29 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Preparar ajuste").click()
             expect(page.get_by_text("El stock todavía no ha cambiado.")).to_be_visible()
             expect(page.get_by_text("Confirmar modificará el stock")).to_be_visible()
+            page.get_by_label(
+                "Confirmo que quiero aplicar este ajuste de stock"
+            ).check()
+            page.get_by_role("button", name="Confirmar ajuste").click()
+            expect(page.get_by_text("Confirmado", exact=True)).to_be_visible()
+            expect(page.get_by_role("link", name="Añadir producto")).to_have_count(0)
+            page.goto(
+                f"{self.live_server_url}/inventory/?store={store.pk}&tab=movements"
+            )
+            expect(page.get_by_text("+3,000")).to_be_visible()
+            expect(page.get_by_text("3,000 → 6,000")).to_be_visible()
+            page.get_by_role("link", name="Ajuste AJ-").click()
+            expect(page.get_by_text("Stock anterior")).to_be_visible()
+            expect(page.get_by_text("Stock posterior")).to_be_visible()
             for width, height in ((1440, 900), (900, 900), (375, 812)):
                 page.set_viewport_size({"width": width, "height": height})
+                if width == 375:
+                    page.goto(f"{self.live_server_url}/inventory/?store={store.pk}")
+                    filters = page.get_by_role("button", name="Filtros")
+                    expect(filters).to_be_visible()
+                    filters.click()
+                    expect(page.get_by_role("dialog")).to_be_visible()
+                    page.get_by_role("button", name="Cerrar filtros").click()
                 self.assertLessEqual(
                     page.evaluate("document.documentElement.scrollWidth"),
                     page.evaluate("document.documentElement.clientWidth"),
@@ -83,7 +116,45 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             browser.close()
 
         item.refresh_from_db()
-        self.assertEqual(item.current_stock, Decimal("3"))
+        self.assertEqual(item.current_stock, Decimal("6"))
         self.assertEqual(
-            StockAdjustment.objects.get().status, StockAdjustment.STATUS_DRAFT
+            StockAdjustment.objects.get().status, StockAdjustment.STATUS_CONFIRMED
         )
+        movement = StockMovement.objects.get(inventory_item=item)
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_ADJUSTMENT_IN)
+        self.assertEqual(movement.stock_before, Decimal("3"))
+        self.assertEqual(movement.stock_after, Decimal("6"))
+
+    def test_initial_stock_flow(self):
+        business = create_business("Initial Browser", "initial-browser")
+        store = create_inventory_store(business=business, name="Centro", code="INITIAL")
+        owner = create_inventory_owner(business=business, password=self.password)
+        product = create_inventory_product(business=business, name="Producto nuevo")
+        item = create_inventory_item(
+            business=business,
+            store=store,
+            product=product,
+            current_stock=Decimal("0"),
+        )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login(page, owner)
+            page.goto(f"{self.live_server_url}/inventory/items/{item.pk}/")
+            page.get_by_role("link", name="Cargar stock inicial").click()
+            page.get_by_label("Cantidad inicial").fill("48")
+            page.get_by_label("Motivo").fill("Apertura")
+            page.get_by_role("button", name="Cargar stock inicial").click()
+            expect(
+                page.get_by_text("Stock inicial cargado correctamente.")
+            ).to_be_visible()
+            expect(page.get_by_role("link", name="Cargar stock inicial")).to_have_count(
+                0
+            )
+            browser.close()
+
+        item.refresh_from_db()
+        movement = StockMovement.objects.get(inventory_item=item)
+        self.assertEqual(item.current_stock, Decimal("48"))
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_INITIAL)
