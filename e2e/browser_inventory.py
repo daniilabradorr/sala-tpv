@@ -5,6 +5,7 @@ import re
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
+from django.urls import reverse
 from playwright.sync_api import expect, sync_playwright
 
 from apps.inventory.models import StockAdjustment, StockMovement
@@ -168,14 +169,62 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Confirmar ajuste").click()
             expect(page.get_by_text("Confirmado", exact=True)).to_be_visible()
             expect(page.get_by_role("link", name="Añadir producto")).to_have_count(0)
+            browser.close()
+
+        item.refresh_from_db()
+        movement = StockMovement.objects.select_related(
+            "stock_adjustment_line__adjustment"
+        ).get(inventory_item=item)
+        adjustment = movement.stock_adjustment_line.adjustment
+        adjustment_detail_url = reverse(
+            "inventory:stock_adjustment_detail", kwargs={"pk": adjustment.pk}
+        )
+        movement_detail_url = reverse(
+            "inventory:stock_movement_detail", kwargs={"pk": movement.pk}
+        )
+        self.assertEqual(item.current_stock, Decimal("6"))
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_CONFIRMED)
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_ADJUSTMENT_IN)
+        self.assertEqual(movement.stock_before, Decimal("3"))
+        self.assertEqual(movement.stock_after, Decimal("6"))
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            self._login(page, owner)
             page.goto(
                 f"{self.live_server_url}/inventory/?store={store.pk}&tab=movements"
             )
             expect(page.get_by_text("+3,000")).to_be_visible()
             expect(page.get_by_text("3,000 → 6,000")).to_be_visible()
-            page.get_by_role("link", name="Ajuste AJ-").click()
-            expect(page.get_by_text("Stock anterior")).to_be_visible()
-            expect(page.get_by_text("Stock posterior")).to_be_visible()
+            origin_link = page.get_by_role(
+                "link", name=f"Ajuste {adjustment.code}", exact=True
+            )
+            expect(origin_link).to_be_visible()
+            expect(origin_link).to_have_attribute("href", adjustment_detail_url)
+            origin_link.click()
+            expect(page.get_by_role("heading", name=adjustment.code)).to_be_visible()
+            expect(page.get_by_text("Confirmado", exact=True)).to_be_visible()
+            expect(page.get_by_text(product.name, exact=True)).to_be_visible()
+            page.go_back()
+            movement_link = page.locator(f'a[href="{movement_detail_url}"]')
+            expect(movement_link).to_be_visible()
+            movement_link.click()
+            expect(page.get_by_text("Stock anterior", exact=True)).to_be_visible()
+            expect(page.get_by_text("Stock posterior", exact=True)).to_be_visible()
+            expect(page.get_by_text("Cambio", exact=True)).to_be_visible()
+            expect(page.get_by_text("Origen", exact=True)).to_be_visible()
+            expect(page.get_by_text("Usuario", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name=product.name)).to_be_visible()
+            expect(
+                page.locator(".page-heading > div > p:not(.erp-eyebrow)")
+            ).to_have_text(store.name)
+            expect(page.locator('dt:has-text("Stock anterior") + dd')).to_have_text(
+                "3,000"
+            )
+            expect(page.locator('dt:has-text("Stock posterior") + dd')).to_have_text(
+                "6,000"
+            )
             for width, height in ((1440, 900), (900, 900), (375, 812)):
                 page.set_viewport_size({"width": width, "height": height})
                 if width == 375:
@@ -202,16 +251,6 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
                     page.evaluate("document.documentElement.clientWidth"),
                 )
             browser.close()
-
-        item.refresh_from_db()
-        self.assertEqual(item.current_stock, Decimal("6"))
-        self.assertEqual(
-            StockAdjustment.objects.get().status, StockAdjustment.STATUS_CONFIRMED
-        )
-        movement = StockMovement.objects.get(inventory_item=item)
-        self.assertEqual(movement.movement_type, StockMovement.TYPE_ADJUSTMENT_IN)
-        self.assertEqual(movement.stock_before, Decimal("3"))
-        self.assertEqual(movement.stock_after, Decimal("6"))
 
     def test_initial_stock_flow(self):
         business = create_business("Initial Browser", "initial-browser")
