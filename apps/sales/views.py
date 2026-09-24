@@ -19,8 +19,11 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views import View
+from decimal import Decimal
 
 from apps.core.htmx import add_hx_trigger
+from apps.customers.forms import CustomerCreateForm
+from apps.customers.services import CustomerService
 
 from apps.billing.models import (
     BillingDocumentStatusChoices,
@@ -821,6 +824,91 @@ class SaleHeaderUpdateView(
             "sales:sale_detail",
             store_id=store.pk,
             sale_pk=sale.pk,
+        )
+
+
+class SaleQuickCustomerCreateView(
+    SaleObjectMixin,
+    CanSellInStoreMixin,
+    BusinessRequiredMixin,
+    View,
+):
+    """Create and select a customer without leaving or recreating an open sale."""
+
+    template_name = "sales/partials/_quick_customer_form.html"
+
+    def get(self, request, store_id, sale_pk):
+        self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
+        return render(
+            request,
+            self.template_name,
+            {
+                "sale": sale,
+                "store": self.store,
+                "form": CustomerCreateForm(business=_get_business(request)),
+            },
+        )
+
+    def post(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
+        form = CustomerCreateForm(request.POST, business=business)
+        if form.is_valid():
+            try:
+                customer, _ = CustomerService.create_customer(
+                    business=business,
+                    customer_data=form.cleaned_data,
+                    credit_limit=Decimal("0.00"),
+                    is_blocked=False,
+                )
+                sale = update_sale_header(
+                    business=business,
+                    sale=sale,
+                    customer=customer,
+                    document_type_requested=sale.document_type_requested,
+                    updated_by=request.user,
+                )
+            except ValidationError as error:
+                _add_service_errors_to_form(form, error)
+            else:
+                sale = get_sale_detail(business=business, pk=sale.pk)
+                response = render(
+                    request,
+                    "sales/partials/_workspace_header.html",
+                    {
+                        "store": store,
+                        "sale": sale,
+                        "header_form": SaleHeaderUpdateForm(
+                            business=business,
+                            store=store,
+                            sale=sale,
+                            initial={
+                                "customer": customer,
+                                "document_type_requested": sale.document_type_requested,
+                            },
+                        ),
+                    },
+                )
+                response["HX-Retarget"] = "#workspace-header"
+                response["HX-Reswap"] = "outerHTML"
+                return add_hx_trigger(
+                    response,
+                    {
+                        "nx:close-modal": {"id": "quick-customer-dialog"},
+                        "nx:toast": {
+                            "message": "Cliente creado y seleccionado.",
+                            "tone": "success",
+                        },
+                    },
+                )
+        return render(
+            request,
+            self.template_name,
+            {"sale": sale, "store": store, "form": form},
+            status=422 if request.htmx else 200,
         )
 
 

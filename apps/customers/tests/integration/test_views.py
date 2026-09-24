@@ -36,7 +36,9 @@ class CustomerViewTests(TestCase):
         self.client.force_login(self.cashier)
         response = self.client.get(url)
         self.assertContains(response, self.account.customer.name)
-        self.assertContains(response, "Personas y empresas asociadas a tus ventas.")
+        self.assertContains(
+            response, "Una ficha global para todas las tiendas del negocio."
+        )
         self.assertContains(response, 'class="table-scroll"', html=False)
         self.assertNotContains(response, self.other_account.customer.name)
         self.assertEqual(
@@ -83,6 +85,28 @@ class CustomerViewTests(TestCase):
         self.assertContains(response, 'id="customer-results"', count=1)
         self.assertNotContains(response, "<html")
         self.assertIn("HX-Request", response.headers["Vary"])
+
+    def test_mobile_filters_use_dialog_and_tabs_swap_navigation_with_panel(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("customers:customer_list"))
+        self.assertContains(response, '<dialog id="customer-filters"', html=False)
+        self.assertContains(response, "data-nx-drawer")
+
+        detail_url = reverse(
+            "customers:customer_detail", args=[self.account.customer.pk]
+        )
+        response = self.client.get(
+            detail_url,
+            {"tab": "account"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(response, 'id="customer-workspace-content"', count=1)
+        self.assertContains(
+            response,
+            'role="tab" aria-selected="true" href="?tab=account"',
+            html=False,
+        )
+        self.assertContains(response, 'id="customer-tab-panel"', count=1)
 
     def test_permissions_and_post_actions(self):
         self.client.force_login(self.cashier)
