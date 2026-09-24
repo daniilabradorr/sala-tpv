@@ -97,7 +97,13 @@ class BrowserResponsiveShellTests(StaticLiveServerTestCase):
                 toggle.click()
                 catalog_link.click()
                 page.wait_for_url(f"{self.live_server_url}/catalog/products/")
-                expect(page.locator('[aria-current="page"]')).to_have_text("Productos")
+                expect(catalog_link).to_have_attribute("aria-current", "page")
+                catalog_tabs = page.get_by_role(
+                    "navigation", name="Secciones del catálogo"
+                )
+                expect(
+                    catalog_tabs.get_by_role("link", name="Productos")
+                ).to_have_attribute("aria-current", "page")
                 page.keyboard.press("Control+k")
                 command_trigger = page.locator("[data-command-trigger]")
                 palette = page.locator("[data-command-dialog]")

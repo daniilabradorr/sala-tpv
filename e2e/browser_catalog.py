@@ -1,6 +1,7 @@
 """Browser coverage for the FE-15 catalog workspace."""
 
 from decimal import Decimal
+import re
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
@@ -69,12 +70,30 @@ class CatalogBrowserTests(StaticLiveServerTestCase):
             ).to_be_visible()
             page.get_by_label("Buscar productos").fill("COLA-E2E")
             expect(page.get_by_text("Cola E2E").first).to_be_visible()
+            page.get_by_label("Estado").select_option("active")
+            page.get_by_label("Control de stock").select_option("tracked")
+            page.wait_for_timeout(500)
+            expect(page.locator("#product-results")).to_have_count(1)
             page.get_by_text("Cola E2E").first.click()
             expect(page.get_by_role("heading", name="Inventario")).to_be_visible()
-            expect(page.get_by_role("cell", name="Centro")).to_be_visible()
-            expect(page.get_by_role("cell", name="6.000")).to_be_visible()
+            stock_row = page.get_by_role("row").filter(has_text="Centro")
+            expect(stock_row).to_be_visible()
+            expect(stock_row.locator("td").nth(1)).to_have_text(
+                re.compile(r"^8([,.]0+)?$")
+            )
+            expect(stock_row.locator("td").nth(2)).to_have_text(
+                re.compile(r"^2([,.]0+)?$")
+            )
+            expect(stock_row.locator("td").nth(3)).to_have_text(
+                re.compile(r"^6([,.]0+)?$")
+            )
+            page.go_back()
+            expect(page.locator("#product-results")).to_have_count(1)
             page.get_by_role("link", name="Categorías").click()
             expect(page.get_by_text("Refrescos").first).to_be_visible()
+            page.get_by_label("Buscar categoría").fill("Refrescos")
+            page.wait_for_timeout(500)
+            expect(page.locator("#category-results")).to_have_count(1)
             page.get_by_role("link", name="Impuestos").click()
             expect(page.get_by_text("Predeterminado").first).to_be_visible()
 

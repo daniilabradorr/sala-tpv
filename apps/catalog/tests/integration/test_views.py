@@ -1,13 +1,20 @@
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
 from django.urls import reverse
 from decimal import Decimal
 from apps.catalog.models import Category, Tax, Product
 from apps.catalog.tests.factories import create_category, create_tax, create_product
-from apps.inventory.models import InventoryItem
+from apps.inventory.models import InventoryItem, StockMovement
 from apps.sales.services import add_sale_line, open_sale
 from apps.sales.tests.factories import create_pos_settings
 from apps.users.models import RoleChoices
-from apps.users.tests.factories import create_business, create_store, create_user
+from apps.users.tests.factories import (
+    create_business,
+    create_store,
+    create_store_access,
+    create_user,
+)
 
 
 class CatalogViewsIntegrationTests(TestCase):
@@ -166,6 +173,103 @@ class CatalogViewsIntegrationTests(TestCase):
             response, "catalog/products/partials/_product_results.html"
         )
         self.assertNotContains(response, "<html")
+        self.assertIn("HX-Request", response.headers["Vary"])
+        self.assertContains(response, 'id="product-results"', count=1)
+
+    def test_product_list_full_page_has_one_outer_swap_target(self):
+        self.login_as(self.cashier)
+        response = self.client.get(reverse("catalog:product_list"))
+        self.assertTemplateUsed(response, "catalog/products/product_list.html")
+        self.assertContains(response, 'id="product-results"', count=1)
+        self.assertContains(response, 'hx-swap="outerHTML"')
+
+    def test_product_list_individual_filters_and_combination(self):
+        service = create_product(
+            business=self.business,
+            name="Asesoría especial",
+            sku="SERV-42",
+            barcode=None,
+            is_service=True,
+            track_stock=False,
+            is_active=False,
+        )
+        cases = (
+            ({"q": "Coca-Cola"}, self.product.name, service.name),
+            ({"q": "COCA_500"}, self.product.name, service.name),
+            ({"q": "PRD000001"}, self.product.name, service.name),
+            ({"category": self.category.pk}, self.product.name, service.name),
+            ({"type": "physical"}, self.product.name, service.name),
+            ({"type": "service"}, service.name, self.product.name),
+            ({"status": "active"}, self.product.name, service.name),
+            ({"status": "inactive"}, service.name, self.product.name),
+            ({"stock": "tracked"}, self.product.name, service.name),
+            ({"stock": "untracked"}, service.name, self.product.name),
+            (
+                {
+                    "q": "asesoría",
+                    "type": "service",
+                    "status": "inactive",
+                    "stock": "untracked",
+                },
+                service.name,
+                self.product.name,
+            ),
+        )
+        self.login_as(self.cashier)
+        for params, included, excluded in cases:
+            with self.subTest(params=params):
+                response = self.client.get(reverse("catalog:product_list"), params)
+                self.assertContains(response, included)
+                self.assertNotContains(response, excluded)
+
+    def test_product_list_paginates_25_and_preserves_filters(self):
+        for index in range(30):
+            create_product(
+                business=self.business,
+                name=f"Producto paginado {index:02d}",
+                sku=f"PAGE-{index:02d}",
+                barcode=f"PAGECODE{index:02d}",
+            )
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("catalog:product_list"), {"q": "Producto paginado", "page": 2}
+        )
+        self.assertEqual(len(response.context["products"]), 5)
+        self.assertContains(response, "q=Producto+paginado&amp;page=1")
+
+    def test_product_list_related_data_does_not_add_queries_per_row(self):
+        self.login_as(self.cashier)
+        with CaptureQueriesContext(connection) as baseline:
+            response = self.client.get(reverse("catalog:product_list"))
+            self.assertEqual(response.status_code, 200)
+        baseline_count = len(baseline)
+        for index in range(10):
+            create_product(
+                business=self.business,
+                category=self.category,
+                tax=self.tax,
+                name=f"Query product {index}",
+                sku=f"QUERY-{index}",
+                barcode=f"QUERYCODE-{index}",
+            )
+        with CaptureQueriesContext(connection) as populated:
+            response = self.client.get(reverse("catalog:product_list"))
+            self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(populated), baseline_count + 1)
+
+    def test_category_search_htmx_is_scoped_partial_and_varies(self):
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("catalog:category_list"),
+            {"q": "Beb"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertTemplateUsed(
+            response, "catalog/categories/partials/_category_results.html"
+        )
+        self.assertContains(response, "Bebidas")
+        self.assertNotContains(response, "Categoría Otro Negocio")
+        self.assertContains(response, 'id="category-results"', count=1)
         self.assertIn("HX-Request", response.headers["Vary"])
 
     def test_category_list_only_shows_categories_from_current_business(self):
@@ -447,6 +551,90 @@ class CatalogViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_tracked_product_detail_reads_inventory_for_owner_and_manager(self):
+        first = create_store(business=self.business, name="Centro", code="CENTRO")
+        second = create_store(business=self.business, name="Norte", code="NORTE")
+        InventoryItem.objects.create(
+            business=self.business,
+            store=first,
+            product=self.product,
+            current_stock=Decimal("8"),
+            reserved_stock=Decimal("2"),
+        )
+        InventoryItem.objects.create(
+            business=self.business,
+            store=second,
+            product=self.product,
+            current_stock=Decimal("4"),
+            reserved_stock=Decimal("1"),
+        )
+        for user in (self.owner, self.manager):
+            with self.subTest(role=user.role):
+                self.login_as(user)
+                response = self.client.get(
+                    reverse("catalog:product_detail", kwargs={"pk": self.product.pk})
+                )
+                self.assertContains(response, "Centro")
+                self.assertContains(response, "Norte")
+                self.assertEqual(StockMovement.objects.count(), 0)
+                self.client.logout()
+
+    def test_cashier_only_reads_inventory_in_accessible_stores(self):
+        visible = create_store(business=self.business, name="Visible", code="VISIBLE")
+        hidden = create_store(business=self.business, name="Oculta", code="HIDDEN")
+        create_store_access(business=self.business, user=self.cashier, store=visible)
+        for store in (visible, hidden):
+            InventoryItem.objects.create(
+                business=self.business, store=store, product=self.product
+            )
+        other_store = create_store(
+            business=self.other_business, name="Negocio ajeno", code="OTHER"
+        )
+        InventoryItem.objects.create(
+            business=self.other_business,
+            store=other_store,
+            product=self.other_product,
+        )
+        self.login_as(self.cashier)
+
+        response = self.client.get(
+            reverse("catalog:product_detail", kwargs={"pk": self.product.pk})
+        )
+
+        self.assertContains(response, "Visible")
+        self.assertNotContains(response, "Oculta")
+        self.assertNotContains(response, "Negocio ajeno")
+
+    def test_service_and_untracked_product_do_not_show_inventory_rows(self):
+        service = create_product(
+            business=self.business,
+            name="Servicio",
+            sku="SERVICE",
+            barcode=None,
+            is_service=True,
+            track_stock=False,
+        )
+        untracked = create_product(
+            business=self.business,
+            name="Producto sin stock",
+            sku="UNTRACKED",
+            barcode="UNTRACKED-CODE",
+            track_stock=False,
+        )
+        self.login_as(self.cashier)
+        service_response = self.client.get(
+            reverse("catalog:product_detail", kwargs={"pk": service.pk})
+        )
+        untracked_response = self.client.get(
+            reverse("catalog:product_detail", kwargs={"pk": untracked.pk})
+        )
+        self.assertContains(service_response, "no requiere inventario físico")
+        self.assertEqual(service_response.context["inventory_items"], [])
+        self.assertNotContains(service_response, "Stock actual")
+        self.assertContains(untracked_response, "no controla stock")
+        self.assertEqual(untracked_response.context["inventory_items"], [])
+        self.assertNotContains(untracked_response, "Stock actual")
+
     def test_owner_can_create_product_and_manipulated_business_is_ignored(self):
         self.login_as(self.owner)
 
@@ -455,8 +643,8 @@ class CatalogViewsIntegrationTests(TestCase):
             data={
                 **self.valid_product_data(),
                 "business": str(self.other_business.pk),
-                "is_active": "",
-                "track_stock": "",
+                "is_active": "on",
+                "track_stock": "on",
             },
         )
 

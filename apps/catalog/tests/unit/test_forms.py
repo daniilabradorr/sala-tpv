@@ -372,14 +372,32 @@ class ProductFormTests(TestCase):
 
     def test_product_create_form_accepts_track_stock(self):
         form = ProductCreateForm(
-            data=self.valid_product_data(),
+            data=self.valid_product_data(track_stock="on"),
             business=self.business,
         )
 
         self.assertTrue(form.is_valid(), form.errors.as_data())
         product = form.save()
 
-        self.assertFalse(product.track_stock)
+        self.assertTrue(product.track_stock)
+
+    def test_product_create_form_accepts_untracked_physical_product(self):
+        form = ProductCreateForm(data=self.valid_product_data(), business=self.business)
+        self.assertTrue(form.is_valid(), form.errors.as_data())
+        self.assertFalse(form.save().track_stock)
+
+    def test_product_create_form_accepts_active_and_inactive_status(self):
+        active_form = ProductCreateForm(
+            data=self.valid_product_data(sku="ACTIVE", is_active="on"),
+            business=self.business,
+        )
+        inactive_form = ProductCreateForm(
+            data=self.valid_product_data(sku="INACTIVE"), business=self.business
+        )
+        self.assertTrue(active_form.is_valid(), active_form.errors.as_data())
+        self.assertTrue(inactive_form.is_valid(), inactive_form.errors.as_data())
+        self.assertTrue(active_form.save().is_active)
+        self.assertFalse(inactive_form.save().is_active)
 
     def test_product_create_form_service_forces_no_stock(self):
         form = ProductCreateForm(
@@ -388,6 +406,7 @@ class ProductFormTests(TestCase):
                 sku="SERV_INST",
                 barcode="",
                 is_service="on",
+                track_stock="on",
             ),
             business=self.business,
         )

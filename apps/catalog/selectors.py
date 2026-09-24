@@ -49,21 +49,27 @@ def get_category_rows(business, search=""):
         by_parent.setdefault(category.parent_id, []).append(category)
 
     rows = []
+    visited = set()
+    visiting = set()
 
     def visit(category, depth, path):
+        if category.pk in visited or category.pk in visiting:
+            return
+        visiting.add(category.pk)
         current_path = [*path, category.name]
         rows.append(
             {"category": category, "depth": depth, "path": " / ".join(current_path)}
         )
         for child in by_parent.get(category.pk, []):
             visit(child, depth + 1, current_path)
+        visiting.remove(category.pk)
+        visited.add(category.pk)
 
     for root in by_parent.get(None, []):
         visit(root, 0, [])
     # Include malformed/orphaned trees defensively.
-    seen = {row["category"].pk for row in rows}
     for category in categories:
-        if category.pk not in seen:
+        if category.pk not in visited:
             visit(category, 0, [])
     if search:
         needle = search.casefold()
