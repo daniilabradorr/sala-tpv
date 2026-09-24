@@ -107,8 +107,15 @@ class AppShellIntegrationTests(TestCase):
 
         response = self.client.get(reverse("catalog:dashboard"))
 
+        self.assertRedirects(response, reverse("catalog:product_list"))
+        response = self.client.get(reverse("catalog:product_list"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="app-sidebar"')
+        self.assertContains(
+            response,
+            f'href="{reverse("catalog:product_list")}" class="is-active" '
+            'aria-current="page"',
+        )
         active_items = [
             item
             for group in response.context["shell_navigation"]
