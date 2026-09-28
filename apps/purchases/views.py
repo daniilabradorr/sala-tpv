@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
@@ -21,7 +23,7 @@ from apps.purchases.forms import (
 )
 from apps.catalog.models import Product
 from apps.core.htmx import add_hx_trigger
-from apps.purchases.models import Purchase, PurchaseStatusChoices
+from apps.purchases.models import Purchase, PurchaseReceipt, PurchaseStatusChoices
 from apps.purchases.selectors import (
     get_accessible_purchase_stores,
     get_purchase_detail,
@@ -101,6 +103,10 @@ class SupplierListView(_PurchasesView, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["filter_form"].auto_id = "id_supplier_desktop_%s"
+        context["mobile_filter_form"] = SupplierFilterForm(
+            self.request.GET or None, auto_id="id_supplier_mobile_%s"
+        )
         context["filter_form"] = self.filter_form
         context["page_query"] = _page_query(self.request)
         context["pagination_target"] = "#supplier-results"
@@ -311,18 +317,20 @@ class PurchaseListView(_PurchasesView, ListView):
     def get_queryset(self):
         business = _business(self.request)
         _, active_store = resolve_active_store(self.request, user=self.request.user)
-        filter_data = self.request.GET.copy() if self.request.GET else None
-        if filter_data is not None and "store" not in filter_data:
-            filter_data["store"] = str(active_store.pk) if active_store else ""
+        self.active_store = active_store
+        self.filter_data = self.request.GET.copy() if self.request.GET else None
+        if self.filter_data is not None and "store" not in self.filter_data:
+            self.filter_data["store"] = str(active_store.pk) if active_store else ""
         self.filter_form = PurchaseFilterForm(
-            filter_data,
+            self.filter_data,
             business=business,
             user=self.request.user,
             initial={"store": active_store},
+            auto_id="id_purchase_desktop_%s",
         )
         data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
         self.local_store = (
-            data.get("store") if filter_data is not None else active_store
+            data.get("store") if self.filter_data is not None else active_store
         )
         if self.request.GET and not self.filter_form.is_valid():
             return Purchase.objects.none()
@@ -350,6 +358,13 @@ class PurchaseListView(_PurchasesView, ListView):
                 ),
                 "statuses": PurchaseStatusChoices.choices,
                 "filter_form": self.filter_form,
+                "mobile_filter_form": PurchaseFilterForm(
+                    self.filter_data,
+                    business=business,
+                    user=self.request.user,
+                    initial={"store": self.active_store},
+                    auto_id="id_purchase_mobile_%s",
+                ),
                 "local_store": self.local_store,
                 "all_stores": self.local_store is None,
                 "kpis": get_purchase_list_kpis(
@@ -541,6 +556,8 @@ class _PurchaseLineView(_PurchasesView, View):
                 ),
             },
         )
+        response["HX-Retarget"] = "#purchase-workspace"
+        response["HX-Reswap"] = "outerHTML"
         return add_hx_trigger(
             response,
             {
@@ -583,13 +600,18 @@ class PurchaseLineCreateView(_PurchaseLineView):
                 _service_errors(form, error)
             else:
                 return self.line_response(purchase)
-        return render(
+        response = render(
             request,
             "purchases/partials/_purchase_line_form.html"
             if _is_htmx(request)
             else "purchases/purchase_line_form.html",
             {"form": form, "purchase": purchase},
+            status=422 if _is_htmx(request) else 200,
         )
+        if _is_htmx(request):
+            response["HX-Retarget"] = "#purchase-line-modal-body"
+            response["HX-Reswap"] = "innerHTML"
+        return response
 
 
 class PurchaseLineUpdateView(_PurchaseLineView):
@@ -638,13 +660,18 @@ class PurchaseLineUpdateView(_PurchaseLineView):
                 _service_errors(form, error)
             else:
                 return self.line_response(purchase)
-        return render(
+        response = render(
             request,
             "purchases/partials/_purchase_line_form.html"
             if _is_htmx(request)
             else "purchases/purchase_line_form.html",
             {"form": form, "purchase": purchase, "line": line},
+            status=422 if _is_htmx(request) else 200,
         )
+        if _is_htmx(request):
+            response["HX-Retarget"] = "#purchase-line-modal-body"
+            response["HX-Reswap"] = "innerHTML"
+        return response
 
 
 class PurchaseLineDeleteView(_PurchaseLineView):
@@ -754,7 +781,12 @@ class PurchaseCancelView(_PurchaseActionView):
             )
         except ValidationError as error:
             messages.error(request, str(error))
-        return redirect("purchases:purchase_detail", pk=pk)
+        url = reverse("purchases:purchase_detail", kwargs={"pk": pk})
+        if _is_htmx(request):
+            response = HttpResponse(status=204)
+            response["HX-Redirect"] = url
+            return response
+        return redirect(url)
 
 
 class PurchaseReceiptCreateView(_PurchasesView, View):
@@ -783,6 +815,24 @@ class PurchaseReceiptCreateView(_PurchasesView, View):
 
     def post(self, request, pk):
         purchase = self.purchase()
+        receivable = purchase.status in {
+            PurchaseStatusChoices.ORDERED,
+            PurchaseStatusChoices.PARTIALLY_RECEIVED,
+        }
+        try:
+            retry_key = UUID(str(request.POST.get("idempotency_key", "")))
+        except (TypeError, ValueError, AttributeError):
+            retry_key = None
+        is_idempotent_retry = purchase.status == PurchaseStatusChoices.RECEIVED and (
+            retry_key is not None
+            and PurchaseReceipt.objects.filter(
+                business=_business(request),
+                purchase=purchase,
+                idempotency_key=retry_key,
+            ).exists()
+        )
+        if not (receivable or is_idempotent_retry):
+            raise PermissionDenied("La compra no admite nuevas recepciones.")
         form = PurchaseReceiptForm(
             request.POST,
             purchase_lines=get_purchase_lines(

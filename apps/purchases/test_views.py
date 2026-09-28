@@ -1,7 +1,9 @@
 from uuid import uuid4
+from decimal import Decimal
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
@@ -66,6 +68,18 @@ class PurchaseViewAccessTests(TestCase):
             supplier=self.supplier,
             created_by=self.owner,
             reference="OTHER-STORE",
+        )
+        Purchase.objects.bulk_create(
+            [
+                Purchase(
+                    business=self.business,
+                    store=self.store,
+                    supplier=self.supplier,
+                    created_by=self.owner,
+                    reference=f"PAGE-{index:02d}",
+                )
+                for index in range(26)
+            ]
         )
         session = self.client.session
         session[ACTIVE_STORE_SESSION_KEY] = self.store.pk
@@ -198,17 +212,41 @@ class PurchaseViewAccessTests(TestCase):
             cost_price=1,
             unit=Product.UNIT_UNIDAD,
         )
-        self.client.force_login(self.owner)
-        response = self.client.get(
-            reverse(
-                "purchases:product_search",
-                kwargs={"purchase_pk": self.purchase.pk},
-            ),
-            {"product_query": "SEARCH-CAFE"},
-            HTTP_HX_REQUEST="true",
+        other_business = Business.objects.create(
+            name="Other search", slug=f"other-search-{uuid4().hex}"
         )
-        self.assertContains(response, product.name)
-        self.assertContains(response, f'data-product-id="{product.pk}"')
+        foreign = Product.objects.create(
+            business=other_business,
+            name="Café ajeno",
+            sku="SEARCH-CAFE-FOREIGN",
+            barcode="8412345678999",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+        )
+        inactive = Product.objects.create(
+            business=self.business,
+            name="Café inactivo",
+            sku="SEARCH-CAFE-INACTIVE",
+            barcode="8412345678982",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+            is_active=False,
+        )
+        self.client.force_login(self.owner)
+        url = reverse(
+            "purchases:product_search", kwargs={"purchase_pk": self.purchase.pk}
+        )
+        for query in ("buscable", "SEARCH-CAFE", "8412345678901"):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    url, {"product_query": query}, HTTP_HX_REQUEST="true"
+                )
+                self.assertContains(response, product.name)
+                self.assertContains(response, f'data-product-id="{product.pk}"')
+                self.assertNotContains(response, foreign.name)
+                self.assertNotContains(response, inactive.name)
         line_form = self.client.get(
             reverse(
                 "purchases:purchase_line_create",
@@ -217,6 +255,74 @@ class PurchaseViewAccessTests(TestCase):
             HTTP_HX_REQUEST="true",
         )
         self.assertContains(line_form, 'hx-trigger="input changed delay:300ms, search"')
+
+    def test_invalid_line_create_and_update_retarget_modal(self):
+        product = Product.objects.create(
+            business=self.business,
+            name="Modal",
+            sku=f"MODAL-{uuid4().hex[:6]}",
+            barcode=f"4{uuid4().int % 10**12:012d}",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+        )
+        self.client.force_login(self.owner)
+        create_url = reverse(
+            "purchases:purchase_line_create",
+            kwargs={"purchase_pk": self.purchase.pk},
+        )
+        invalid = self.client.post(
+            create_url,
+            {"product": product.pk, "quantity": "", "unit_cost": ""},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(invalid.status_code, 422)
+        self.assertTemplateUsed(invalid, "purchases/partials/_purchase_line_form.html")
+        self.assertEqual(invalid.headers["HX-Retarget"], "#purchase-line-modal-body")
+        self.assertEqual(invalid.headers["HX-Reswap"], "innerHTML")
+        self.assertNotContains(invalid, 'id="purchase-workspace"', status_code=422)
+
+        line = add_purchase_line(
+            business=self.business,
+            purchase=self.purchase,
+            product=product,
+            quantity=1,
+            unit_cost=1,
+            user=self.owner,
+        )
+        update_url = reverse(
+            "purchases:purchase_line_update",
+            kwargs={"purchase_pk": self.purchase.pk, "line_pk": line.pk},
+        )
+        invalid = self.client.post(
+            update_url,
+            {"quantity": "", "unit_cost": "", "tax_rate": "0"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(invalid.headers["HX-Retarget"], "#purchase-line-modal-body")
+        self.assertEqual(invalid.headers["HX-Reswap"], "innerHTML")
+
+    def test_receipt_post_rejects_non_receivable_states(self):
+        self.client.force_login(self.owner)
+        url = reverse("purchases:purchase_receive", kwargs={"pk": self.purchase.pk})
+        for status in (
+            PurchaseStatusChoices.DRAFT,
+            PurchaseStatusChoices.RECEIVED,
+            PurchaseStatusChoices.CANCELLED,
+        ):
+            Purchase.objects.filter(pk=self.purchase.pk).update(
+                status=status,
+                ordered_at=(
+                    timezone.now() if status == PurchaseStatusChoices.RECEIVED else None
+                ),
+            )
+            self.purchase.refresh_from_db()
+            with self.subTest(status=status):
+                self.assertEqual(
+                    self.client.post(url, {"idempotency_key": uuid4()}).status_code,
+                    403,
+                )
 
     def test_order_get_is_review_and_post_mutates(self):
         self.client.force_login(self.owner)
@@ -342,7 +448,8 @@ class PurchaseViewAccessTests(TestCase):
         review = self.client.get(
             reverse("purchases:purchase_order", kwargs={"pk": self.purchase.pk})
         )
-        self.assertContains(review, "2.000</strong> unidades")
+        self.assertEqual(review.context["progress"]["ordered"], Decimal("2"))
+        self.assertContains(review, "unidades")
         response = self.client.post(
             reverse("purchases:purchase_order", kwargs={"pk": self.purchase.pk})
         )

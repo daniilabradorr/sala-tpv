@@ -17,7 +17,7 @@ class AccessibleFormMixin:
         super().__init__(*args, **kwargs)
         for name, field in self.fields.items():
             if field.help_text:
-                field.widget.attrs["aria-describedby"] = f"id_{name}-help"
+                field.widget.attrs["aria-describedby"] = f"{self[name].auto_id}-help"
 
     def full_clean(self):
         super().full_clean()
@@ -27,7 +27,7 @@ class AccessibleFormMixin:
             widget = self.fields[name].widget
             widget.attrs["aria-invalid"] = "true"
             described_by = widget.attrs.get("aria-describedby", "").split()
-            described_by.append(f"id_{name}-errors")
+            described_by.append(f"{self[name].auto_id}-errors")
             widget.attrs["aria-describedby"] = " ".join(dict.fromkeys(described_by))
 
 

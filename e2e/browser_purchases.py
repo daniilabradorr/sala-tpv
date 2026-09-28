@@ -17,6 +17,7 @@ from apps.purchases.models import (
     PurchaseStatusChoices,
     Supplier,
 )
+from apps.purchases.services import add_purchase_line
 from apps.stores.models import Store
 from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_user
@@ -98,22 +99,52 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Añadir producto").click()
             line_modal = page.locator("#purchase-line-modal")
             search = line_modal.get_by_label("Buscar producto")
-            search.fill("CAFE-E2E")
+            with page.expect_response(
+                lambda response: (
+                    "/products/search/" in response.url
+                    and "product_query=CAFE-E2E" in response.url
+                    and response.status == 200
+                )
+            ):
+                search.fill("CAFE-E2E")
             result = line_modal.locator("#product-results").get_by_role(
                 "button", name=re.compile("Café Browser.*CAFE-E2E")
             )
             expect(result).to_be_visible()
-            search.fill("")
+            with page.expect_response(
+                lambda response: (
+                    "/products/search/" in response.url
+                    and "product_query=" in response.url
+                    and response.status == 200
+                )
+            ):
+                search.fill("")
             expect(line_modal.locator("#product-results")).to_contain_text(
                 "Escribe para buscar productos"
             )
-            search.fill("CAFE-E2E")
+            with page.expect_response(
+                lambda response: (
+                    "/products/search/" in response.url
+                    and "product_query=CAFE-E2E" in response.url
+                    and response.status == 200
+                )
+            ):
+                search.fill("CAFE-E2E")
             expect(result).to_be_visible()
             result.click()
-            line_modal.locator("input[name=quantity]").fill("5")
+            expect(line_modal.locator("input[name=product]")).to_have_value(
+                str(self.product.pk)
+            )
             line_modal.locator("input[name=unit_cost]").fill("2")
             line_modal.locator("input[name=tax_rate]").fill("10")
             line_modal.get_by_role("button", name="Guardar producto").click()
+            expect(line_modal).to_have_attribute("open", "")
+            expect(line_modal.locator(".field-errors")).to_be_visible()
+            expect(page.locator("#purchase-workspace")).to_have_count(1)
+            expect(page.get_by_role("link", name="Resumen")).to_be_visible()
+            line_modal.locator("input[name=quantity]").fill("5")
+            line_modal.get_by_role("button", name="Guardar producto").click()
+            expect(line_modal).not_to_have_attribute("open", "")
             expect(page.locator("#purchase-lines")).to_contain_text("11.00 €")
 
             page.get_by_role("link", name="Realizar pedido").click()
@@ -203,12 +234,42 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             browser.close()
 
     def test_responsive_surfaces_have_no_horizontal_overflow(self):
+        supplier = Supplier.objects.get(name="Proveedor Browser")
+        purchase = Purchase.objects.create(
+            business=self.business,
+            store=self.store,
+            supplier=supplier,
+            created_by=self.owner,
+            reference="RESPONSIVE-LINES",
+        )
+        add_purchase_line(
+            business=self.business,
+            purchase=purchase,
+            product=self.product,
+            quantity=5,
+            unit_cost=2,
+            tax_rate=10,
+            user=self.owner,
+        )
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             for width in (375, 767, 768):
                 page = browser.new_page(viewport={"width": width, "height": 812})
                 self.login(page)
                 page.goto(f"{self.live_server_url}/purchases/")
+                ids_are_unique = page.evaluate(
+                    """() => { const ids = [...document.querySelectorAll('[id]')]
+                        .map((node) => node.id); return new Set(ids).size === ids.length; }"""
+                )
+                assert ids_are_unique
+                if width <= 767:
+                    page.get_by_role("button", name="Filtros").click()
+                    expect(page.locator("#purchase-filters")).to_have_attribute(
+                        "open", ""
+                    )
+                    page.locator("#purchase-filters").get_by_role(
+                        "button", name="×"
+                    ).click()
                 assert page.evaluate(
                     "document.documentElement.scrollWidth <= innerWidth"
                 )
@@ -225,6 +286,20 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
                             "Proveedor Browser", exact=True
                         )
                     ).to_be_visible()
+                assert page.evaluate(
+                    "document.documentElement.scrollWidth <= innerWidth"
+                )
+                page.goto(f"{self.live_server_url}/purchases/{purchase.pk}/")
+                page.get_by_role("link", name="Productos").click()
+                if width <= 767:
+                    card = page.locator(".purchase-line-card")
+                    expect(card).to_be_visible()
+                    expect(card).to_contain_text("Pedida")
+                    expect(card).to_contain_text("Recibida")
+                    expect(card).to_contain_text("Pendiente")
+                    expect(card.get_by_role("button", name="Editar")).to_be_visible()
+                else:
+                    expect(page.locator(".purchase-line-table")).to_be_visible()
                 assert page.evaluate(
                     "document.documentElement.scrollWidth <= innerWidth"
                 )
