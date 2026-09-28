@@ -288,7 +288,18 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             )
         ).to_be_visible()
         self._select_or_verify_single_series()
-        self.page.get_by_role("button", name="Emitir rectificativa").click()
+        with self.page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/rectify/" in response.url
+            )
+        ) as response_info:
+            self.page.get_by_role("button", name="Emitir rectificativa").click()
+        response = response_info.value
+        self.assertEqual(response.status, 204)
+        redirect = response.headers.get("hx-redirect")
+        self.assertIsNotNone(redirect)
+        self.assertRegex(redirect, r"/billing/stores/\d+/documents/\d+/$")
+        self.page.wait_for_url(re.compile(r"/billing/stores/\d+/documents/\d+/$"))
         return self._id_from_url(r"/documents/(\d+)/$")
 
     def _select_or_verify_single_series(self):

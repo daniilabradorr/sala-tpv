@@ -1,5 +1,6 @@
 """Real Chromium coverage for the FE-18 Billing workspace."""
 
+import re
 import uuid
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
@@ -192,13 +193,31 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 expect(billing_header.locator(".erp-subtitle")).to_contain_text(
                     "Tienda Billing E2E"
                 )
-                page.get_by_label("Buscar").fill(self.document_number)
+                filters = page.locator("#billing-document-filters")
+                search = filters.get_by_role("textbox", name="Buscar", exact=True)
+                with page.expect_response(
+                    lambda response: (
+                        "/billing/stores/" in response.url
+                        and "/documents/" in response.url
+                        and "q=" in response.url
+                        and response.status == 200
+                    )
+                ):
+                    search.fill(self.document_number)
                 expect(
-                    page.get_by_role("link", name=self.document_number)
+                    page.get_by_role("link", name=self.document_number, exact=True)
                 ).to_be_visible()
-                page.get_by_label("Buscar").fill("Cliente Fiscal Snapshot")
+                with page.expect_response(
+                    lambda response: (
+                        "/billing/stores/" in response.url
+                        and "/documents/" in response.url
+                        and "q=" in response.url
+                        and response.status == 200
+                    )
+                ):
+                    search.fill("Cliente Fiscal Snapshot")
                 expect(
-                    page.get_by_role("link", name=self.document_number)
+                    page.get_by_role("link", name=self.document_number, exact=True)
                 ).to_be_visible()
                 page.get_by_label("Tipo de documento").select_option("F2")
                 page.get_by_label("Estado").select_option("issued")
@@ -222,7 +241,19 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 page.get_by_role("link", name="Sustituir por factura completa").click()
                 expect(page.get_by_text(self.document_number)).to_be_visible()
                 page.get_by_label("Cliente").select_option(str(self.customer_id))
-                page.get_by_role("button", name="Emitir factura completa").click()
+                with page.expect_response(
+                    lambda response: (
+                        response.request.method == "POST"
+                        and "/substitute/" in response.url
+                    )
+                ) as response_info:
+                    page.get_by_role("button", name="Emitir factura completa").click()
+                response = response_info.value
+                self.assertEqual(response.status, 204)
+                redirect = response.headers.get("hx-redirect")
+                self.assertIsNotNone(redirect)
+                self.assertRegex(redirect, r"/billing/stores/\d+/documents/\d+/$")
+                page.wait_for_url(re.compile(r"/billing/stores/\d+/documents/\d+/$"))
                 page.get_by_role("link", name="Relaciones", exact=True).click()
                 expect(page.get_by_text("Sustituye a")).to_be_visible()
                 page.get_by_role("link", name=self.document_number).click()
