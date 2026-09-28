@@ -75,8 +75,21 @@ class PurchaseViewAccessTests(TestCase):
         self.assertContains(response, self.purchase.reference)
         self.assertNotContains(response, "OTHER-STORE")
         self.assertEqual(response.context["filter_form"].initial["store"], self.store)
+        paged = self.client.get(f"{reverse('purchases:purchase_list')}?page=2")
+        self.assertEqual(
+            paged.context["filter_form"]["store"].value(), str(self.store.pk)
+        )
+        self.assertIn(f"store={self.store.pk}", paged.context["page_query"])
+        self.assertNotContains(paged, "OTHER-STORE")
         response = self.client.get(f"{reverse('purchases:purchase_list')}?store=")
         self.assertContains(response, "OTHER-STORE")
+        self.assertIn("store=&", response.context["page_query"])
+        self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
+        scoped = self.client.get(
+            f"{reverse('purchases:purchase_list')}?store={other_store.pk}"
+        )
+        self.assertContains(scoped, "OTHER-STORE")
+        self.assertNotContains(scoped, self.purchase.reference)
         self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
 
     def test_cashier_is_forbidden(self):
@@ -196,6 +209,14 @@ class PurchaseViewAccessTests(TestCase):
         )
         self.assertContains(response, product.name)
         self.assertContains(response, f'data-product-id="{product.pk}"')
+        line_form = self.client.get(
+            reverse(
+                "purchases:purchase_line_create",
+                kwargs={"purchase_pk": self.purchase.pk},
+            ),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(line_form, 'hx-trigger="input changed delay:300ms, search"')
 
     def test_order_get_is_review_and_post_mutates(self):
         self.client.force_login(self.owner)
@@ -203,6 +224,77 @@ class PurchaseViewAccessTests(TestCase):
         review = self.client.get(url)
         self.assertEqual(review.status_code, 200)
         self.assertContains(review, "líneas comerciales quedarán fijadas")
+
+    def test_commercial_edit_views_deny_non_draft_purchase(self):
+        product = Product.objects.create(
+            business=self.business,
+            name="Fijado",
+            sku=f"LOCKED-{uuid4().hex[:6]}",
+            barcode=f"7{uuid4().int % 10**12:012d}",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+        )
+        line = add_purchase_line(
+            business=self.business,
+            purchase=self.purchase,
+            product=product,
+            quantity=1,
+            unit_cost=1,
+            user=self.owner,
+        )
+        order_purchase(
+            business=self.business, purchase=self.purchase, ordered_by=self.owner
+        )
+        self.client.force_login(self.owner)
+        requests = (
+            (
+                "get",
+                reverse("purchases:purchase_update", kwargs={"pk": self.purchase.pk}),
+                {},
+            ),
+            (
+                "post",
+                reverse("purchases:purchase_update", kwargs={"pk": self.purchase.pk}),
+                {},
+            ),
+            (
+                "get",
+                reverse(
+                    "purchases:purchase_line_update",
+                    kwargs={"purchase_pk": self.purchase.pk, "line_pk": line.pk},
+                ),
+                {},
+            ),
+            (
+                "post",
+                reverse(
+                    "purchases:purchase_line_update",
+                    kwargs={"purchase_pk": self.purchase.pk, "line_pk": line.pk},
+                ),
+                {"quantity": "2", "unit_cost": "1", "tax_rate": "0"},
+            ),
+            (
+                "get",
+                reverse(
+                    "purchases:purchase_line_create",
+                    kwargs={"purchase_pk": self.purchase.pk},
+                ),
+                {},
+            ),
+            (
+                "post",
+                reverse(
+                    "purchases:purchase_line_delete",
+                    kwargs={"purchase_pk": self.purchase.pk, "line_pk": line.pk},
+                ),
+                {},
+            ),
+        )
+        for method, url, data in requests:
+            with self.subTest(method=method, url=url):
+                response = getattr(self.client, method)(url, data)
+                self.assertEqual(response.status_code, 403)
 
     def test_manager_with_access_can_open_detail(self):
         UserStoreAccess.objects.create(
@@ -247,6 +339,10 @@ class PurchaseViewAccessTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
+        review = self.client.get(
+            reverse("purchases:purchase_order", kwargs={"pk": self.purchase.pk})
+        )
+        self.assertContains(review, "2.000</strong> unidades")
         response = self.client.post(
             reverse("purchases:purchase_order", kwargs={"pk": self.purchase.pk})
         )
@@ -289,12 +385,26 @@ class PurchaseViewAccessTests(TestCase):
             ordered_by=self.owner,
         )
         key = uuid4()
-        payload = {"idempotency_key": str(key), f"line_{line.pk}": "2.000"}
+        payload = {
+            "idempotency_key": str(key),
+            f"line_{line.pk}": "2.000",
+            "notes": "Entrega 1",
+        }
         self.client.force_login(self.owner)
         url = reverse("purchases:purchase_receive", kwargs={"pk": self.purchase.pk})
         review = self.client.post(url, payload)
         self.assertEqual(review.status_code, 200)
         self.assertContains(review, str(key))
+        self.assertContains(review, "data-nx-critical-form")
+        self.assertContains(review, 'hx-post="')
+        edit = self.client.post(url, {**payload, "step": "edit"})
+        self.assertEqual(edit.status_code, 200)
+        self.assertContains(edit, str(key))
+        self.assertContains(edit, "2.000")
+        self.assertContains(edit, "Entrega 1")
+        second_review = self.client.post(url, payload)
+        self.assertEqual(second_review.status_code, 200)
+        self.assertContains(second_review, str(key))
         confirmed_payload = {**payload, "confirm": "1"}
         self.assertEqual(self.client.post(url, confirmed_payload).status_code, 302)
         self.assertEqual(self.client.post(url, confirmed_payload).status_code, 302)

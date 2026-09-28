@@ -10,7 +10,28 @@ from apps.stores.models import Store
 from apps.purchases.selectors import get_accessible_purchase_stores
 
 
-class PurchaseFilterForm(forms.Form):
+class AccessibleFormMixin:
+    """Connect help/error regions to widgets without rebuilding their HTML."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if field.help_text:
+                field.widget.attrs["aria-describedby"] = f"id_{name}-help"
+
+    def full_clean(self):
+        super().full_clean()
+        for name, errors in self.errors.items():
+            if name not in self.fields or not errors:
+                continue
+            widget = self.fields[name].widget
+            widget.attrs["aria-invalid"] = "true"
+            described_by = widget.attrs.get("aria-describedby", "").split()
+            described_by.append(f"id_{name}-errors")
+            widget.attrs["aria-describedby"] = " ".join(dict.fromkeys(described_by))
+
+
+class PurchaseFilterForm(AccessibleFormMixin, forms.Form):
     q = forms.CharField(required=False, label="Buscar")
     status = forms.ChoiceField(required=False, choices=(), label="Estado")
     supplier = forms.ModelChoiceField(
@@ -39,7 +60,7 @@ class PurchaseFilterForm(forms.Form):
         )
 
 
-class SupplierFilterForm(forms.Form):
+class SupplierFilterForm(AccessibleFormMixin, forms.Form):
     q = forms.CharField(required=False, label="Buscar")
     status = forms.ChoiceField(
         required=False,
@@ -48,7 +69,7 @@ class SupplierFilterForm(forms.Form):
     )
 
 
-class SupplierPurchaseFilterForm(forms.Form):
+class SupplierPurchaseFilterForm(AccessibleFormMixin, forms.Form):
     status = forms.ChoiceField(required=False, choices=(), label="Estado")
     store = forms.ModelChoiceField(
         required=False, queryset=Store.objects.none(), label="Tienda"
@@ -72,7 +93,7 @@ class SupplierPurchaseFilterForm(forms.Form):
         )
 
 
-class SupplierForm(forms.Form):
+class SupplierForm(AccessibleFormMixin, forms.Form):
     name = forms.CharField(max_length=180)
     legal_name = forms.CharField(max_length=180, required=False)
     tax_identifier = forms.CharField(max_length=30, required=False)
@@ -82,7 +103,7 @@ class SupplierForm(forms.Form):
     is_active = forms.BooleanField(required=False, initial=True)
 
 
-class _PurchaseHeaderForm(forms.Form):
+class _PurchaseHeaderForm(AccessibleFormMixin, forms.Form):
     store = forms.ModelChoiceField(queryset=Store.objects.none())
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.none())
     reference = forms.CharField(max_length=120, required=False)
@@ -112,7 +133,7 @@ class PurchaseUpdateForm(_PurchaseHeaderForm):
     pass
 
 
-class PurchaseLineCreateForm(forms.Form):
+class PurchaseLineCreateForm(AccessibleFormMixin, forms.Form):
     product = forms.ModelChoiceField(
         queryset=Product.objects.none(), widget=forms.HiddenInput
     )
@@ -131,7 +152,7 @@ class PurchaseLineCreateForm(forms.Form):
         )
 
 
-class PurchaseLineUpdateForm(forms.Form):
+class PurchaseLineUpdateForm(AccessibleFormMixin, forms.Form):
     quantity = forms.DecimalField(
         max_digits=14, decimal_places=3, min_value=Decimal("0.001")
     )
@@ -139,7 +160,7 @@ class PurchaseLineUpdateForm(forms.Form):
     tax_rate = forms.DecimalField(max_digits=5, decimal_places=2, min_value=0)
 
 
-class PurchaseReceiptForm(forms.Form):
+class PurchaseReceiptForm(AccessibleFormMixin, forms.Form):
     notes = forms.CharField(widget=forms.Textarea, required=False)
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
@@ -163,6 +184,15 @@ class PurchaseReceiptForm(forms.Form):
                     f"recibida {line.quantity_received}, pendiente {remaining}"
                 ),
             )
+        self.receipt_rows = [
+            {
+                "line": line,
+                "pending": line.quantity_ordered - line.quantity_received,
+                "field": self[field_name],
+            }
+            for line in self.purchase_lines
+            if (field_name := f"line_{line.pk}") in self.fields
+        ]
 
     def clean(self):
         cleaned = super().clean()

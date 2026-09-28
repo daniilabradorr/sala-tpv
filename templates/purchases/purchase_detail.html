@@ -18,9 +18,9 @@
   </header>
   {% if receipt_registered %}<div class="feedback feedback-success" role="status"><strong>✓ RECEPCIÓN REGISTRADA</strong><br>{{ received_units }} unidades recibidas. Estado: {{ purchase.get_status_display }}.</div>{% endif %}
   <nav class="tabs" aria-label="Detalle de compra">
-    <a href="?tab=summary" hx-get="?tab=summary" hx-target="#purchase-workspace" hx-push-url="true" {% if tab == 'summary' %}aria-current="page"{% endif %}>Resumen</a>
-    <a href="?tab=products" hx-get="?tab=products" hx-target="#purchase-workspace" hx-push-url="true" {% if tab == 'products' %}aria-current="page"{% endif %}>Productos</a>
-    <a href="?tab=receipts" hx-get="?tab=receipts" hx-target="#purchase-workspace" hx-push-url="true" {% if tab == 'receipts' %}aria-current="page"{% endif %}>Recepciones</a>
+    <a href="?tab=summary" hx-get="?tab=summary" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'summary' %}aria-current="page"{% endif %}>Resumen</a>
+    <a href="?tab=products" hx-get="?tab=products" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'products' %}aria-current="page"{% endif %}>Productos</a>
+    <a href="?tab=receipts" hx-get="?tab=receipts" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'receipts' %}aria-current="page"{% endif %}>Recepciones</a>
   </nav>
   {% include "purchases/partials/_purchase_workspace.html" %}
 </section>

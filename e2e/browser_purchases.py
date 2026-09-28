@@ -97,10 +97,17 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
 
             page.get_by_role("button", name="Añadir producto").click()
             line_modal = page.locator("#purchase-line-modal")
-            line_modal.get_by_label("Buscar producto").fill("CAFE-E2E")
+            search = line_modal.get_by_label("Buscar producto")
+            search.fill("CAFE-E2E")
             result = line_modal.locator("#product-results").get_by_role(
-                "button", name="Café Browser CAFE-E2E · 8412345678901"
+                "button", name=re.compile("Café Browser.*CAFE-E2E")
             )
+            expect(result).to_be_visible()
+            search.fill("")
+            expect(line_modal.locator("#product-results")).to_contain_text(
+                "Escribe para buscar productos"
+            )
+            search.fill("CAFE-E2E")
             expect(result).to_be_visible()
             result.click()
             line_modal.locator("input[name=quantity]").fill("5")
@@ -122,10 +129,22 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
 
             page.get_by_role("link", name="Registrar recepción").click()
             page.locator("input[name^=line_]").fill("2")
+            page.locator("textarea[name=notes]").fill("Entrega 1")
+            receipt_key = page.locator("input[name=idempotency_key]").input_value()
             page.get_by_role("button", name="Revisar recepción").click()
             expect(
                 page.get_by_role("heading", name="Revisar recepción")
             ).to_be_visible()
+            expect(page.locator("input[name=idempotency_key]")).to_have_value(
+                receipt_key
+            )
+            page.get_by_role("button", name="Volver").click()
+            expect(page.locator("input[name^=line_]")).to_have_value("2")
+            expect(page.locator("textarea[name=notes]")).to_have_value("Entrega 1")
+            expect(page.locator("input[name=idempotency_key]")).to_have_value(
+                receipt_key
+            )
+            page.get_by_role("button", name="Revisar recepción").click()
             page.get_by_role("button", name="Registrar recepción").click()
             expect(page.get_by_text("RECEPCIÓN REGISTRADA")).to_be_visible()
             expect(
@@ -159,6 +178,12 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
 
             page.get_by_role("link", name="Recepciones").click()
+            page.get_by_role("link", name="Resumen").click()
+            page.get_by_role("link", name="Productos").click()
+            page.get_by_role("link", name="Recepciones").click()
+            page.get_by_role("link", name="Resumen").click()
+            expect(page.locator("#purchase-workspace")).to_have_count(1)
+            page.get_by_role("link", name="Recepciones").click()
             movement_link = page.locator(".stock-impact a")
             expect(movement_link).to_have_count(2)
             movement_pk = StockMovement.objects.order_by("pk").values_list(
@@ -172,6 +197,9 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("link", name="Proveedor E2E").click()
             page.get_by_role("link", name="Compras").click()
             expect(page.get_by_role("link", name="Compra PUR-E2E")).to_be_visible()
+            page.get_by_role("link", name="Resumen").click()
+            page.get_by_role("link", name="Compras").click()
+            expect(page.locator("#supplier-workspace")).to_have_count(1)
             browser.close()
 
     def test_responsive_surfaces_have_no_horizontal_overflow(self):

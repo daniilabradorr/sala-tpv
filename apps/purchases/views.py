@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views import View
@@ -67,9 +67,11 @@ def _service_errors(form, error):
         form.add_error(None, str(error))
 
 
-def _page_query(request):
+def _page_query(request, *, effective_store=None, include_store=False):
     query = request.GET.copy()
     query.pop("page", None)
+    if include_store and "store" not in query:
+        query["store"] = str(effective_store.pk) if effective_store else ""
     encoded = query.urlencode()
     return f"{encoded}&" if encoded else ""
 
@@ -309,15 +311,18 @@ class PurchaseListView(_PurchasesView, ListView):
     def get_queryset(self):
         business = _business(self.request)
         _, active_store = resolve_active_store(self.request, user=self.request.user)
+        filter_data = self.request.GET.copy() if self.request.GET else None
+        if filter_data is not None and "store" not in filter_data:
+            filter_data["store"] = str(active_store.pk) if active_store else ""
         self.filter_form = PurchaseFilterForm(
-            self.request.GET or None,
+            filter_data,
             business=business,
             user=self.request.user,
             initial={"store": active_store},
         )
         data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
         self.local_store = (
-            data.get("store") if "store" in self.request.GET else active_store
+            data.get("store") if filter_data is not None else active_store
         )
         if self.request.GET and not self.filter_form.is_valid():
             return Purchase.objects.none()
@@ -350,7 +355,11 @@ class PurchaseListView(_PurchasesView, ListView):
                 "kpis": get_purchase_list_kpis(
                     business=business, user=self.request.user, store=self.local_store
                 ),
-                "page_query": _page_query(self.request),
+                "page_query": _page_query(
+                    self.request,
+                    effective_store=self.local_store,
+                    include_store=True,
+                ),
             }
         )
         return context
@@ -449,11 +458,14 @@ class PurchaseUpdateView(_PurchasesView, View):
     template_name = "purchases/purchase_form.html"
 
     def _purchase(self):
-        return get_purchase_detail(
+        purchase = get_purchase_detail(
             business=_business(self.request),
             user=self.request.user,
             pk=self.kwargs["pk"],
         )
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se puede editar una compra en borrador.")
+        return purchase
 
     def _form(self, purchase, data=None):
         return PurchaseUpdateForm(
@@ -556,6 +568,8 @@ class PurchaseLineCreateView(_PurchaseLineView):
 
     def post(self, request, purchase_pk):
         purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se pueden añadir productos a un borrador.")
         form = PurchaseLineCreateForm(request.POST, business=_business(request))
         if form.is_valid():
             try:
@@ -587,6 +601,8 @@ class PurchaseLineUpdateView(_PurchaseLineView):
 
     def get(self, request, purchase_pk, line_pk):
         purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se puede editar una compra en borrador.")
         line = self._line(purchase)
         form = PurchaseLineUpdateForm(
             initial={
@@ -605,6 +621,8 @@ class PurchaseLineUpdateView(_PurchaseLineView):
 
     def post(self, request, purchase_pk, line_pk):
         purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se puede editar una compra en borrador.")
         line = self._line(purchase)
         form = PurchaseLineUpdateForm(request.POST)
         if form.is_valid():
@@ -634,6 +652,8 @@ class PurchaseLineDeleteView(_PurchaseLineView):
 
     def post(self, request, purchase_pk, line_pk):
         purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se puede editar una compra en borrador.")
         line = get_object_or_404(
             get_purchase_lines(business=_business(request), purchase=purchase),
             pk=line_pk,
@@ -702,7 +722,9 @@ class PurchaseOrderView(_PurchasesView, View):
         if not purchase.is_draft:
             raise PermissionDenied("Solo se puede revisar un borrador.")
         return render(
-            request, "purchases/purchase_order_review.html", {"purchase": purchase}
+            request,
+            "purchases/purchase_order_review.html",
+            {"purchase": purchase, "progress": get_purchase_progress(purchase)},
         )
 
     def post(self, request, pk):
@@ -713,7 +735,12 @@ class PurchaseOrderView(_PurchasesView, View):
             )
         except ValidationError as error:
             messages.error(request, str(error))
-        return redirect("purchases:purchase_detail", pk=pk)
+        url = reverse("purchases:purchase_detail", kwargs={"pk": pk})
+        if _is_htmx(request):
+            response = HttpResponse(status=204)
+            response["HX-Redirect"] = url
+            return response
+        return redirect(url)
 
 
 class PurchaseCancelView(_PurchaseActionView):
@@ -762,6 +789,14 @@ class PurchaseReceiptCreateView(_PurchasesView, View):
                 business=_business(request), purchase=purchase
             ),
         )
+        if request.POST.get("step") == "edit":
+            return render(
+                request,
+                "purchases/partials/_receipt_form_content.html"
+                if _is_htmx(request)
+                else self.template_name,
+                {"form": form, "purchase": purchase},
+            )
         if form.is_valid() and request.POST.get("confirm") != "1":
             receipt_lines = form.receipt_lines()
             return render(
@@ -792,5 +827,17 @@ class PurchaseReceiptCreateView(_PurchasesView, View):
                 units = sum(item["quantity_received"] for item in form.receipt_lines())
                 messages.success(request, "✓ Recepción registrada correctamente.")
                 url = reverse("purchases:purchase_detail", kwargs={"pk": pk})
-                return HttpResponseRedirect(f"{url}?receipt_registered=1&units={units}")
-        return render(request, self.template_name, {"form": form, "purchase": purchase})
+                url = f"{url}?receipt_registered=1&units={units}"
+                if _is_htmx(request):
+                    response = HttpResponse(status=204)
+                    response["HX-Redirect"] = url
+                    return response
+                return HttpResponseRedirect(url)
+        return render(
+            request,
+            "purchases/partials/_receipt_form_content.html"
+            if _is_htmx(request)
+            else self.template_name,
+            {"form": form, "purchase": purchase},
+            status=422 if _is_htmx(request) else 200,
+        )
