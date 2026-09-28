@@ -74,9 +74,23 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Iniciar sesión").click()
             page.goto(f"{self.live_server_url}/customers/")
             expect(page.locator(".customer-cards")).to_be_visible()
+            expect(
+                page.locator(".customer-cards").get_by_label(
+                    "Acciones para Ana Browser"
+                )
+            ).to_be_visible()
             page.get_by_role("button", name="Filtros").click()
             expect(page.locator("#customer-filters")).to_have_attribute("open", "")
             page.get_by_role("button", name="Cerrar filtros").click()
+            page.set_viewport_size({"width": 767, "height": 812})
+            expect(page.locator(".customer-cards")).to_be_visible()
+            self.assertTrue(
+                page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            )
+            page.set_viewport_size({"width": 768, "height": 812})
+            expect(page.locator(".customer-cards")).to_be_hidden()
+            expect(page.locator(".customer-table")).to_be_visible()
+            page.set_viewport_size({"width": 375, "height": 812})
             page.locator(".customer-cards").get_by_role(
                 "link", name="Ana Browser", exact=False
             ).click()

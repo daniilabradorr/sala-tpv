@@ -112,6 +112,44 @@ class CustomerViewTests(TestCase):
         )
         self.assertContains(response, 'id="customer-tab-panel"', count=1)
 
+    def test_lifecycle_actions_are_available_to_managers_but_not_cashiers(self):
+        list_url = reverse("customers:customer_list")
+        detail_url = reverse(
+            "customers:customer_detail", args=[self.account.customer.pk]
+        )
+        deactivate_url = reverse(
+            "customers:customer_deactivate", args=[self.account.customer.pk]
+        )
+        reactivate_url = reverse(
+            "customers:customer_reactivate", args=[self.account.customer.pk]
+        )
+
+        for user in (self.owner, self.manager):
+            with self.subTest(role=user.role):
+                self.client.force_login(user)
+                listing = self.client.get(list_url)
+                self.assertContains(listing, deactivate_url, count=2)
+                self.assertContains(listing, "Editar")
+                detail = self.client.get(detail_url)
+                self.assertContains(detail, deactivate_url)
+                self.assertContains(detail, "Más acciones para")
+
+        self.client.force_login(self.cashier)
+        listing = self.client.get(list_url)
+        self.assertNotContains(listing, deactivate_url)
+        self.assertNotContains(listing, "Acciones para")
+        detail = self.client.get(detail_url)
+        self.assertNotContains(detail, deactivate_url)
+        self.assertNotContains(detail, "Más acciones para")
+
+        self.account.customer.is_active = False
+        self.account.customer.save()
+        self.client.force_login(self.owner)
+        listing = self.client.get(list_url, {"status": "inactive"})
+        self.assertContains(listing, reactivate_url, count=2)
+        detail = self.client.get(detail_url)
+        self.assertContains(detail, reactivate_url)
+
     def test_new_sale_prefers_sellable_active_store_and_falls_back(self):
         store_a = create_store(self.business, name="Tienda A", code="A")
         store_b = create_store(self.business, name="Tienda B", code="B")

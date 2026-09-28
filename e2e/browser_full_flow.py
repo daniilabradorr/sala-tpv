@@ -245,8 +245,17 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         row = self.page.locator(".return-line").filter(has_text=product_name)
         row.get_by_label(re.compile("Cantidad a devolver")).fill("1")
         row.get_by_label("Devolver al stock disponible").check()
+        self.page.locator("#return-workspace").evaluate(
+            "element => { element.dataset.e2eBeforeReturnSwap = 'true'; }"
+        )
         row.get_by_role("button", name="Actualizar").click()
-        self.page.get_by_label("PIN de seguridad").fill(self.OWNER_PIN)
+        updated_workspace = self.page.locator(
+            "#return-workspace:not([data-e2e-before-return-swap])"
+        )
+        expect(updated_workspace).to_be_visible()
+        pin = updated_workspace.get_by_label("PIN de seguridad")
+        expect(pin).to_be_visible()
+        pin.fill(self.OWNER_PIN)
         self.page.get_by_role("button", name="Completar devolución").click()
         expect(self.page.get_by_text("✓ Devolución completada")).to_be_visible()
         return return_id
