@@ -74,13 +74,14 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Iniciar sesión").click()
             page.goto(f"{self.live_server_url}/customers/")
             expect(page.locator(".customer-cards")).to_be_visible()
-            customer_actions = page.locator(".customer-cards").get_by_label(
-                "Acciones para Ana Browser"
+            customer_actions = page.locator(".customer-cards").get_by_role(
+                "button", name="Acciones para Ana Browser", exact=True
             )
             expect(customer_actions).to_be_visible()
             customer_actions.click()
             actions_drawer = page.locator(f"#customer-actions-{account.customer_id}")
             expect(actions_drawer).to_have_attribute("open", "")
+            expect(actions_drawer).to_be_visible()
             expect(actions_drawer.get_by_role("link", name="Editar")).to_be_visible()
             expect(
                 actions_drawer.get_by_role("button", name="Desactivar")
@@ -101,6 +102,20 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             page.locator(".customer-cards").get_by_role(
                 "link", name="Ana Browser", exact=False
             ).click()
+            detail_actions = page.get_by_role(
+                "button", name="Más acciones para Ana Browser", exact=True
+            )
+            expect(detail_actions).to_be_visible()
+            detail_actions.click()
+            detail_drawer = page.locator("#customer-detail-actions")
+            expect(detail_drawer).to_have_attribute("open", "")
+            expect(
+                detail_drawer.get_by_role("button", name="Desactivar")
+            ).to_be_visible()
+            detail_drawer.get_by_role("button", name="Cerrar acciones").click()
+            self.assertTrue(
+                page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            )
             page.get_by_role("tab", name="Cuenta").click()
             expect(page.get_by_role("tab", name="Cuenta")).to_have_attribute(
                 "aria-selected", "true"
