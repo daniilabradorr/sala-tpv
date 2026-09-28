@@ -130,6 +130,10 @@ class CustomerViewTests(TestCase):
                 listing = self.client.get(list_url)
                 self.assertContains(listing, deactivate_url, count=2)
                 self.assertContains(listing, "Editar")
+                self.assertContains(
+                    listing,
+                    f'aria-controls="customer-actions-{self.account.customer.pk}"',
+                )
                 detail = self.client.get(detail_url)
                 self.assertContains(detail, deactivate_url)
                 self.assertContains(detail, "Más acciones para")
@@ -138,6 +142,9 @@ class CustomerViewTests(TestCase):
         listing = self.client.get(list_url)
         self.assertNotContains(listing, deactivate_url)
         self.assertNotContains(listing, "Acciones para")
+        self.assertNotContains(
+            listing, f'aria-controls="customer-actions-{self.account.customer.pk}"'
+        )
         detail = self.client.get(detail_url)
         self.assertNotContains(detail, deactivate_url)
         self.assertNotContains(detail, "Más acciones para")

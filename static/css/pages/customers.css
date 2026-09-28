@@ -9,6 +9,7 @@
 .action-menu div { background: var(--nx-surface); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-md); box-shadow: var(--nx-shadow-md); display: grid; min-width: 9rem; padding: .4rem; position: absolute; right: 0; z-index: 3; }
 .action-menu a,.action-menu button { background: none; border: 0; color: inherit; font: inherit; padding: .65rem; text-align: left; width: 100%; }
 .customer-cards,.mobile-filter-button,.drawer-close { display: none; }
+.customer-mobile-actions { display:grid; gap:var(--nx-space-3); padding-top:var(--nx-space-4); }.customer-mobile-actions form,.customer-mobile-actions .button { margin:0; width:100%; }
 .customer-workspace, #customer-workspace-content, #customer-tab-panel, .account-heading, .account-heading > *, .customer-header-actions, .debt-grid, .debt-grid > *, .table-scroll { min-width: 0; }
 #customer-workspace-content, #customer-tab-panel, .customer-tabs, .table-scroll { max-width: 100%; }
 .customer-header { align-items: center; display: flex; justify-content: space-between; gap: var(--nx-space-4); }.customer-header h1 { margin: .25rem 0; }.customer-header-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--nx-space-2); }

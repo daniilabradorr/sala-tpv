@@ -74,11 +74,18 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Iniciar sesión").click()
             page.goto(f"{self.live_server_url}/customers/")
             expect(page.locator(".customer-cards")).to_be_visible()
+            customer_actions = page.locator(".customer-cards").get_by_label(
+                "Acciones para Ana Browser"
+            )
+            expect(customer_actions).to_be_visible()
+            customer_actions.click()
+            actions_drawer = page.locator(f"#customer-actions-{account.customer_id}")
+            expect(actions_drawer).to_have_attribute("open", "")
+            expect(actions_drawer.get_by_role("link", name="Editar")).to_be_visible()
             expect(
-                page.locator(".customer-cards").get_by_label(
-                    "Acciones para Ana Browser"
-                )
+                actions_drawer.get_by_role("button", name="Desactivar")
             ).to_be_visible()
+            actions_drawer.get_by_role("button", name="Cerrar acciones").click()
             page.get_by_role("button", name="Filtros").click()
             expect(page.locator("#customer-filters")).to_have_attribute("open", "")
             page.get_by_role("button", name="Cerrar filtros").click()
