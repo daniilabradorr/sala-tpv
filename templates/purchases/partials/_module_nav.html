@@ -1,0 +1,1 @@
+<nav class="purchase-nav tabs" aria-label="Compras y proveedores"><a href="{% url 'purchases:purchase_list' %}" {% if section == 'purchases' %}aria-current="page"{% endif %}>Compras</a><a href="{% url 'purchases:supplier_list' %}" {% if section == 'suppliers' %}aria-current="page"{% endif %}>Proveedores</a></nav>

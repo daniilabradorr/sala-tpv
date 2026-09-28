@@ -3,9 +3,19 @@ from uuid import uuid4
 from django.test import TestCase
 
 from apps.core.models import Business
-from apps.purchases.models import Purchase, PurchaseStatusChoices, Supplier
+from decimal import Decimal
+
+from apps.catalog.models import Product
+from apps.purchases.models import (
+    Purchase,
+    PurchaseLine,
+    PurchaseStatusChoices,
+    Supplier,
+)
 from apps.purchases.selectors import (
     get_accessible_purchase_stores,
+    get_purchase_detail,
+    get_purchase_list,
     get_purchases_for_user,
     get_suppliers_for_business,
 )
@@ -160,3 +170,34 @@ class PurchaseSelectorTests(TestCase):
                         business=self.business, user=self.owner, **filters
                     ).exists()
                 )
+
+    def test_detail_and_list_progress_use_separate_query_shapes(self):
+        product = Product.objects.create(
+            business=self.business,
+            name="Café",
+            sku="CAFE-SELECTOR",
+            barcode="8412345678901",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+        )
+        PurchaseLine.objects.create(
+            business=self.business,
+            purchase=self.purchase_a,
+            product=product,
+            product_name=product.name,
+            sku=product.sku,
+            unit=product.unit,
+            quantity_ordered=Decimal("5.000"),
+            quantity_received=Decimal("2.000"),
+            unit_cost=Decimal("1.00"),
+        )
+        detail = get_purchase_detail(
+            business=self.business, user=self.owner, pk=self.purchase_a.pk
+        )
+        self.assertEqual(detail, self.purchase_a)
+        listed = get_purchase_list(
+            business=self.business, user=self.owner, store=self.store_a
+        ).get(pk=self.purchase_a.pk)
+        self.assertEqual(listed.ordered_total, Decimal("5"))
+        self.assertEqual(listed.received_total, Decimal("2"))

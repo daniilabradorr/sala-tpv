@@ -143,20 +143,20 @@ class PurchaseFormTests(TestCase):
         )
 
     def test_receipt_form_generates_uuid_and_rejects_non_positive_values(self):
-        lines = [
-            PurchaseLine(
-                pk=1,
-                product_name="A",
-                quantity_ordered=1,
-                quantity_received=1,
-            )
-        ]
-        unbound = PurchaseReceiptForm(purchase_lines=lines)
+        complete = PurchaseLine(
+            pk=1, product_name="A", quantity_ordered=1, quantity_received=1
+        )
+        unbound = PurchaseReceiptForm(purchase_lines=[complete])
         self.assertIsNotNone(unbound.initial["idempotency_key"])
+        self.assertNotIn("line_1", unbound.fields)
+
+        pending = PurchaseLine(
+            pk=2, product_name="B", quantity_ordered=2, quantity_received=1
+        )
         for value in ("0", "-1"):
             bound = PurchaseReceiptForm(
-                {"idempotency_key": str(uuid4()), "line_1": value},
-                purchase_lines=lines,
+                {"idempotency_key": str(uuid4()), "line_2": value},
+                purchase_lines=[pending],
             )
             self.assertFalse(bound.is_valid())
-            self.assertIn("line_1", bound.fields)
+            self.assertIn("line_2", bound.fields)

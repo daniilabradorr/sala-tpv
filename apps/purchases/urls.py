@@ -10,9 +10,29 @@ urlpatterns = [
         "suppliers/create/", views.SupplierCreateView.as_view(), name="supplier_create"
     ),
     path(
+        "suppliers/quick-create/",
+        views.QuickSupplierCreateView.as_view(),
+        name="supplier_quick_create",
+    ),
+    path(
         "suppliers/<int:pk>/edit/",
         views.SupplierUpdateView.as_view(),
         name="supplier_update",
+    ),
+    path(
+        "suppliers/<int:pk>/",
+        views.SupplierDetailView.as_view(),
+        name="supplier_detail",
+    ),
+    path(
+        "suppliers/<int:pk>/deactivate/",
+        views.SupplierDeactivateView.as_view(),
+        name="supplier_deactivate",
+    ),
+    path(
+        "suppliers/<int:pk>/reactivate/",
+        views.SupplierActivateView.as_view(),
+        name="supplier_reactivate",
     ),
     path("", views.PurchaseListView.as_view(), name="purchase_list"),
     path("create/", views.PurchaseCreateView.as_view(), name="purchase_create"),
@@ -31,6 +51,11 @@ urlpatterns = [
         "<int:purchase_pk>/lines/create/",
         views.PurchaseLineCreateView.as_view(),
         name="purchase_line_create",
+    ),
+    path(
+        "<int:purchase_pk>/products/search/",
+        views.ProductSearchView.as_view(),
+        name="product_search",
     ),
     path(
         "<int:purchase_pk>/lines/<int:line_pk>/edit/",

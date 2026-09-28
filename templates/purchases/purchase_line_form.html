@@ -1,3 +1,1 @@
-{% extends "base.html" %}
-{% block title %}Línea de compra | Netxodo{% endblock %}
-{% block content %}<section class="card"><h1>{% if line %}Editar línea{% else %}Añadir línea{% endif %}</h1><p>Compra {{ purchase.pk }}</p><form method="post" novalidate>{% csrf_token %}{{ form.as_p }}<button class="btn" type="submit">Guardar</button> <a class="btn" href="{% url 'purchases:purchase_detail' purchase.pk %}">Cancelar</a></form></section>{% endblock %}
+{% extends "base.html" %}{% load static %}{% block title %}Producto de compra | Netxodo{% endblock %}{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/purchases.css' %}">{% endblock %}{% block content %}<section class="purchases-page"><div class="card form-card">{% include "purchases/partials/_purchase_line_form.html" %}</div></section>{% endblock %}{% block extra_js %}<script type="module" src="{% static 'js/pages/purchases.js' %}"></script>{% endblock %}
