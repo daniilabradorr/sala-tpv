@@ -113,8 +113,20 @@ class PurchaseViewAccessTests(TestCase):
         self.assertNotContains(paged, "OTHER-STORE")
         self.assertContains(paged, self.purchase.reference)
         response = self.client.get(f"{reverse('purchases:purchase_list')}?store=")
-        self.assertContains(response, "OTHER-STORE")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["filter_form"]["store"].value(), "")
+        self.assertTrue(response.context["all_stores"])
         self.assertIn("store=&", response.context["page_query"])
+        self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
+        all_stores_page_two = self.client.get(
+            f"{reverse('purchases:purchase_list')}?store=&page=2"
+        )
+        self.assertEqual(all_stores_page_two.status_code, 200)
+        self.assertContains(all_stores_page_two, "OTHER-STORE")
+        self.assertEqual(
+            all_stores_page_two.context["filter_form"]["store"].value(), ""
+        )
+        self.assertIn("store=&", all_stores_page_two.context["page_query"])
         self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
         scoped = self.client.get(
             f"{reverse('purchases:purchase_list')}?store={other_store.pk}"

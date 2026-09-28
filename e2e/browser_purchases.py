@@ -117,18 +117,38 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.wait_for_function("window.__purchaseLineModalSettled === true")
             line_modal = page.locator("#purchase-line-modal")
             search = line_modal.get_by_label("Buscar producto")
+            page.evaluate(
+                """() => {
+                    window.__productSearchSwapCount = 0;
+                    document.body.addEventListener("htmx:afterSwap", (event) => {
+                        if (event.detail.target?.id === "product-results") {
+                            window.__productSearchSwapCount += 1;
+                        }
+                    });
+                }"""
+            )
+            swap_count = page.evaluate("window.__productSearchSwapCount")
             with page.expect_response(
                 lambda response: (
                     "/products/search/" in response.url
                     and "product_query=CAFE-E2E" in response.url
                     and response.status == 200
                 )
-            ):
+            ) as response_info:
                 search.fill("CAFE-E2E")
+            response = response_info.value
+            body = response.text()
+            assert "Café Browser" in body
+            assert "CAFE-E2E" in body
+            page.wait_for_function(
+                "previous => window.__productSearchSwapCount > previous",
+                arg=swap_count,
+            )
             result = line_modal.locator("#product-results").get_by_role(
                 "button", name=re.compile("Café Browser.*CAFE-E2E")
             )
             expect(result).to_be_visible()
+            swap_count = page.evaluate("window.__productSearchSwapCount")
             with page.expect_response(
                 lambda response: (
                     "/products/search/" in response.url
@@ -137,9 +157,14 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
                 )
             ):
                 search.fill("")
+            page.wait_for_function(
+                "previous => window.__productSearchSwapCount > previous",
+                arg=swap_count,
+            )
             expect(line_modal.locator("#product-results")).to_contain_text(
                 "Escribe para buscar productos"
             )
+            swap_count = page.evaluate("window.__productSearchSwapCount")
             with page.expect_response(
                 lambda response: (
                     "/products/search/" in response.url
@@ -148,6 +173,10 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
                 )
             ):
                 search.fill("CAFE-E2E")
+            page.wait_for_function(
+                "previous => window.__productSearchSwapCount > previous",
+                arg=swap_count,
+            )
             expect(result).to_be_visible()
             result.click()
             expect(line_modal.locator("input[name=product]")).to_have_value(
@@ -228,7 +257,9 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
 
             page.get_by_role("link", name="Recepciones").click()
             page.get_by_role("link", name="Resumen").click()
-            page.get_by_role("link", name="Productos").click()
+            page.get_by_label("Detalle de compra").get_by_role(
+                "link", name="Productos", exact=True
+            ).click()
             page.get_by_role("link", name="Recepciones").click()
             page.get_by_role("link", name="Resumen").click()
             expect(page.locator("#purchase-workspace")).to_have_count(1)
@@ -308,7 +339,9 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
                     "document.documentElement.scrollWidth <= innerWidth"
                 )
                 page.goto(f"{self.live_server_url}/purchases/{purchase.pk}/")
-                page.get_by_role("link", name="Productos").click()
+                page.get_by_label("Detalle de compra").get_by_role(
+                    "link", name="Productos", exact=True
+                ).click()
                 if width <= 767:
                     card = page.locator(".purchase-line-card")
                     expect(card).to_be_visible()
