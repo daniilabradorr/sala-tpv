@@ -221,9 +221,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         expect(
             self.page.get_by_role("heading", name=re.compile(r"Venta #"))
         ).to_be_visible()
-        series = self.page.locator('select[name="series"]')
-        if series.count():
-            series.select_option(index=1)
+        self._select_or_verify_single_series()
         self.page.get_by_role("radio", name=method, exact=True).check()
         if method == "Efectivo":
             self.page.locator('input[name="cash_received"]').fill(str(amount))
@@ -280,9 +278,27 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _issue_rectification(self, expected_type):
         self.step = f"issue {expected_type}"
         self.page.get_by_role("link", name="Emitir rectificativa").click()
-        self.page.locator("#id_series").select_option(index=1)
+        expect(self.page.get_by_text("Documento fiscal original")).to_be_visible()
+        expect(self.page.get_by_text("Se emitirá")).to_be_visible()
+        expect(self.page.get_by_text(expected_type, exact=False)).to_be_visible()
+        expect(self.page.get_by_text("Importe", exact=True)).to_be_visible()
+        expect(
+            self.page.locator("#billing-command-form").get_by_text(
+                re.compile(r"(?:F1|F2)-.+-\d+")
+            )
+        ).to_be_visible()
+        self._select_or_verify_single_series()
         self.page.get_by_role("button", name="Emitir rectificativa").click()
         return self._id_from_url(r"/documents/(\d+)/$")
+
+    def _select_or_verify_single_series(self):
+        series_select = self.page.locator('select[name="series"]')
+        if series_select.count():
+            series_select.select_option(index=1)
+            return
+        hidden_series = self.page.locator('input[type="hidden"][name="series"]')
+        expect(hidden_series).to_have_count(1)
+        expect(hidden_series).not_to_have_value("")
 
     def _close_cash_session(self, session_id, expected_cash):
         self.step = "review and close cash session"

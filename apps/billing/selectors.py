@@ -1,5 +1,7 @@
 """Side-effect-free, tenant-scoped Billing queries."""
 
+import re
+
 from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 
@@ -80,6 +82,12 @@ def billing_document_list(
         )
         if query.isdigit():
             search |= Q(number=int(query))
+        full_number = re.match(r"^(?P<series>.+)-(?P<number>\d+)$", query)
+        if full_number:
+            search |= Q(
+                series_text__iexact=full_number.group("series"),
+                number=int(full_number.group("number")),
+            )
         queryset = queryset.filter(search)
     return queryset
 

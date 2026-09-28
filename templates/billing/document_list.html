@@ -4,8 +4,7 @@
 {% block content %}<section class="erp-page billing-page">
 <header class="erp-header"><div><p class="erp-eyebrow">Facturación</p><h1>Documentos fiscales</h1><p class="erp-subtitle">{{ store.name }} · histórico fiscal de la tienda</p></div></header>
 {% include "billing/_nav.html" with billing_section="documents" %}
-<form id="billing-document-filters" method="get" class="erp-toolbar billing-filters" novalidate hx-get="{% url 'billing:document_list' store_id=store.pk %}" hx-target="#billing-document-results" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, submit, keyup changed delay:350ms from:#id_q">
-{% include "includes/erp_form_fields.html" %}<button class="button button-secondary" type="submit">Filtrar</button></form>
+{% include "billing/partials/_document_filters.html" %}
 {% include "billing/partials/document_results.html" %}
 </section>{% endblock %}
 

@@ -161,9 +161,20 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 expect(page.get_by_text("Inactiva", exact=True)).to_be_visible()
                 page.get_by_role("button", name="Reactivar").click()
                 expect(page.get_by_text("Activa", exact=True)).to_be_visible()
-                assert page.evaluate(
-                    "document.documentElement.scrollWidth <= window.innerWidth"
+                series_url = (
+                    f"{self.live_server_url}/billing/stores/{self.store_id}/series/"
                 )
+                for width in (375, 767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    page.goto(series_url)
+                    if width < 768:
+                        expect(page.locator(".billing-cards")).to_be_visible()
+                        expect(page.locator(".billing-table")).to_be_hidden()
+                    else:
+                        expect(page.locator(".billing-table")).to_be_visible()
+                    assert page.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth"
+                    )
             finally:
                 browser.close()
 
@@ -177,7 +188,14 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                     f"{self.live_server_url}/billing/stores/{self.store_id}/documents/"
                 )
                 page.goto(documents_url)
-                expect(page.get_by_text("Tienda Billing E2E")).to_be_visible()
+                billing_header = page.locator(".billing-page > .erp-header")
+                expect(billing_header.locator(".erp-subtitle")).to_contain_text(
+                    "Tienda Billing E2E"
+                )
+                page.get_by_label("Buscar").fill(self.document_number)
+                expect(
+                    page.get_by_role("link", name=self.document_number)
+                ).to_be_visible()
                 page.get_by_label("Buscar").fill("Cliente Fiscal Snapshot")
                 expect(
                     page.get_by_role("link", name=self.document_number)
@@ -207,6 +225,10 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Emitir factura completa").click()
                 page.get_by_role("link", name="Relaciones", exact=True).click()
                 expect(page.get_by_text("Sustituye a")).to_be_visible()
+                page.get_by_role("link", name=self.document_number).click()
+                page.get_by_role("link", name="Relaciones", exact=True).click()
+                expect(page.get_by_text("Sustituida por")).to_be_visible()
+                expect(page.locator("#billing-document-workspace")).to_have_count(1)
 
                 for width in (375, 767, 768, 1280):
                     page.set_viewport_size({"width": width, "height": 900})

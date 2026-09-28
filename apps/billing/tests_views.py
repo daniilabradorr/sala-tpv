@@ -111,6 +111,38 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertTrue(response.context["form"].errors)
         self.assertContains(response, str(own))
 
+    def test_full_fiscal_number_search_finds_document(self):
+        document = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
+        response = self.client.get(self.list_url(), {"q": document.full_number})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["documents"]), [document])
+
+    def test_invalid_hx_list_filter_retargets_only_filter_form(self):
+        self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
+        response = self.client.get(
+            self.list_url(),
+            {"date_from": "2026-09-30", "date_to": "2026-09-01"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response["HX-Retarget"], "#billing-document-filters")
+        self.assertEqual(response["HX-Reswap"], "outerHTML")
+        self.assertContains(
+            response,
+            'id="billing-document-filters"',
+            count=1,
+            status_code=422,
+        )
+        self.assertContains(
+            response,
+            "La fecha inicial no puede ser posterior",
+            status_code=422,
+        )
+        self.assertNotContains(response, "<html", status_code=422)
+        self.assertNotContains(
+            response, 'id="billing-document-results"', status_code=422
+        )
+
     def test_business_and_store_access_are_enforced(self):
         foreign_store = create_sales_store(business=self.other_business)
         self.assertEqual(self.client.get(self.list_url(foreign_store)).status_code, 403)
@@ -221,9 +253,14 @@ class BillingHTTPTests(BillingFormsFixture):
                 HTTP_HX_REQUEST="true",
             )
             self.assertEqual(response.status_code, 422)
-            self.assertContains(response, 'id="billing-command-form"', count=1)
-            self.assertContains(response, f'value="{key}"')
-            self.assertNotContains(response, "<html")
+            self.assertContains(
+                response,
+                'id="billing-command-form"',
+                count=1,
+                status_code=422,
+            )
+            self.assertContains(response, f'value="{key}"', status_code=422)
+            self.assertNotContains(response, "<html", status_code=422)
 
     def test_same_http_intention_is_idempotent_and_ignores_extra_fields(self):
         sale, series, key = self.sale(), self.series("F2"), uuid.uuid4()

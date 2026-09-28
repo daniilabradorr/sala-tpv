@@ -102,6 +102,26 @@ class BillingSeriesHTTPPermissionTests(BillingFormsFixture):
         url = reverse("billing:series_list", kwargs={"store_id": foreign_store.pk})
         self.assertEqual(self.client.get(url).status_code, 403)
 
+    def test_invalid_hx_filter_retargets_series_form_without_losing_scope(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            self.url("series_list"),
+            {"year": "not-a-year"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response["HX-Retarget"], "#billing-series-filters")
+        self.assertEqual(response["HX-Reswap"], "outerHTML")
+        self.assertContains(
+            response,
+            'id="billing-series-filters"',
+            count=1,
+            status_code=422,
+        )
+        self.assertContains(response, "Introduzca un número entero", status_code=422)
+        self.assertNotContains(response, "<html", status_code=422)
+        self.assertNotContains(response, 'id="billing-series-results"', status_code=422)
+
     def test_used_series_tampered_identity_post_is_rejected(self):
         self.client.force_login(self.user)
         document = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)

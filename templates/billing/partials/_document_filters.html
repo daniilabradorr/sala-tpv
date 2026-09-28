@@ -1,0 +1,2 @@
+<form id="billing-document-filters" method="get" class="erp-toolbar billing-filters" novalidate hx-get="{% url 'billing:document_list' store_id=store.pk %}" hx-target="#billing-document-results" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, submit, keyup changed delay:350ms from:#id_q">
+{% include "includes/erp_form_fields.html" %}<button class="button button-secondary" type="submit">Filtrar</button></form>

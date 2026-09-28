@@ -53,6 +53,13 @@ def _add_service_errors(form, error):
             form.add_error(None, message)
 
 
+def _invalid_filter_response(request, template_name, context, target):
+    response = render(request, template_name, context, status=422)
+    response["HX-Retarget"] = target
+    response["HX-Reswap"] = "outerHTML"
+    return response
+
+
 class BillingStoreContextMixin:
     @property
     def business(self):
@@ -87,8 +94,16 @@ class BillingDocumentListView(
 
     def get(self, request, *args, **kwargs):
         form = BillingDocumentFilterForm(request.GET or None, business=self.business)
+        is_valid = form.is_valid()
+        if request.headers.get("HX-Request") == "true" and not is_valid:
+            return _invalid_filter_response(
+                request,
+                "billing/partials/_document_filters.html",
+                {"store": self.store, "form": form},
+                "#billing-document-filters",
+            )
         filters = {}
-        if form.is_valid():
+        if is_valid:
             filters = {
                 key: value
                 for key, value in form.cleaned_data.items()
@@ -183,7 +198,15 @@ class BillingSeriesListView(BillingSeriesBaseView):
 
     def get(self, request, *args, **kwargs):
         form = BillingSeriesFilterForm(request.GET or None)
-        filters = form.cleaned_data if form.is_valid() else {}
+        is_valid = form.is_valid()
+        if request.headers.get("HX-Request") == "true" and not is_valid:
+            return _invalid_filter_response(
+                request,
+                "billing/partials/_series_filters.html",
+                {"store": self.store, "form": form},
+                "#billing-series-filters",
+            )
+        filters = form.cleaned_data if is_valid else {}
         series = billing_series_list(
             business=self.business, store=self.store, **filters
         )
