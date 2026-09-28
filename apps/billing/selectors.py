@@ -22,7 +22,10 @@ def _billing_document_base_queryset():
 
 def _document_detail_queryset():
     relations = BillingDocumentRelation.objects.select_related(
-        "source_document", "target_document"
+        "source_document",
+        "source_document__series",
+        "target_document",
+        "target_document__series",
     )
     return (
         _billing_document_base_queryset()

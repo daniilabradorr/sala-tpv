@@ -5,8 +5,9 @@ import uuid
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views import View
 
 from apps.billing.forms import (
@@ -37,7 +38,6 @@ from apps.users.mixins import (
     BusinessRequiredMixin,
     CanSellInStoreMixin,
     StoreAccessRequiredMixin,
-    ManagerOrOwnerRequiredMixin,
 )
 from apps.users.helpers import can_sell_in_store, is_owner_or_manager
 
@@ -163,13 +163,19 @@ class BillingDocumentDetailView(
 
 
 class BillingSeriesBaseView(
-    ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
     StoreAccessRequiredMixin,
     BillingStoreContextMixin,
     View,
 ):
-    pass
+    def dispatch(self, request, *args, **kwargs):
+        if (
+            request.user.is_authenticated
+            and not request.user.is_superuser
+            and not is_owner_or_manager(request.user)
+        ):
+            raise PermissionDenied("Solo owner o manager pueden gestionar series.")
+        return super().dispatch(request, *args, **kwargs)
 
 
 class BillingSeriesListView(BillingSeriesBaseView):
@@ -246,6 +252,25 @@ class BillingSeriesFormView(BillingSeriesBaseView):
         form = BillingSeriesForm(
             request.POST, business=self.business, store=self.store, instance=series
         )
+        protected_fields = {
+            "document_type",
+            "prefix",
+            "year",
+            "padding",
+            "cash_register",
+            "store",
+            "current_number",
+        }
+        if (
+            series
+            and series.has_issued_documents
+            and protected_fields.intersection(request.POST)
+        ):
+            form.add_error(
+                None,
+                "No se puede modificar la identidad de una serie que ya tiene "
+                "documentos emitidos.",
+            )
         if form.is_valid():
             payload = {
                 "business": self.business,
@@ -306,6 +331,7 @@ class BillingCommandView(
 ):
     form_class = None
     template_name = None
+    partial_template_name = None
     success_message = "Documento fiscal emitido correctamente."
 
     def get_subject(self):
@@ -337,14 +363,18 @@ class BillingCommandView(
                 _add_service_errors(form, error)
             else:
                 messages.success(request, self.success_message)
-                response = redirect(
+                url = reverse(
                     "billing:document_detail",
-                    store_id=self.store.pk,
-                    document_pk=document.pk,
+                    kwargs={
+                        "store_id": self.store.pk,
+                        "document_pk": document.pk,
+                    },
                 )
                 if request.headers.get("HX-Request") == "true":
-                    response["HX-Redirect"] = response.url
-                return response
+                    response = HttpResponse(status=204)
+                    response["HX-Redirect"] = url
+                    return response
+                return redirect(url)
         return self.render_form(
             form,
             subject,
@@ -352,9 +382,12 @@ class BillingCommandView(
         )
 
     def render_form(self, form, subject, status=200):
+        template_name = self.template_name
+        if self.request.headers.get("HX-Request") == "true" and status == 422:
+            template_name = self.partial_template_name
         return render(
             self.request,
-            self.template_name,
+            template_name,
             {"store": self.store, "form": form, "subject": subject},
             status=status,
         )
@@ -363,6 +396,7 @@ class BillingCommandView(
 class IssueSaleDocumentView(BillingCommandView):
     form_class = IssueSaleDocumentForm
     template_name = "billing/issue_sale_document.html"
+    partial_template_name = "billing/partials/_issue_sale_form.html"
 
     def get_subject(self):
         return self.get_sale()
@@ -383,6 +417,7 @@ class IssueSaleDocumentView(BillingCommandView):
 class SubstituteSimplifiedDocumentView(BillingCommandView):
     form_class = SubstituteSimplifiedDocumentForm
     template_name = "billing/substitute_simplified_document.html"
+    partial_template_name = "billing/partials/_substitute_form.html"
 
     def get_subject(self):
         return self.get_sale()
@@ -404,6 +439,7 @@ class SubstituteSimplifiedDocumentView(BillingCommandView):
 class IssueSaleReturnRectificationView(BillingCommandView):
     form_class = SaleReturnRectificationForm
     template_name = "billing/issue_sale_return_rectification.html"
+    partial_template_name = "billing/partials/_rectification_form.html"
 
     def get_subject(self):
         return self.get_sale_return()

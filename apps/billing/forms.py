@@ -136,6 +136,7 @@ class IssueSaleDocumentForm(forms.Form):
             if sale.document_type_requested == RequestedDocumentTypeChoices.INVOICE
             else BillingDocumentTypeChoices.F2
         )
+        self.document_type = expected_type
         self.fields["series"].queryset = active_billing_series(
             business=business,
             document_type=expected_type,
@@ -163,6 +164,12 @@ class SubstituteSimplifiedDocumentForm(forms.Form):
             store=sale.store,
             cash_register=sale.cash_register,
         )
+        originals = list(
+            issued_original_documents_for_sale(business=business, sale=sale).filter(
+                document_type=BillingDocumentTypeChoices.F2
+            )[:2]
+        )
+        self.original_document = originals[0] if len(originals) == 1 else None
         if not self.is_bound and sale.customer_id and sale.customer.is_active:
             self.initial.setdefault("customer", sale.customer_id)
         _configure_single_series(self)
@@ -179,6 +186,7 @@ class SaleReturnRectificationForm(forms.Form):
         super().__init__(*args, **kwargs)
         self._history_error = None
         self._companion_required = False
+        self.companion_required = False
         sale = sale_return.original_sale
         candidates = []
         if sale_return.original_billing_document_id:
@@ -213,6 +221,8 @@ class SaleReturnRectificationForm(forms.Form):
             if candidate.document_type == BillingDocumentTypeChoices.F1
             else BillingDocumentTypeChoices.R5
         )
+        self.original_document = candidate
+        self.document_type = document_type
         self.fields["series"].queryset = active_billing_series(
             business=business,
             document_type=document_type,
@@ -241,6 +251,7 @@ class SaleReturnRectificationForm(forms.Form):
                 self.fields["series"].queryset = BillingSeries.objects.none()
                 return
             self._companion_required = len(substitutions) == 1
+            self.companion_required = self._companion_required
             if self._companion_required:
                 self.fields["companion_f3_series"].required = True
                 self.fields["companion_f3_series"].queryset = active_billing_series(
