@@ -261,7 +261,12 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             )
             page.get_by_role("button", name="Revisar recepción").click()
             page.get_by_role("button", name="Registrar recepción").click()
-            expect(page.get_by_text("RECEPCIÓN REGISTRADA")).to_be_visible()
+            receipt_feedback = page.locator(
+                ".purchases-page .feedback.feedback-success"
+            )
+            expect(receipt_feedback).to_be_visible()
+            expect(receipt_feedback).to_contain_text("RECEPCIÓN REGISTRADA")
+            expect(receipt_feedback).to_contain_text("2 unidades recibidas")
             purchase_status = page.locator(".purchases-page > .erp-header .badge")
             expect(purchase_status).to_have_text("Recibida parcialmente")
             stock = self._db_value(
