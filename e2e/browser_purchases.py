@@ -206,7 +206,10 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(line_modal).to_have_attribute("open", "")
             expect(line_modal.locator(".field-errors")).to_be_visible()
             expect(page.locator("#purchase-workspace")).to_have_count(1)
-            expect(page.get_by_role("link", name="Resumen")).to_be_visible()
+            purchase_tabs = page.get_by_label("Detalle de compra")
+            expect(
+                purchase_tabs.get_by_role("link", name="Resumen", exact=True)
+            ).to_be_visible()
             line_modal.locator("input[name=quantity]").fill("5")
             line_modal.get_by_role("button", name="Guardar producto").click()
             expect(line_modal).not_to_have_attribute("open", "")
@@ -230,7 +233,8 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("link", name="Realizar pedido").click()
             expect(page.get_by_text("Esta acción no cambia el stock.")).to_be_visible()
             page.get_by_role("button", name="Realizar pedido").click()
-            expect(page.get_by_text("Pedida", exact=True)).to_be_visible()
+            purchase_status = page.locator(".purchases-page > .erp-header .badge")
+            expect(purchase_status).to_have_text("Pedida")
             stock = self._db_value(
                 lambda: InventoryItem.objects.values_list(
                     "current_stock", flat=True
@@ -258,9 +262,8 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Revisar recepción").click()
             page.get_by_role("button", name="Registrar recepción").click()
             expect(page.get_by_text("RECEPCIÓN REGISTRADA")).to_be_visible()
-            expect(
-                page.get_by_text("Recibida parcialmente", exact=True)
-            ).to_be_visible()
+            purchase_status = page.locator(".purchases-page > .erp-header .badge")
+            expect(purchase_status).to_have_text("Recibida parcialmente")
             stock = self._db_value(
                 lambda: InventoryItem.objects.values_list(
                     "current_stock", flat=True
@@ -274,7 +277,8 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.locator("input[name^=line_]").fill("3")
             page.get_by_role("button", name="Revisar recepción").click()
             page.get_by_role("button", name="Registrar recepción").click()
-            expect(page.get_by_text("Recibida", exact=True)).to_be_visible()
+            purchase_status = page.locator(".purchases-page > .erp-header .badge")
+            expect(purchase_status).to_have_text("Recibida")
             expect(page.get_by_role("link", name="Registrar recepción")).to_have_count(
                 0
             )
@@ -292,15 +296,14 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             )
             self.assertEqual(purchase_status, PurchaseStatusChoices.RECEIVED)
 
-            page.get_by_role("link", name="Recepciones").click()
-            page.get_by_role("link", name="Resumen").click()
-            page.get_by_label("Detalle de compra").get_by_role(
-                "link", name="Productos", exact=True
-            ).click()
-            page.get_by_role("link", name="Recepciones").click()
-            page.get_by_role("link", name="Resumen").click()
+            purchase_tabs = page.get_by_label("Detalle de compra")
+            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
+            purchase_tabs.get_by_role("link", name="Resumen", exact=True).click()
+            purchase_tabs.get_by_role("link", name="Productos", exact=True).click()
+            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
+            purchase_tabs.get_by_role("link", name="Resumen", exact=True).click()
             expect(page.locator("#purchase-workspace")).to_have_count(1)
-            page.get_by_role("link", name="Recepciones").click()
+            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
             movement_link = page.locator(".stock-impact a")
             expect(movement_link).to_have_count(2)
             movement_pk = self._db_value(
@@ -316,10 +319,11 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(page).to_have_url(re.compile(r"/inventory/movements/\d+/$"))
             page.goto(f"{self.live_server_url}/purchases/{purchase_pk}/")
             page.get_by_role("link", name="Proveedor E2E").click()
-            page.get_by_role("link", name="Compras").click()
+            supplier_tabs = page.locator(".purchases-page nav.tabs")
+            supplier_tabs.get_by_role("link", name="Compras", exact=True).click()
             expect(page.get_by_role("link", name="Compra PUR-E2E")).to_be_visible()
-            page.get_by_role("link", name="Resumen").click()
-            page.get_by_role("link", name="Compras").click()
+            supplier_tabs.get_by_role("link", name="Resumen", exact=True).click()
+            supplier_tabs.get_by_role("link", name="Compras", exact=True).click()
             expect(page.locator("#supplier-workspace")).to_have_count(1)
             browser.close()
 
