@@ -14,6 +14,7 @@ class PurchaseURLTests(SimpleTestCase):
         ("purchase_cancel", {"pk": 7}, views.PurchaseCancelView),
         ("purchase_receive", {"pk": 7}, views.PurchaseReceiptCreateView),
         ("purchase_line_create", {"purchase_pk": 7}, views.PurchaseLineCreateView),
+        ("product_search", {"purchase_pk": 7}, views.ProductSearchView),
         (
             "purchase_line_update",
             {"purchase_pk": 7, "line_pk": 9},
@@ -26,6 +27,7 @@ class PurchaseURLTests(SimpleTestCase):
         ),
         ("supplier_list", {}, views.SupplierListView),
         ("supplier_create", {}, views.SupplierCreateView),
+        ("supplier_quick_create", {}, views.QuickSupplierCreateView),
         ("supplier_update", {"pk": 4}, views.SupplierUpdateView),
     )
 
@@ -37,8 +39,8 @@ class PurchaseURLTests(SimpleTestCase):
 
     def test_mutating_actions_are_post_only(self):
         for view_class in (
-            views.PurchaseOrderView,
             views.PurchaseCancelView,
             views.PurchaseLineDeleteView,
         ):
             self.assertEqual(view_class.http_method_names, ["post"])
+        self.assertEqual(views.PurchaseOrderView.http_method_names, ["get", "post"])

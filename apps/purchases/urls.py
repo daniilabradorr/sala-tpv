@@ -10,6 +10,11 @@ urlpatterns = [
         "suppliers/create/", views.SupplierCreateView.as_view(), name="supplier_create"
     ),
     path(
+        "suppliers/quick-create/",
+        views.QuickSupplierCreateView.as_view(),
+        name="supplier_quick_create",
+    ),
+    path(
         "suppliers/<int:pk>/edit/",
         views.SupplierUpdateView.as_view(),
         name="supplier_update",
@@ -46,6 +51,11 @@ urlpatterns = [
         "<int:purchase_pk>/lines/create/",
         views.PurchaseLineCreateView.as_view(),
         name="purchase_line_create",
+    ),
+    path(
+        "<int:purchase_pk>/products/search/",
+        views.ProductSearchView.as_view(),
+        name="product_search",
     ),
     path(
         "<int:purchase_pk>/lines/<int:line_pk>/edit/",

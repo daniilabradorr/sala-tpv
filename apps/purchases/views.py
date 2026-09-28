@@ -1,6 +1,10 @@
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
+from django.db.models import Q
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views import View
 from django.views.generic import ListView
 
@@ -13,16 +17,19 @@ from apps.purchases.forms import (
     PurchaseUpdateForm,
     SupplierForm,
     SupplierFilterForm,
+    SupplierPurchaseFilterForm,
 )
+from apps.catalog.models import Product
+from apps.core.htmx import add_hx_trigger
 from apps.purchases.models import Purchase, PurchaseStatusChoices
 from apps.purchases.selectors import (
     get_accessible_purchase_stores,
     get_purchase_detail,
     get_purchase_lines,
     get_purchase_list_kpis,
+    get_purchase_list,
     get_purchase_progress,
     get_purchase_receipts,
-    get_purchases_for_user,
     get_supplier_detail,
     get_suppliers_for_business,
 )
@@ -60,6 +67,17 @@ def _service_errors(form, error):
         form.add_error(None, str(error))
 
 
+def _page_query(request):
+    query = request.GET.copy()
+    query.pop("page", None)
+    encoded = query.urlencode()
+    return f"{encoded}&" if encoded else ""
+
+
+def _is_htmx(request):
+    return request.headers.get("HX-Request") == "true"
+
+
 class _PurchasesView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin):
     pass
 
@@ -82,6 +100,8 @@ class SupplierListView(_PurchasesView, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["filter_form"] = self.filter_form
+        context["page_query"] = _page_query(self.request)
+        context["pagination_target"] = "#supplier-results"
         return context
 
     def render_to_response(self, context, **kwargs):
@@ -117,6 +137,45 @@ class SupplierCreateView(_PurchasesView, View):
                     )
                 return redirect("purchases:supplier_detail", pk=supplier.pk)
         return render(request, self.template_name, {"form": form, "is_create": True})
+
+
+class QuickSupplierCreateView(_PurchasesView, View):
+    template_name = "purchases/partials/_quick_supplier_form.html"
+
+    def get(self, request):
+        return render(request, self.template_name, {"form": SupplierForm()})
+
+    def post(self, request):
+        form = SupplierForm(request.POST)
+        if form.is_valid():
+            try:
+                supplier = create_supplier(
+                    business=_business(request), user=request.user, **form.cleaned_data
+                )
+            except ValidationError as error:
+                _service_errors(form, error)
+            else:
+                response = render(
+                    request,
+                    "purchases/partials/_quick_supplier_success.html",
+                    {"supplier": supplier},
+                )
+                return add_hx_trigger(
+                    response,
+                    {
+                        "purchases:supplier-selected": {
+                            "id": supplier.pk,
+                            "name": supplier.name,
+                        },
+                        "nx:close-modal": {"id": "quick-supplier"},
+                        "nx:toast": {
+                            "message": "Proveedor creado y seleccionado.",
+                            "tone": "success",
+                        },
+                    },
+                )
+        response = render(request, self.template_name, {"form": form}, status=422)
+        return response
 
 
 class SupplierUpdateView(_PurchasesView, View):
@@ -169,20 +228,46 @@ class SupplierDetailView(_PurchasesView, View):
         tab = request.GET.get("tab", "summary")
         if tab not in {"summary", "purchases"}:
             tab = "summary"
-        purchases = get_purchases_for_user(
-            business=business, user=request.user, supplier=supplier
-        )[:25]
+        context = {
+            "supplier": supplier,
+            "tab": tab,
+            "stores": get_accessible_purchase_stores(
+                business=business, user=request.user
+            ),
+        }
+        if tab == "purchases":
+            form = SupplierPurchaseFilterForm(
+                request.GET or None, business=business, user=request.user
+            )
+            data = form.cleaned_data if form.is_valid() else {}
+            if request.GET and not form.is_valid():
+                purchases = Purchase.objects.none()
+            else:
+                purchases = get_purchase_list(
+                    business=business,
+                    user=request.user,
+                    supplier=supplier,
+                    status=data.get("status", ""),
+                    store=data.get("store"),
+                    date_from=data.get("date_from"),
+                    date_to=data.get("date_to"),
+                )
+            context.update(
+                {
+                    "purchase_filter_form": form,
+                    "purchases_page": Paginator(purchases, 25).get_page(
+                        request.GET.get("page")
+                    ),
+                    "page_query": _page_query(request),
+                }
+            )
+        template = "purchases/supplier_detail.html"
+        if _is_htmx(request):
+            template = "purchases/partials/_supplier_workspace.html"
         return render(
             request,
-            "purchases/supplier_detail.html",
-            {
-                "supplier": supplier,
-                "tab": tab,
-                "purchases": purchases,
-                "stores": get_accessible_purchase_stores(
-                    business=business, user=request.user
-                ),
-            },
+            template,
+            context,
         )
 
 
@@ -223,17 +308,20 @@ class PurchaseListView(_PurchasesView, ListView):
 
     def get_queryset(self):
         business = _business(self.request)
+        _, active_store = resolve_active_store(self.request, user=self.request.user)
         self.filter_form = PurchaseFilterForm(
-            self.request.GET or None, business=business, user=self.request.user
+            self.request.GET or None,
+            business=business,
+            user=self.request.user,
+            initial={"store": active_store},
         )
         data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
-        _, active_store = resolve_active_store(self.request, user=self.request.user)
         self.local_store = (
             data.get("store") if "store" in self.request.GET else active_store
         )
         if self.request.GET and not self.filter_form.is_valid():
             return Purchase.objects.none()
-        return get_purchases_for_user(
+        return get_purchase_list(
             business=business,
             user=self.request.user,
             query=data.get("q", ""),
@@ -262,6 +350,7 @@ class PurchaseListView(_PurchasesView, ListView):
                 "kpis": get_purchase_list_kpis(
                     business=business, user=self.request.user, store=self.local_store
                 ),
+                "page_query": _page_query(self.request),
             }
         )
         return context
@@ -291,7 +380,13 @@ class PurchaseCreateView(_PurchasesView, View):
 
     def get(self, request):
         return render(
-            request, self.template_name, {"form": self._form(), "is_create": True}
+            request,
+            self.template_name,
+            {
+                "form": self._form(),
+                "quick_supplier_form": SupplierForm(),
+                "is_create": True,
+            },
         )
 
     def post(self, request):
@@ -308,27 +403,45 @@ class PurchaseCreateView(_PurchasesView, View):
             else:
                 messages.success(request, "Compra creada correctamente.")
                 return redirect("purchases:purchase_detail", pk=purchase.pk)
-        return render(request, self.template_name, {"form": form, "is_create": True})
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "quick_supplier_form": SupplierForm(),
+                "is_create": True,
+            },
+        )
 
 
 class PurchaseDetailView(_PurchasesView, View):
     def get(self, request, pk):
-        purchase = get_purchase_detail(
-            business=_business(request), user=request.user, pk=pk
-        )
+        business = _business(request)
+        purchase = get_purchase_detail(business=business, user=request.user, pk=pk)
+        tab = request.GET.get("tab", "summary")
+        if tab not in {"summary", "products", "receipts"}:
+            tab = "summary"
+        context = {
+            "purchase": purchase,
+            "tab": tab,
+            "progress": get_purchase_progress(purchase),
+            "receipt_registered": request.GET.get("receipt_registered") == "1",
+            "received_units": request.GET.get("units", ""),
+        }
+        if tab == "products":
+            context["lines"] = get_purchase_lines(business=business, purchase=purchase)
+        elif tab == "receipts":
+            context["receipts_page"] = Paginator(
+                get_purchase_receipts(business=business, purchase=purchase), 25
+            ).get_page(request.GET.get("page"))
+            context["page_query"] = _page_query(request)
+        template = "purchases/purchase_detail.html"
+        if _is_htmx(request):
+            template = "purchases/partials/_purchase_workspace.html"
         return render(
             request,
-            "purchases/purchase_detail.html",
-            {
-                "purchase": purchase,
-                "lines": get_purchase_lines(
-                    business=_business(request), purchase=purchase
-                ),
-                "receipts": get_purchase_receipts(
-                    business=_business(request), purchase=purchase
-                ),
-                "progress": get_purchase_progress(purchase),
-            },
+            template,
+            context,
         )
 
 
@@ -399,15 +512,45 @@ class _PurchaseLineView(_PurchasesView, View):
             pk=self.kwargs["purchase_pk"],
         )
 
+    def line_response(self, purchase):
+        if not _is_htmx(self.request):
+            return redirect("purchases:purchase_detail", pk=purchase.pk)
+        refreshed = get_purchase_detail(
+            business=_business(self.request), user=self.request.user, pk=purchase.pk
+        )
+        response = render(
+            self.request,
+            "purchases/partials/_purchase_workspace.html",
+            {
+                "purchase": refreshed,
+                "tab": "products",
+                "lines": get_purchase_lines(
+                    business=_business(self.request), purchase=refreshed
+                ),
+            },
+        )
+        return add_hx_trigger(
+            response,
+            {
+                "nx:close-modal": {},
+                "nx:toast": {"message": "Compra actualizada.", "tone": "success"},
+            },
+        )
+
 
 class PurchaseLineCreateView(_PurchaseLineView):
     def get(self, request, purchase_pk):
+        purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se pueden añadir productos a un borrador.")
         return render(
             request,
-            "purchases/purchase_line_form.html",
+            "purchases/partials/_purchase_line_form.html"
+            if _is_htmx(request)
+            else "purchases/purchase_line_form.html",
             {
                 "form": PurchaseLineCreateForm(business=_business(request)),
-                "purchase": self.purchase(),
+                "purchase": purchase,
             },
         )
 
@@ -425,10 +568,12 @@ class PurchaseLineCreateView(_PurchaseLineView):
             except ValidationError as error:
                 _service_errors(form, error)
             else:
-                return redirect("purchases:purchase_detail", pk=purchase.pk)
+                return self.line_response(purchase)
         return render(
             request,
-            "purchases/purchase_line_form.html",
+            "purchases/partials/_purchase_line_form.html"
+            if _is_htmx(request)
+            else "purchases/purchase_line_form.html",
             {"form": form, "purchase": purchase},
         )
 
@@ -452,7 +597,9 @@ class PurchaseLineUpdateView(_PurchaseLineView):
         )
         return render(
             request,
-            "purchases/purchase_line_form.html",
+            "purchases/partials/_purchase_line_form.html"
+            if _is_htmx(request)
+            else "purchases/purchase_line_form.html",
             {"form": form, "purchase": purchase, "line": line},
         )
 
@@ -472,10 +619,12 @@ class PurchaseLineUpdateView(_PurchaseLineView):
             except ValidationError as error:
                 _service_errors(form, error)
             else:
-                return redirect("purchases:purchase_detail", pk=purchase.pk)
+                return self.line_response(purchase)
         return render(
             request,
-            "purchases/purchase_line_form.html",
+            "purchases/partials/_purchase_line_form.html"
+            if _is_htmx(request)
+            else "purchases/purchase_line_form.html",
             {"form": form, "purchase": purchase, "line": line},
         )
 
@@ -498,7 +647,33 @@ class PurchaseLineDeleteView(_PurchaseLineView):
             )
         except ValidationError as error:
             messages.error(request, str(error))
-        return redirect("purchases:purchase_detail", pk=purchase.pk)
+        return self.line_response(purchase)
+
+
+class ProductSearchView(_PurchasesView, View):
+    def get(self, request, purchase_pk):
+        purchase = get_purchase_detail(
+            business=_business(request), user=request.user, pk=purchase_pk
+        )
+        if not purchase.is_draft:
+            raise PermissionDenied("La compra ya no admite productos.")
+        query = request.GET.get("product_query", "").strip()
+        products = Product.objects.filter(
+            business=_business(request), is_active=True
+        ).order_by("name", "pk")
+        if query:
+            products = products.filter(
+                Q(name__icontains=query)
+                | Q(sku__icontains=query)
+                | Q(barcode__icontains=query)
+            )
+        else:
+            products = products.none()
+        return render(
+            request,
+            "purchases/partials/_product_results.html",
+            {"products": products[:25], "query": query},
+        )
 
 
 class _PurchaseActionView(_PurchasesView, View):
@@ -513,6 +688,8 @@ class _PurchaseActionView(_PurchasesView, View):
 
 
 class PurchaseOrderView(_PurchasesView, View):
+    http_method_names = ["get", "post"]
+
     def purchase(self):
         return get_purchase_detail(
             business=_business(self.request),
@@ -612,6 +789,8 @@ class PurchaseReceiptCreateView(_PurchasesView, View):
             except ValidationError as error:
                 _service_errors(form, error)
             else:
-                messages.success(request, "Recepción registrada correctamente.")
-                return redirect("purchases:purchase_detail", pk=pk)
+                units = sum(item["quantity_received"] for item in form.receipt_lines())
+                messages.success(request, "✓ Recepción registrada correctamente.")
+                url = reverse("purchases:purchase_detail", kwargs={"pk": pk})
+                return HttpResponseRedirect(f"{url}?receipt_registered=1&units={units}")
         return render(request, self.template_name, {"form": form, "purchase": purchase})

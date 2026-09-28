@@ -1,6 +1,7 @@
 """Consultas read-only y tenant-scoped del módulo Purchases."""
 
-from django.db.models import Count, F, Prefetch, Q, Sum
+from django.db.models import Count, DecimalField, F, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
 from apps.purchases.models import Purchase, PurchaseLine, PurchaseReceipt, Supplier
@@ -62,14 +63,10 @@ def get_purchases_for_user(
     date_from=None,
     date_to=None,
 ):
-    qs = (
-        Purchase.objects.filter(
-            business=business,
-            store__in=get_accessible_purchase_stores(business=business, user=user),
-        )
-        .select_related("store", "supplier", "created_by")
-        .prefetch_related("lines")
-    )
+    qs = Purchase.objects.filter(
+        business=business,
+        store__in=get_accessible_purchase_stores(business=business, user=user),
+    ).select_related("store", "supplier", "created_by")
     valid_statuses = {
         value for value, _label in Purchase._meta.get_field("status").choices
     }
@@ -100,6 +97,16 @@ def get_purchases_for_user(
     return qs.order_by("-created_at", "-pk")
 
 
+def get_purchase_list(*, business, user, **filters):
+    """Listado optimizado: el progreso se agrega en SQL, sin cargar líneas."""
+
+    zero = Value(0, output_field=DecimalField(max_digits=14, decimal_places=3))
+    return get_purchases_for_user(business=business, user=user, **filters).annotate(
+        ordered_total=Coalesce(Sum("lines__quantity_ordered"), zero),
+        received_total=Coalesce(Sum("lines__quantity_received"), zero),
+    )
+
+
 def get_purchase_list_kpis(*, business, user, store=None):
     qs = get_purchases_for_user(business=business, user=user, store=store)
     values = {
@@ -122,14 +129,8 @@ def get_purchase_progress(purchase):
 
 
 def get_purchase_detail(*, business, user, pk):
-    receipt_qs = PurchaseReceipt.objects.select_related("received_by").prefetch_related(
-        "lines__purchase_line", "stock_movements__product"
-    )
     return get_object_or_404(
-        get_purchases_for_user(business=business, user=user).prefetch_related(
-            Prefetch("lines", queryset=PurchaseLine.objects.select_related("product")),
-            Prefetch("receipts", queryset=receipt_qs),
-        ),
+        get_purchases_for_user(business=business, user=user),
         pk=pk,
     )
 

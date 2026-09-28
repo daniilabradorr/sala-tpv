@@ -48,6 +48,30 @@ class SupplierFilterForm(forms.Form):
     )
 
 
+class SupplierPurchaseFilterForm(forms.Form):
+    status = forms.ChoiceField(required=False, choices=(), label="Estado")
+    store = forms.ModelChoiceField(
+        required=False, queryset=Store.objects.none(), label="Tienda"
+    )
+    date_from = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+    date_to = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, business, user, **kwargs):
+        super().__init__(*args, **kwargs)
+        from apps.purchases.models import PurchaseStatusChoices
+
+        self.fields["status"].choices = [("", "Todos")] + list(
+            PurchaseStatusChoices.choices
+        )
+        self.fields["store"].queryset = get_accessible_purchase_stores(
+            business=business, user=user
+        )
+
+
 class SupplierForm(forms.Form):
     name = forms.CharField(max_length=180)
     legal_name = forms.CharField(max_length=180, required=False)
@@ -89,7 +113,9 @@ class PurchaseUpdateForm(_PurchaseHeaderForm):
 
 
 class PurchaseLineCreateForm(forms.Form):
-    product = forms.ModelChoiceField(queryset=Product.objects.none())
+    product = forms.ModelChoiceField(
+        queryset=Product.objects.none(), widget=forms.HiddenInput
+    )
     quantity = forms.DecimalField(
         max_digits=14, decimal_places=3, min_value=Decimal("0.001")
     )
@@ -100,17 +126,9 @@ class PurchaseLineCreateForm(forms.Form):
 
     def __init__(self, *args, business, **kwargs):
         super().__init__(*args, **kwargs)
-        products = Product.objects.filter(business=business, is_active=True)
-        product_query = (
-            self.data.get("product_query") or kwargs.pop("product_query", "")
-        ).strip()
-        if product_query:
-            products = products.filter(
-                Q(name__icontains=product_query)
-                | Q(sku__icontains=product_query)
-                | Q(barcode__icontains=product_query)
-            )
-        self.fields["product"].queryset = products.order_by("name", "pk")[:30]
+        self.fields["product"].queryset = Product.objects.filter(
+            business=business, is_active=True
+        )
 
 
 class PurchaseLineUpdateForm(forms.Form):
@@ -132,9 +150,10 @@ class PurchaseReceiptForm(forms.Form):
         self.purchase_lines = list(purchase_lines)
         for line in self.purchase_lines:
             remaining = line.quantity_ordered - line.quantity_received
-            if remaining <= 0:
+            field_name = f"line_{line.pk}"
+            if remaining <= 0 and not (self.is_bound and field_name in self.data):
                 continue
-            self.fields[f"line_{line.pk}"] = forms.DecimalField(
+            self.fields[field_name] = forms.DecimalField(
                 max_digits=14,
                 decimal_places=3,
                 min_value=Decimal("0.001"),

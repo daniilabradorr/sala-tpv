@@ -6,6 +6,7 @@ from django.urls import reverse
 from apps.business_config.models import POSSettings
 from apps.catalog.models import Product
 from apps.core.models import Business
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.purchases.models import (
     Purchase,
@@ -57,10 +58,60 @@ class PurchaseViewAccessTests(TestCase):
             self.client.get(reverse("purchases:purchase_list")).status_code, 200
         )
 
+    def test_active_store_is_explicit_and_all_stores_is_local(self):
+        other_store = Store.objects.create(business=self.business, name="B", code="B2")
+        Purchase.objects.create(
+            business=self.business,
+            store=other_store,
+            supplier=self.supplier,
+            created_by=self.owner,
+            reference="OTHER-STORE",
+        )
+        session = self.client.session
+        session[ACTIVE_STORE_SESSION_KEY] = self.store.pk
+        session.save()
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("purchases:purchase_list"))
+        self.assertContains(response, self.purchase.reference)
+        self.assertNotContains(response, "OTHER-STORE")
+        self.assertEqual(response.context["filter_form"].initial["store"], self.store)
+        response = self.client.get(f"{reverse('purchases:purchase_list')}?store=")
+        self.assertContains(response, "OTHER-STORE")
+        self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
+
     def test_cashier_is_forbidden(self):
         self.client.force_login(self.cashier)
         self.assertEqual(
             self.client.get(reverse("purchases:purchase_list")).status_code, 403
+        )
+
+    def test_cross_business_supplier_and_purchase_are_not_found(self):
+        other = Business.objects.create(name="B", slug=f"b-{uuid4().hex}")
+        other_store = Store.objects.create(business=other, name="B", code="OTHER")
+        other_supplier = Supplier.objects.create(business=other, name="Ajeno")
+        other_owner = create_user(
+            business=other,
+            role=RoleChoices.OWNER,
+            email="views-other-owner@test.com",
+        )
+        other_purchase = Purchase.objects.create(
+            business=other,
+            store=other_store,
+            supplier=other_supplier,
+            created_by=other_owner,
+        )
+        self.client.force_login(self.owner)
+        self.assertEqual(
+            self.client.get(
+                reverse("purchases:supplier_detail", kwargs={"pk": other_supplier.pk})
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("purchases:purchase_detail", kwargs={"pk": other_purchase.pk})
+            ).status_code,
+            404,
         )
 
     def test_manager_without_store_access_gets_404_for_detail(self):
@@ -105,6 +156,53 @@ class PurchaseViewAccessTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Purchase.objects.filter(reference="HTTP").exists())
         self.assertFalse(StockMovement.objects.exists())
+
+    def test_quick_supplier_invalid_is_partial_and_valid_selects_supplier(self):
+        self.client.force_login(self.owner)
+        url = reverse("purchases:supplier_quick_create")
+        invalid = self.client.post(url, {"name": ""}, HTTP_HX_REQUEST="true")
+        self.assertEqual(invalid.status_code, 422)
+        self.assertTemplateUsed(invalid, "purchases/partials/_quick_supplier_form.html")
+        self.assertNotContains(invalid, "<html", html=False, status_code=422)
+        valid = self.client.post(
+            url,
+            {"name": "Proveedor rápido", "is_active": "on"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(valid.status_code, 200)
+        supplier = Supplier.objects.get(name="Proveedor rápido")
+        self.assertTrue(supplier.is_active)
+        self.assertIn("nx:close-modal", valid.headers["HX-Trigger"])
+        self.assertIn("purchases:supplier-selected", valid.headers["HX-Trigger"])
+
+    def test_product_search_is_limited_and_tenant_scoped(self):
+        product = Product.objects.create(
+            business=self.business,
+            name="Café buscable",
+            sku="SEARCH-CAFE",
+            barcode="8412345678901",
+            base_price=1,
+            cost_price=1,
+            unit=Product.UNIT_UNIDAD,
+        )
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse(
+                "purchases:product_search",
+                kwargs={"purchase_pk": self.purchase.pk},
+            ),
+            {"product_query": "SEARCH-CAFE"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(response, product.name)
+        self.assertContains(response, f'data-product-id="{product.pk}"')
+
+    def test_order_get_is_review_and_post_mutates(self):
+        self.client.force_login(self.owner)
+        url = reverse("purchases:purchase_order", kwargs={"pk": self.purchase.pk})
+        review = self.client.get(url)
+        self.assertEqual(review.status_code, 200)
+        self.assertContains(review, "líneas comerciales quedarán fijadas")
 
     def test_manager_with_access_can_open_detail(self):
         UserStoreAccess.objects.create(
