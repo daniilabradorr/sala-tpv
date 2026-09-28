@@ -93,7 +93,9 @@ class SupplierListView(_PurchasesView, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        self.filter_form = SupplierFilterForm(self.request.GET or None)
+        self.filter_form = SupplierFilterForm(
+            self.request.GET or None, auto_id="id_supplier_desktop_%s"
+        )
         data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
         return get_suppliers_for_business(
             business=_business(self.request),
@@ -103,11 +105,10 @@ class SupplierListView(_PurchasesView, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["filter_form"].auto_id = "id_supplier_desktop_%s"
+        context["filter_form"] = self.filter_form
         context["mobile_filter_form"] = SupplierFilterForm(
             self.request.GET or None, auto_id="id_supplier_mobile_%s"
         )
-        context["filter_form"] = self.filter_form
         context["page_query"] = _page_query(self.request)
         context["pagination_target"] = "#supplier-results"
         return context

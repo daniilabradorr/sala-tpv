@@ -60,6 +60,22 @@ class PurchaseViewAccessTests(TestCase):
             self.client.get(reverse("purchases:purchase_list")).status_code, 200
         )
 
+    def test_supplier_list_full_and_htmx_responses_are_valid(self):
+        self.client.force_login(self.owner)
+        url = reverse("purchases:supplier_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.supplier.name)
+        self.assertContains(response, 'id="id_supplier_desktop_q"')
+        self.assertContains(response, 'id="id_supplier_mobile_q"')
+        self.assertEqual(response.content.count(b'id="id_supplier_desktop_q"'), 1)
+        self.assertEqual(response.content.count(b'id="id_supplier_mobile_q"'), 1)
+
+        partial = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertEqual(partial.status_code, 200)
+        self.assertTemplateUsed(partial, "purchases/partials/_supplier_results.html")
+        self.assertContains(partial, self.supplier.name)
+
     def test_active_store_is_explicit_and_all_stores_is_local(self):
         other_store = Store.objects.create(business=self.business, name="B", code="B2")
         Purchase.objects.create(
@@ -86,7 +102,7 @@ class PurchaseViewAccessTests(TestCase):
         session.save()
         self.client.force_login(self.owner)
         response = self.client.get(reverse("purchases:purchase_list"))
-        self.assertContains(response, self.purchase.reference)
+        self.assertContains(response, "PAGE-25")
         self.assertNotContains(response, "OTHER-STORE")
         self.assertEqual(response.context["filter_form"].initial["store"], self.store)
         paged = self.client.get(f"{reverse('purchases:purchase_list')}?page=2")
@@ -95,6 +111,7 @@ class PurchaseViewAccessTests(TestCase):
         )
         self.assertIn(f"store={self.store.pk}", paged.context["page_query"])
         self.assertNotContains(paged, "OTHER-STORE")
+        self.assertContains(paged, self.purchase.reference)
         response = self.client.get(f"{reverse('purchases:purchase_list')}?store=")
         self.assertContains(response, "OTHER-STORE")
         self.assertIn("store=&", response.context["page_query"])

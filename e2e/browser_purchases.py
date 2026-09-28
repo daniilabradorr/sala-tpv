@@ -96,7 +96,25 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Crear borrador").click()
             expect(page.get_by_role("heading", name="Compra PUR-E2E")).to_be_visible()
 
-            page.get_by_role("button", name="Añadir producto").click()
+            page.evaluate(
+                """() => {
+                    window.__purchaseLineModalSettled = false;
+                    const handler = (event) => {
+                        if (event.detail.target?.id === "purchase-line-modal-body") {
+                            window.__purchaseLineModalSettled = true;
+                            document.body.removeEventListener("htmx:afterSettle", handler);
+                        }
+                    };
+                    document.body.addEventListener("htmx:afterSettle", handler);
+                }"""
+            )
+            with page.expect_response(
+                lambda response: (
+                    "/lines/create/" in response.url and response.status == 200
+                )
+            ):
+                page.get_by_role("button", name="Añadir producto").click()
+            page.wait_for_function("window.__purchaseLineModalSettled === true")
             line_modal = page.locator("#purchase-line-modal")
             search = line_modal.get_by_label("Buscar producto")
             with page.expect_response(
