@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Informes | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/reports.css' %}">{% endblock %}
+{% block content %}
+<section class="erp-page reports-page">
+  <header class="erp-header"><div><p class="erp-eyebrow">Análisis</p><h1>Informes</h1><p class="erp-subtitle">Datos dinámicos de las fuentes operativas de tu negocio.</p></div></header>
+  {% include "reports/partials/_filters.html" %}
+  {% if report_data %}{% include "reports/partials/_workspace.html" %}{% endif %}
+</section>
+{% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/reports.js' %}"></script>{% endblock %}

@@ -903,10 +903,12 @@ def cash_summary(*, business, period, store=None):
     return result
 
 
-def cash_sessions_summary(*, business, period, store=None):
+def cash_sessions_summary(*, business, period, store=None, limit=None):
     """List sessions intersecting the period, with each complete session's movements."""
     _validate_scope(business=business, period=period, store=store)
-    sessions = list(
+    if limit is not None and (not isinstance(limit, int) or limit < 1):
+        raise ValueError("limit must be a positive integer.")
+    queryset = (
         CashSession.objects.filter(
             business=business, opened_at__lt=period.end, **_store_filter(store)
         )
@@ -914,6 +916,7 @@ def cash_sessions_summary(*, business, period, store=None):
         .select_related("cash_register", "store")
         .order_by("-opened_at", "-pk")
     )
+    sessions = list(queryset[:limit] if limit is not None else queryset)
     totals = {
         session.pk: {
             "cash_sales": ZERO_MONEY,

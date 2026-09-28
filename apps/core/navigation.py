@@ -6,6 +6,7 @@ from apps.users.helpers import (
     can_manage_business_settings,
     can_manage_users,
     can_sell_in_store,
+    can_view_reports,
     is_owner_or_manager,
 )
 
@@ -13,6 +14,7 @@ from apps.users.helpers import (
 GROUPS = (
     ("operation", "Operación"),
     ("management", "Gestión"),
+    ("analysis", "Análisis"),
     ("administration", "Administración"),
 )
 
@@ -83,6 +85,18 @@ def build_shell_navigation(request, *, active_store):
                     "caja registro sesiones efectivo",
                     app_name == "cash_register",
                 ),
+            )
+        )
+    if can_view_reports(user):
+        items.append(
+            _item(
+                "reports",
+                "Informes",
+                "chart",
+                reverse("reports:overview"),
+                "analysis",
+                "informes análisis ventas pagos caja fiscal inventario compras",
+                app_name == "reports",
             )
         )
 

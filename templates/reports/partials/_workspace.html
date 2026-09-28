@@ -1,0 +1,13 @@
+<div id="reports-workspace" class="reports-workspace" aria-live="polite" data-active-tab="{{ tab }}">
+  <nav class="reports-tabs" aria-label="Informes">
+    {% for item in tab_urls %}<a href="{{ item.url }}" data-report-tab="{{ item.key }}" hx-get="{{ item.url }}" hx-target="#reports-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == item.key %}aria-current="page" class="active"{% endif %}>{{ item.label }}</a>{% endfor %}
+  </nav>
+  <header class="reports-scope"><p>Resumen · <strong>{{ scope_name }}</strong> · {{ date_from|date:"d/m/Y" }} → {{ date_to|date:"d/m/Y" }}</p><span class="htmx-indicator">Actualizando…</span></header>
+  {% if tab == "general" %}{% include "reports/partials/_general.html" %}
+  {% elif tab == "sales" %}{% include "reports/partials/_sales.html" %}
+  {% elif tab == "payments" %}{% include "reports/partials/_payments.html" %}
+  {% elif tab == "cash" %}{% include "reports/partials/_cash.html" %}
+  {% elif tab == "tax" %}{% include "reports/partials/_tax.html" %}
+  {% elif tab == "inventory" %}{% include "reports/partials/_inventory.html" %}
+  {% elif tab == "purchases" %}{% include "reports/partials/_purchases.html" %}{% endif %}
+</div>
