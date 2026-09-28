@@ -1,9 +1,11 @@
 """Browser coverage for the complete FE-17 purchase and supplier workflow."""
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import re
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.db import connections
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
@@ -32,6 +34,20 @@ from apps.users.tests.factories import create_user
 )
 class PurchasesBrowserTests(StaticLiveServerTestCase):
     password = "Purchases-E2E-123!"
+
+    @staticmethod
+    def _db_value(operation):
+        """Evaluate one eager ORM value outside Playwright's asyncio context."""
+
+        def worker():
+            connections.close_all()
+            try:
+                return operation()
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(worker).result()
 
     def setUp(self):
         self.business = Business.objects.create(
@@ -75,6 +91,8 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
         page.get_by_role("button", name="Iniciar sesión").click()
 
     def test_complete_purchase_receipt_and_supplier_flow(self):
+        store_pk = self.store.pk
+        product_pk = self.product.pk
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 900})
@@ -180,7 +198,7 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(result).to_be_visible()
             result.click()
             expect(line_modal.locator("input[name=product]")).to_have_value(
-                str(self.product.pk)
+                str(product_pk)
             )
             line_modal.locator("input[name=unit_cost]").fill("2")
             line_modal.locator("input[name=tax_rate]").fill("10")
@@ -200,21 +218,25 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(totals).to_contain_text("Total")
             expect(totals).to_contain_text("11,00 €")
 
-            purchase = Purchase.objects.get(reference="PUR-E2E")
-            self.assertEqual(purchase.subtotal_amount, Decimal("10.00"))
-            self.assertEqual(purchase.tax_amount, Decimal("1.00"))
-            self.assertEqual(purchase.total_amount, Decimal("11.00"))
+            purchase_pk, subtotal, tax, total = self._db_value(
+                lambda: Purchase.objects.values_list(
+                    "pk", "subtotal_amount", "tax_amount", "total_amount"
+                ).get(reference="PUR-E2E")
+            )
+            self.assertEqual(subtotal, Decimal("10.00"))
+            self.assertEqual(tax, Decimal("1.00"))
+            self.assertEqual(total, Decimal("11.00"))
 
             page.get_by_role("link", name="Realizar pedido").click()
             expect(page.get_by_text("Esta acción no cambia el stock.")).to_be_visible()
             page.get_by_role("button", name="Realizar pedido").click()
             expect(page.get_by_text("Pedida", exact=True)).to_be_visible()
-            self.assertEqual(
-                InventoryItem.objects.get(
-                    store=self.store, product=self.product
-                ).current_stock,
-                Decimal("4.000"),
+            stock = self._db_value(
+                lambda: InventoryItem.objects.values_list(
+                    "current_stock", flat=True
+                ).get(store_id=store_pk, product_id=product_pk)
             )
+            self.assertEqual(stock, Decimal("4.000"))
 
             page.get_by_role("link", name="Registrar recepción").click()
             page.locator("input[name^=line_]").fill("2")
@@ -239,14 +261,14 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(
                 page.get_by_text("Recibida parcialmente", exact=True)
             ).to_be_visible()
-            self.assertEqual(
-                InventoryItem.objects.get(
-                    store=self.store, product=self.product
-                ).current_stock,
-                Decimal("6.000"),
+            stock = self._db_value(
+                lambda: InventoryItem.objects.values_list(
+                    "current_stock", flat=True
+                ).get(store_id=store_pk, product_id=product_pk)
             )
-            self.assertEqual(StockMovement.objects.count(), 1)
-            self.assertEqual(PurchaseReceipt.objects.count(), 1)
+            self.assertEqual(stock, Decimal("6.000"))
+            self.assertEqual(self._db_value(StockMovement.objects.count), 1)
+            self.assertEqual(self._db_value(PurchaseReceipt.objects.count), 1)
 
             page.get_by_role("link", name="Registrar recepción").click()
             page.locator("input[name^=line_]").fill("3")
@@ -256,15 +278,19 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             expect(page.get_by_role("link", name="Registrar recepción")).to_have_count(
                 0
             )
-            self.assertEqual(
-                InventoryItem.objects.get(
-                    store=self.store, product=self.product
-                ).current_stock,
-                Decimal("9.000"),
+            stock = self._db_value(
+                lambda: InventoryItem.objects.values_list(
+                    "current_stock", flat=True
+                ).get(store_id=store_pk, product_id=product_pk)
             )
-            self.assertEqual(StockMovement.objects.count(), 2)
-            purchase = Purchase.objects.get(reference="PUR-E2E")
-            self.assertEqual(purchase.status, PurchaseStatusChoices.RECEIVED)
+            self.assertEqual(stock, Decimal("9.000"))
+            self.assertEqual(self._db_value(StockMovement.objects.count), 2)
+            purchase_status = self._db_value(
+                lambda: Purchase.objects.values_list("status", flat=True).get(
+                    pk=purchase_pk
+                )
+            )
+            self.assertEqual(purchase_status, PurchaseStatusChoices.RECEIVED)
 
             page.get_by_role("link", name="Recepciones").click()
             page.get_by_role("link", name="Resumen").click()
@@ -277,14 +303,18 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             page.get_by_role("link", name="Recepciones").click()
             movement_link = page.locator(".stock-impact a")
             expect(movement_link).to_have_count(2)
-            movement_pk = StockMovement.objects.order_by("pk").values_list(
-                "pk", flat=True
-            )[0]
+            movement_pk = self._db_value(
+                lambda: (
+                    StockMovement.objects.order_by("pk")
+                    .values_list("pk", flat=True)
+                    .first()
+                )
+            )
             page.locator(
                 f'.stock-impact a[href="/inventory/movements/{movement_pk}/"]'
             ).click()
             expect(page).to_have_url(re.compile(r"/inventory/movements/\d+/$"))
-            page.goto(f"{self.live_server_url}/purchases/{purchase.pk}/")
+            page.goto(f"{self.live_server_url}/purchases/{purchase_pk}/")
             page.get_by_role("link", name="Proveedor E2E").click()
             page.get_by_role("link", name="Compras").click()
             expect(page.get_by_role("link", name="Compra PUR-E2E")).to_be_visible()
