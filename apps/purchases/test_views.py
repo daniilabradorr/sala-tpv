@@ -75,7 +75,6 @@ class PurchaseViewAccessTests(TestCase):
     def test_actions_reject_get(self):
         self.client.force_login(self.owner)
         actions = (
-            ("purchase_order", {"pk": self.purchase.pk}),
             ("purchase_cancel", {"pk": self.purchase.pk}),
             (
                 "purchase_line_delete",
@@ -195,8 +194,12 @@ class PurchaseViewAccessTests(TestCase):
         payload = {"idempotency_key": str(key), f"line_{line.pk}": "2.000"}
         self.client.force_login(self.owner)
         url = reverse("purchases:purchase_receive", kwargs={"pk": self.purchase.pk})
-        self.assertEqual(self.client.post(url, payload).status_code, 302)
-        self.assertEqual(self.client.post(url, payload).status_code, 302)
+        review = self.client.post(url, payload)
+        self.assertEqual(review.status_code, 200)
+        self.assertContains(review, str(key))
+        confirmed_payload = {**payload, "confirm": "1"}
+        self.assertEqual(self.client.post(url, confirmed_payload).status_code, 302)
+        self.assertEqual(self.client.post(url, confirmed_payload).status_code, 302)
 
         line.refresh_from_db()
         self.purchase.refresh_from_db()

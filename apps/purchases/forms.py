@@ -10,6 +10,44 @@ from apps.stores.models import Store
 from apps.purchases.selectors import get_accessible_purchase_stores
 
 
+class PurchaseFilterForm(forms.Form):
+    q = forms.CharField(required=False, label="Buscar")
+    status = forms.ChoiceField(required=False, choices=(), label="Estado")
+    supplier = forms.ModelChoiceField(
+        required=False, queryset=Supplier.objects.none(), label="Proveedor"
+    )
+    store = forms.ModelChoiceField(
+        required=False, queryset=Store.objects.none(), label="Tienda"
+    )
+    date_from = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+    date_to = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, business, user, **kwargs):
+        super().__init__(*args, **kwargs)
+        from apps.purchases.models import PurchaseStatusChoices
+
+        self.fields["status"].choices = [("", "Todos")] + list(
+            PurchaseStatusChoices.choices
+        )
+        self.fields["supplier"].queryset = Supplier.objects.filter(business=business)
+        self.fields["store"].queryset = get_accessible_purchase_stores(
+            business=business, user=user
+        )
+
+
+class SupplierFilterForm(forms.Form):
+    q = forms.CharField(required=False, label="Buscar")
+    status = forms.ChoiceField(
+        required=False,
+        initial="active",
+        choices=(("active", "Activos"), ("inactive", "Inactivos"), ("all", "Todos")),
+    )
+
+
 class SupplierForm(forms.Form):
     name = forms.CharField(max_length=180)
     legal_name = forms.CharField(max_length=180, required=False)
@@ -62,9 +100,17 @@ class PurchaseLineCreateForm(forms.Form):
 
     def __init__(self, *args, business, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["product"].queryset = Product.objects.filter(
-            business=business, is_active=True
-        ).order_by("name", "pk")
+        products = Product.objects.filter(business=business, is_active=True)
+        product_query = (
+            self.data.get("product_query") or kwargs.pop("product_query", "")
+        ).strip()
+        if product_query:
+            products = products.filter(
+                Q(name__icontains=product_query)
+                | Q(sku__icontains=product_query)
+                | Q(barcode__icontains=product_query)
+            )
+        self.fields["product"].queryset = products.order_by("name", "pk")[:30]
 
 
 class PurchaseLineUpdateForm(forms.Form):
@@ -80,19 +126,19 @@ class PurchaseReceiptForm(forms.Form):
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args, purchase_lines, **kwargs):
-        bound = bool(args) or "data" in kwargs
         super().__init__(*args, **kwargs)
-        if not bound:
+        if not self.is_bound:
             self.initial.setdefault("idempotency_key", uuid4())
         self.purchase_lines = list(purchase_lines)
         for line in self.purchase_lines:
             remaining = line.quantity_ordered - line.quantity_received
+            if remaining <= 0:
+                continue
             self.fields[f"line_{line.pk}"] = forms.DecimalField(
                 max_digits=14,
                 decimal_places=3,
                 min_value=Decimal("0.001"),
                 required=False,
-                disabled=not bound and remaining <= 0,
                 label=(
                     f"{line.product_name}: pedida {line.quantity_ordered}, "
                     f"recibida {line.quantity_received}, pendiente {remaining}"
@@ -101,7 +147,11 @@ class PurchaseReceiptForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        if not any(cleaned.get(f"line_{line.pk}") for line in self.purchase_lines):
+        if not any(
+            cleaned.get(f"line_{line.pk}")
+            for line in self.purchase_lines
+            if f"line_{line.pk}" in self.fields
+        ):
             raise forms.ValidationError(
                 "Debes indicar al menos una cantidad a recibir."
             )
@@ -114,5 +164,6 @@ class PurchaseReceiptForm(forms.Form):
                 "quantity_received": self.cleaned_data[f"line_{line.pk}"],
             }
             for line in self.purchase_lines
-            if self.cleaned_data.get(f"line_{line.pk}") is not None
+            if f"line_{line.pk}" in self.fields
+            and self.cleaned_data.get(f"line_{line.pk}") is not None
         ]

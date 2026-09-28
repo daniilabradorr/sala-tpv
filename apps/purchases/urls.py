@@ -14,6 +14,21 @@ urlpatterns = [
         views.SupplierUpdateView.as_view(),
         name="supplier_update",
     ),
+    path(
+        "suppliers/<int:pk>/",
+        views.SupplierDetailView.as_view(),
+        name="supplier_detail",
+    ),
+    path(
+        "suppliers/<int:pk>/deactivate/",
+        views.SupplierDeactivateView.as_view(),
+        name="supplier_deactivate",
+    ),
+    path(
+        "suppliers/<int:pk>/reactivate/",
+        views.SupplierActivateView.as_view(),
+        name="supplier_reactivate",
+    ),
     path("", views.PurchaseListView.as_view(), name="purchase_list"),
     path("create/", views.PurchaseCreateView.as_view(), name="purchase_create"),
     path("<int:pk>/", views.PurchaseDetailView.as_view(), name="purchase_detail"),

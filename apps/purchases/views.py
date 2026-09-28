@@ -5,18 +5,22 @@ from django.views import View
 from django.views.generic import ListView
 
 from apps.purchases.forms import (
+    PurchaseFilterForm,
     PurchaseCreateForm,
     PurchaseLineCreateForm,
     PurchaseLineUpdateForm,
     PurchaseReceiptForm,
     PurchaseUpdateForm,
     SupplierForm,
+    SupplierFilterForm,
 )
-from apps.purchases.models import PurchaseStatusChoices
+from apps.purchases.models import Purchase, PurchaseStatusChoices
 from apps.purchases.selectors import (
     get_accessible_purchase_stores,
     get_purchase_detail,
     get_purchase_lines,
+    get_purchase_list_kpis,
+    get_purchase_progress,
     get_purchase_receipts,
     get_purchases_for_user,
     get_supplier_detail,
@@ -35,6 +39,9 @@ from apps.purchases.services import (
     update_supplier,
 )
 from apps.users.mixins import BusinessRequiredMixin, ManagerOrOwnerRequiredMixin
+from apps.core.shell import resolve_active_store
+from django.utils.decorators import method_decorator
+from django.views.decorators.vary import vary_on_headers
 
 
 def _business(request):
@@ -57,17 +64,30 @@ class _PurchasesView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin):
     pass
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class SupplierListView(_PurchasesView, ListView):
     template_name = "purchases/supplier_list.html"
     context_object_name = "suppliers"
     paginate_by = 25
 
     def get_queryset(self):
+        self.filter_form = SupplierFilterForm(self.request.GET or None)
+        data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
         return get_suppliers_for_business(
             business=_business(self.request),
-            query=self.request.GET.get("q", ""),
-            status=self.request.GET.get("status", "active"),
+            query=data.get("q", ""),
+            status=data.get("status", "active"),
         )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["filter_form"] = self.filter_form
+        return context
+
+    def render_to_response(self, context, **kwargs):
+        if self.request.headers.get("HX-Request") == "true":
+            self.template_name = "purchases/partials/_supplier_results.html"
+        return super().render_to_response(context, **kwargs)
 
 
 class SupplierCreateView(_PurchasesView, View):
@@ -82,14 +102,20 @@ class SupplierCreateView(_PurchasesView, View):
         form = SupplierForm(request.POST)
         if form.is_valid():
             try:
-                create_supplier(
+                supplier = create_supplier(
                     business=_business(request), user=request.user, **form.cleaned_data
                 )
             except ValidationError as error:
                 _service_errors(form, error)
             else:
                 messages.success(request, "Proveedor creado correctamente.")
-                return redirect("purchases:supplier_list")
+                if request.headers.get("HX-Request") == "true":
+                    return render(
+                        request,
+                        "purchases/partials/_quick_supplier_success.html",
+                        {"supplier": supplier},
+                    )
+                return redirect("purchases:supplier_detail", pk=supplier.pk)
         return render(request, self.template_name, {"form": form, "is_create": True})
 
 
@@ -132,23 +158,90 @@ class SupplierUpdateView(_PurchasesView, View):
                 _service_errors(form, error)
             else:
                 messages.success(request, "Proveedor actualizado correctamente.")
-                return redirect("purchases:supplier_list")
+                return redirect("purchases:supplier_detail", pk=supplier.pk)
         return render(request, self.template_name, {"form": form, "supplier": supplier})
 
 
+class SupplierDetailView(_PurchasesView, View):
+    def get(self, request, pk):
+        business = _business(request)
+        supplier = get_supplier_detail(business=business, pk=pk)
+        tab = request.GET.get("tab", "summary")
+        if tab not in {"summary", "purchases"}:
+            tab = "summary"
+        purchases = get_purchases_for_user(
+            business=business, user=request.user, supplier=supplier
+        )[:25]
+        return render(
+            request,
+            "purchases/supplier_detail.html",
+            {
+                "supplier": supplier,
+                "tab": tab,
+                "purchases": purchases,
+                "stores": get_accessible_purchase_stores(
+                    business=business, user=request.user
+                ),
+            },
+        )
+
+
+class SupplierStatusView(_PurchasesView, View):
+    http_method_names = ["post"]
+    active = False
+
+    def post(self, request, pk):
+        supplier = get_supplier_detail(business=_business(request), pk=pk)
+        update_supplier(
+            business=_business(request),
+            supplier=supplier,
+            user=request.user,
+            is_active=self.active,
+        )
+        messages.success(
+            request,
+            "Proveedor reactivado."
+            if self.active
+            else "Proveedor desactivado; su histórico se conserva.",
+        )
+        return redirect("purchases:supplier_detail", pk=pk)
+
+
+class SupplierActivateView(SupplierStatusView):
+    active = True
+
+
+class SupplierDeactivateView(SupplierStatusView):
+    active = False
+
+
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class PurchaseListView(_PurchasesView, ListView):
     template_name = "purchases/purchase_list.html"
     context_object_name = "purchases"
     paginate_by = 25
 
     def get_queryset(self):
+        business = _business(self.request)
+        self.filter_form = PurchaseFilterForm(
+            self.request.GET or None, business=business, user=self.request.user
+        )
+        data = self.filter_form.cleaned_data if self.filter_form.is_valid() else {}
+        _, active_store = resolve_active_store(self.request, user=self.request.user)
+        self.local_store = (
+            data.get("store") if "store" in self.request.GET else active_store
+        )
+        if self.request.GET and not self.filter_form.is_valid():
+            return Purchase.objects.none()
         return get_purchases_for_user(
-            business=_business(self.request),
+            business=business,
             user=self.request.user,
-            query=self.request.GET.get("q", ""),
-            status=self.request.GET.get("status", ""),
-            store=self.request.GET.get("store", ""),
-            supplier=self.request.GET.get("supplier", ""),
+            query=data.get("q", ""),
+            status=data.get("status", ""),
+            store=self.local_store,
+            supplier=data.get("supplier"),
+            date_from=data.get("date_from"),
+            date_to=data.get("date_to"),
         )
 
     def get_context_data(self, **kwargs):
@@ -163,17 +256,37 @@ class PurchaseListView(_PurchasesView, ListView):
                     business=business, status="all"
                 ),
                 "statuses": PurchaseStatusChoices.choices,
+                "filter_form": self.filter_form,
+                "local_store": self.local_store,
+                "all_stores": self.local_store is None,
+                "kpis": get_purchase_list_kpis(
+                    business=business, user=self.request.user, store=self.local_store
+                ),
             }
         )
         return context
+
+    def render_to_response(self, context, **kwargs):
+        if self.request.headers.get("HX-Request") == "true":
+            self.template_name = "purchases/partials/_purchase_results.html"
+        return super().render_to_response(context, **kwargs)
 
 
 class PurchaseCreateView(_PurchasesView, View):
     template_name = "purchases/purchase_form.html"
 
     def _form(self, data=None):
+        initial = {}
+        _, active_store = resolve_active_store(self.request, user=self.request.user)
+        if active_store:
+            initial["store"] = active_store
+        if self.request.GET.get("supplier"):
+            initial["supplier"] = self.request.GET["supplier"]
         return PurchaseCreateForm(
-            data, business=_business(self.request), user=self.request.user
+            data,
+            business=_business(self.request),
+            user=self.request.user,
+            initial=initial,
         )
 
     def get(self, request):
@@ -214,6 +327,7 @@ class PurchaseDetailView(_PurchasesView, View):
                 "receipts": get_purchase_receipts(
                     business=_business(request), purchase=purchase
                 ),
+                "progress": get_purchase_progress(purchase),
             },
         )
 
@@ -398,7 +512,22 @@ class _PurchaseActionView(_PurchasesView, View):
         )
 
 
-class PurchaseOrderView(_PurchaseActionView):
+class PurchaseOrderView(_PurchasesView, View):
+    def purchase(self):
+        return get_purchase_detail(
+            business=_business(self.request),
+            user=self.request.user,
+            pk=self.kwargs["pk"],
+        )
+
+    def get(self, request, pk):
+        purchase = self.purchase()
+        if not purchase.is_draft:
+            raise PermissionDenied("Solo se puede revisar un borrador.")
+        return render(
+            request, "purchases/purchase_order_review.html", {"purchase": purchase}
+        )
+
     def post(self, request, pk):
         purchase = self.purchase()
         try:
@@ -456,6 +585,20 @@ class PurchaseReceiptCreateView(_PurchasesView, View):
                 business=_business(request), purchase=purchase
             ),
         )
+        if form.is_valid() and request.POST.get("confirm") != "1":
+            receipt_lines = form.receipt_lines()
+            return render(
+                request,
+                "purchases/purchase_receipt_review.html",
+                {
+                    "form": form,
+                    "purchase": purchase,
+                    "receipt_lines": receipt_lines,
+                    "total_units": sum(
+                        item["quantity_received"] for item in receipt_lines
+                    ),
+                },
+            )
         if form.is_valid():
             try:
                 register_purchase_receipt(
