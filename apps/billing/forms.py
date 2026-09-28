@@ -126,7 +126,7 @@ class BillingSeriesForm(forms.Form):
 
 
 class IssueSaleDocumentForm(forms.Form):
-    series = forms.ModelChoiceField(BillingSeries.objects.none())
+    series = forms.ModelChoiceField(BillingSeries.objects.none(), label="Serie")
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput())
 
     def __init__(self, *args, business, sale, **kwargs):
@@ -148,8 +148,8 @@ class IssueSaleDocumentForm(forms.Form):
 
 
 class SubstituteSimplifiedDocumentForm(forms.Form):
-    customer = forms.ModelChoiceField(Customer.objects.none())
-    series = forms.ModelChoiceField(BillingSeries.objects.none())
+    customer = forms.ModelChoiceField(Customer.objects.none(), label="Cliente")
+    series = forms.ModelChoiceField(BillingSeries.objects.none(), label="Serie")
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput())
 
     def __init__(self, *args, business, sale, **kwargs):
@@ -176,9 +176,9 @@ class SubstituteSimplifiedDocumentForm(forms.Form):
 
 
 class SaleReturnRectificationForm(forms.Form):
-    series = forms.ModelChoiceField(BillingSeries.objects.none())
+    series = forms.ModelChoiceField(BillingSeries.objects.none(), label="Serie")
     companion_f3_series = forms.ModelChoiceField(
-        BillingSeries.objects.none(), required=False
+        BillingSeries.objects.none(), required=False, label="Serie F3 complementaria"
     )
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput())
 

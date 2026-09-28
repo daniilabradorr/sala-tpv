@@ -240,7 +240,20 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 page.get_by_role("link", name="Resumen", exact=True).click()
                 page.get_by_role("link", name="Sustituir por factura completa").click()
                 expect(page.get_by_text(self.document_number)).to_be_visible()
-                page.get_by_label("Cliente").select_option(str(self.customer_id))
+                command_form = page.locator("#billing-command-form")
+                customer = command_form.get_by_role(
+                    "combobox", name="Cliente", exact=True
+                )
+                customer.select_option(str(self.customer_id))
+                series_select = command_form.locator('select[name="series"]')
+                if series_select.count():
+                    series_select.select_option(index=1)
+                else:
+                    hidden_series = command_form.locator(
+                        'input[type="hidden"][name="series"]'
+                    )
+                    expect(hidden_series).to_have_count(1)
+                    expect(hidden_series).not_to_have_value("")
                 with page.expect_response(
                     lambda response: (
                         response.request.method == "POST"

@@ -158,6 +158,10 @@ class BillingDocumentFilterFormTests(BillingFormsFixture):
 
 
 class IssueSaleDocumentFormTests(BillingFormsFixture):
+    def test_series_label_is_spanish(self):
+        form = IssueSaleDocumentForm(business=self.business, sale=self.sale())
+        self.assertEqual(form.fields["series"].label, "Serie")
+
     def test_invoice_and_ticket_expose_only_expected_series(self):
         f1, f2 = self.series("F1"), self.series("F2")
         invoice = self.sale(RequestedDocumentTypeChoices.INVOICE, self.customer)
@@ -222,6 +226,13 @@ class IssueSaleDocumentFormTests(BillingFormsFixture):
 
 
 class SubstituteSimplifiedDocumentFormTests(BillingFormsFixture):
+    def test_customer_and_series_labels_are_spanish(self):
+        form = SubstituteSimplifiedDocumentForm(
+            business=self.business, sale=self.sale()
+        )
+        self.assertEqual(form.fields["customer"].label, "Cliente")
+        self.assertEqual(form.fields["series"].label, "Serie")
+
     def test_customer_and_f3_series_are_scoped(self):
         sale = self.sale(customer=self.customer)
         valid = self.series("F3")
@@ -252,6 +263,16 @@ class SubstituteSimplifiedDocumentFormTests(BillingFormsFixture):
 
 
 class SaleReturnRectificationFormTests(BillingFormsFixture):
+    def test_series_labels_are_spanish(self):
+        form = SaleReturnRectificationForm(
+            business=self.business, sale_return=self.completed_return(self.sale())
+        )
+        self.assertEqual(form.fields["series"].label, "Serie")
+        self.assertEqual(
+            form.fields["companion_f3_series"].label,
+            "Serie F3 complementaria",
+        )
+
     def test_f1_exposes_r1_and_f2_exposes_r5(self):
         r1, r5 = self.series("R1"), self.series("R5")
         sale_f1 = self.sale(RequestedDocumentTypeChoices.INVOICE, self.customer)
