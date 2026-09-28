@@ -1,0 +1,4 @@
+<nav class="billing-nav tabs" aria-label="Secciones de facturación">
+  <a href="{% url 'billing:document_list' store_id=store.pk %}" {% if billing_section == 'documents' %}aria-current="page"{% endif %}>Documentos</a>
+  {% if can_manage_series %}<a href="{% url 'billing:series_list' store_id=store.pk %}" {% if billing_section == 'series' %}aria-current="page"{% endif %}>Series</a>{% endif %}
+</nav>

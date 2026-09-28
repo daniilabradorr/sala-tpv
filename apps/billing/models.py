@@ -378,6 +378,15 @@ class BillingDocument(TimeStampedModel):
             return f"{self.get_document_type_display()} · borrador"
         return f"{self.series_text}-{self.number}"
 
+    @property
+    def full_number(self):
+        """Return the immutable visible fiscal number without database access."""
+        if self.number is None:
+            return "Borrador"
+        cached_series = self._state.fields_cache.get("series")
+        padding = cached_series.padding if cached_series is not None else 0
+        return f"{self.series_text}-{self.number:0{padding}d}"
+
     def _was_issued(self):
         if not self.pk:
             return False

@@ -88,6 +88,155 @@ class BillingUnsupportedFiscalCase(BillingServiceError):
     """A sale contains a fiscal treatment not implemented by this MVP."""
 
 
+SERIES_IDENTITY_FIELDS = (
+    "store_id",
+    "cash_register_id",
+    "document_type",
+    "prefix",
+    "year",
+    "padding",
+)
+
+
+def _series_collision_error():
+    return BillingServiceError(
+        {"prefix": "Ya existe una serie con este prefijo y año."}
+    )
+
+
+def _raise_series_validation(error, *, business, prefix, year, exclude_series_id=None):
+    collision = BillingSeries.objects.filter(
+        business=business, prefix=(prefix or "").strip().upper(), year=year
+    )
+    if exclude_series_id is not None:
+        collision = collision.exclude(pk=exclude_series_id)
+    if collision.exists():
+        raise _series_collision_error() from error
+    raise error
+
+
+def create_billing_series(
+    *, business, store, cash_register, document_type, name, prefix, year, padding
+):
+    """Create a store series; its fiscal counter is never accepted as input."""
+    series = BillingSeries(
+        business=business,
+        store=store,
+        cash_register=cash_register,
+        document_type=document_type,
+        name=name,
+        prefix=prefix,
+        year=year,
+        padding=padding,
+        current_number=0,
+        is_active=True,
+    )
+    try:
+        with transaction.atomic():
+            series.save()
+    except IntegrityError as error:
+        raise _series_collision_error() from error
+    except ValidationError as error:
+        _raise_series_validation(
+            error,
+            business=business,
+            prefix=prefix,
+            year=year,
+        )
+    return series
+
+
+@transaction.atomic
+def update_billing_series(
+    *,
+    series_id,
+    business,
+    store,
+    cash_register,
+    document_type,
+    name,
+    prefix,
+    year,
+    padding,
+):
+    """Update only administrative fields on a freshly locked database row."""
+    try:
+        series = BillingSeries.objects.select_for_update().get(
+            pk=series_id, business=business, store=store
+        )
+    except BillingSeries.DoesNotExist as error:
+        raise BillingServiceError(
+            {"series": "La serie no existe en esta tienda."}
+        ) from error
+    proposed = {
+        "store_id": store.pk,
+        "cash_register_id": getattr(cash_register, "pk", None),
+        "document_type": document_type,
+        "prefix": (prefix or "").strip().upper(),
+        "year": year,
+        "padding": padding,
+    }
+    used = BillingDocument.objects.filter(
+        series=series, status=BillingDocumentStatusChoices.ISSUED
+    ).exists()
+    if used and any(
+        getattr(series, field) != value for field, value in proposed.items()
+    ):
+        raise BillingServiceError(
+            "No se puede modificar la identidad de una serie que ya tiene documentos emitidos."
+        )
+    for field, value in proposed.items():
+        setattr(series, field, value)
+    series.name = name
+    try:
+        series.save(
+            update_fields=[
+                "name",
+                "store",
+                "cash_register",
+                "document_type",
+                "prefix",
+                "year",
+                "padding",
+                "updated_at",
+            ]
+        )
+    except IntegrityError as error:
+        raise _series_collision_error() from error
+    except ValidationError as error:
+        _raise_series_validation(
+            error,
+            business=business,
+            prefix=prefix,
+            year=year,
+            exclude_series_id=series_id,
+        )
+    return series
+
+
+def _set_billing_series_active(*, series_id, business, store, is_active):
+    with transaction.atomic():
+        try:
+            series = BillingSeries.objects.select_for_update().get(
+                pk=series_id, business=business, store=store
+            )
+        except BillingSeries.DoesNotExist as error:
+            raise BillingServiceError(
+                {"series": "La serie no existe en esta tienda."}
+            ) from error
+        series.is_active = is_active
+        series.save(update_fields=["is_active", "updated_at"])
+        return series
+
+
+def activate_billing_series(**kwargs):
+    return _set_billing_series_active(is_active=True, **kwargs)
+
+
+def deactivate_billing_series(**kwargs):
+    return _set_billing_series_active(is_active=False, **kwargs)
+
+
 def _money(value):
     """Match Sales' per-line ROUND_HALF_UP monetary policy."""
     return Decimal(value).quantize(MONEY_STEP, rounding=ROUND_HALF_UP)
