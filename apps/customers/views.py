@@ -2,7 +2,11 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
+from django.http import QueryDict
 from django.shortcuts import redirect, render
+from django.views.decorators.vary import vary_on_headers
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.generic import ListView, DetailView
 
@@ -15,10 +19,18 @@ from apps.customers.models import CustomerTypeChoices
 from apps.customers.selectors import (
     get_customer_account_entries,
     get_customer_detail,
+    get_customer_list_kpis,
+    get_customer_pending_debt_sales,
     get_customers_for_business,
 )
 from apps.customers.services import CustomerAccountService, CustomerService
 from apps.users.mixins import BusinessRequiredMixin, ManagerOrOwnerRequiredMixin
+from apps.sales.selectors import get_sales_for_business
+from apps.billing.selectors import billing_documents_for_customer
+from apps.stores.selectors import get_stores_available_for_user
+from apps.users.helpers import can_sell_in_store
+from apps.core.shell import resolve_active_store
+from apps.sales.forms import SaleFilterForm
 
 
 def _get_business(request):
@@ -37,6 +49,7 @@ def add_service_errors(form, error):
         form.add_error(None, error.message if hasattr(error, "message") else str(error))
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class CustomerListView(BusinessRequiredMixin, ListView):
     template_name = "customers/customer_list.html"
     context_object_name = "customers"
@@ -49,6 +62,7 @@ class CustomerListView(BusinessRequiredMixin, ListView):
             query=self.request.GET.get("q", ""),
             status=self.request.GET.get("status", "active"),
             customer_type=self.request.GET.get("customer_type", ""),
+            account_state=self.request.GET.get("account_state", ""),
         )
 
     def get_context_data(self, **kwargs):
@@ -58,12 +72,20 @@ class CustomerListView(BusinessRequiredMixin, ListView):
                 "query": self.request.GET.get("q", ""),
                 "status": self.request.GET.get("status", "active"),
                 "customer_type": self.request.GET.get("customer_type", ""),
+                "account_state": self.request.GET.get("account_state", ""),
                 "customer_type_choices": CustomerTypeChoices.choices,
+                "kpis": get_customer_list_kpis(business=_get_business(self.request)),
             }
         )
         return context
 
+    def render_to_response(self, context, **response_kwargs):
+        if self.request.headers.get("HX-Request") == "true":
+            self.template_name = "customers/partials/_customer_results.html"
+        return super().render_to_response(context, **response_kwargs)
 
+
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class CustomerDetailView(BusinessRequiredMixin, DetailView):
     template_name = "customers/customer_detail.html"
     context_object_name = "customer"
@@ -76,10 +98,101 @@ class CustomerDetailView(BusinessRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["account"] = self.object.account
-        context["account_entries"] = get_customer_account_entries(
-            business=_get_business(self.request), account=self.object.account, limit=20
+        business = _get_business(self.request)
+        stores = get_stores_available_for_user(
+            user=self.request.user, only_active=False
         )
+        store_ids = list(stores.values_list("pk", flat=True))
+        _, active_store = resolve_active_store(self.request, user=self.request.user)
+        sellable_stores = [
+            store
+            for store in get_stores_available_for_user(user=self.request.user)
+            if can_sell_in_store(self.request.user, store)
+        ]
+        operational_store = (
+            active_store
+            if active_store is not None
+            and can_sell_in_store(self.request.user, active_store)
+            else next(iter(sellable_stores), None)
+        )
+        tab = self.request.GET.get("tab", "summary")
+        if tab not in {"summary", "sales", "account", "documents"}:
+            tab = "summary"
+        context.update(
+            {
+                "tab": tab,
+                "stores": stores,
+                "operational_store": operational_store,
+                "visible_store_ids": store_ids,
+            }
+        )
+        if tab == "sales":
+            has_filters = any(
+                self.request.GET.get(key)
+                for key in ("period", "status", "date_from", "date_to")
+            )
+            filter_form = SaleFilterForm(
+                self.request.GET if has_filters else None, business=business
+            )
+            valid_filters = filter_form.cleaned_data if filter_form.is_valid() else {}
+            period = self.request.GET.get("period", "")
+            filters = {
+                "customer": self.object,
+                "status": valid_filters.get("status", ""),
+                "date_from": valid_filters.get("date_from"),
+                "date_to": valid_filters.get("date_to"),
+            }
+            sales = get_sales_for_business(business=business, filters=filters).filter(
+                store_id__in=store_ids
+            )
+            store_id = self.request.GET.get("store")
+            if store_id and store_id.isdigit():
+                sales = sales.filter(store_id=store_id)
+            context.update(
+                {
+                    "sales_store": store_id or "",
+                    "sales_status": filters["status"],
+                    "sales_period": period,
+                    "date_from": self.request.GET.get("date_from", ""),
+                    "date_to": self.request.GET.get("date_to", ""),
+                    "sales_filter_errors": filter_form.errors,
+                }
+            )
+            query = QueryDict(mutable=True)
+            for key in ("period", "store", "status", "date_from", "date_to"):
+                if self.request.GET.get(key):
+                    query[key] = self.request.GET[key]
+            context["sales_query"] = f"{query.urlencode()}&" if query else ""
+            context["sales_page"] = Paginator(sales, 25).get_page(
+                self.request.GET.get("page")
+            )
+        elif tab == "account":
+            entries = get_customer_account_entries(
+                business=business, account=self.object.account
+            )
+            context["entries_page"] = Paginator(entries, 25).get_page(
+                self.request.GET.get("page")
+            )
+            context["pending_sales"] = get_customer_pending_debt_sales(
+                business=business,
+                customer=self.object,
+                stores=sellable_stores,
+            )
+        elif tab == "documents":
+            docs = (
+                billing_documents_for_customer(business=business, customer=self.object)
+                .filter(store__in=stores)
+                .order_by("-operation_date", "-pk")
+            )
+            context["documents_page"] = Paginator(docs, 25).get_page(
+                self.request.GET.get("page")
+            )
         return context
+
+    def render_to_response(self, context, **response_kwargs):
+        if self.request.headers.get("HX-Request") == "true":
+            self.template_name = "customers/partials/_customer_workspace_content.html"
+        return super().render_to_response(context, **response_kwargs)
 
 
 class CustomerCreateView(BusinessRequiredMixin, View):

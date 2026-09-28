@@ -30,6 +30,11 @@ urlpatterns = [
         name="sale_header_update",
     ),
     path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/customers/quick-create/",
+        views.SaleQuickCustomerCreateView.as_view(),
+        name="quick_customer_create",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/lines/add/",
         views.SaleLineAddView.as_view(),
         name="sale_line_add",

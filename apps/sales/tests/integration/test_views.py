@@ -75,6 +75,9 @@ TEST_TEMPLATES = [
                         "sales/partials/_workspace_header.html": (
                             "header {{ sale.customer }} {{ header_form.errors }}"
                         ),
+                        "sales/partials/_quick_customer_form.html": (
+                            "quick customer {{ form.errors }}"
+                        ),
                         "sales/partials/_line_editor.html": (
                             "<section id='line-editor'>{{ form.errors }}</section>"
                         ),
@@ -178,6 +181,7 @@ class SaleViewsIntegrationTests(TestCase):
             "sale_open": {"store_id": 1},
             "sale_detail": {"store_id": 1, "sale_pk": 2},
             "sale_header_update": {"store_id": 1, "sale_pk": 2},
+            "quick_customer_create": {"store_id": 1, "sale_pk": 2},
             "sale_line_add": {"store_id": 1, "sale_pk": 2},
             "sale_line_update": {"store_id": 1, "sale_pk": 2, "line_pk": 3},
             "sale_line_quantity_update": {
@@ -204,8 +208,8 @@ class SaleViewsIntegrationTests(TestCase):
             for name, kwargs in route_kwargs.items()
         }
 
-        self.assertEqual(len(reversed_urls), 19)
-        self.assertEqual(len(set(reversed_urls.values())), 19)
+        self.assertEqual(len(reversed_urls), 20)
+        self.assertEqual(len(set(reversed_urls.values())), 20)
         for url in reversed_urls.values():
             # URLs are included under the `sales/` prefix in config.urls,
             # so assert presence of the expected store fragment instead
@@ -267,6 +271,69 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/users/login/", response.url)
 
+    def test_quick_customer_create_selects_customer_without_recreating_sale(self):
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        url = reverse(
+            "sales:quick_customer_create",
+            kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+        )
+
+        invalid = self.client.post(
+            url,
+            {"customer_type": "person", "name": "", "country_code": "ES"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(Sale.objects.count(), 1)
+
+        response = self.client.post(
+            url,
+            {
+                "customer_type": "person",
+                "name": "Cliente rápido",
+                "country_code": "ES",
+                "phone": "600123123",
+                "email": "rapido@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["HX-Retarget"], "#workspace-header")
+        sale.refresh_from_db()
+        self.assertEqual(sale.customer.name, "Cliente rápido")
+        self.assertEqual(sale.store, self.store)
+        self.assertEqual(Sale.objects.count(), 1)
+        self.assertTrue(sale.lines.filter(pk=line.pk).exists())
+
+    @patch("apps.sales.views.update_sale_header")
+    def test_quick_customer_create_rolls_back_customer_when_selection_fails(
+        self, mocked_update
+    ):
+        mocked_update.side_effect = ValidationError("La venta ha cambiado.")
+        self.login_as(self.owner)
+        sale, line = self.create_open_sale_with_line()
+        original_customer = sale.customer
+        customer_count = self.business.customers.count()
+        response = self.client.post(
+            reverse(
+                "sales:quick_customer_create",
+                kwargs={"store_id": self.store.pk, "sale_pk": sale.pk},
+            ),
+            {
+                "customer_type": "person",
+                "name": "Debe hacer rollback",
+                "country_code": "ES",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "La venta ha cambiado.", status_code=422)
+        self.assertEqual(self.business.customers.count(), customer_count)
+        sale.refresh_from_db()
+        self.assertEqual(sale.customer, original_customer)
+        self.assertTrue(sale.lines.filter(pk=line.pk).exists())
+
     def test_open_sale_uses_workspace_with_scoped_search_and_htmx_grid(self):
         self.login_as(self.owner)
         sale, _line = self.create_open_sale_with_line()
@@ -318,6 +385,24 @@ class SaleViewsIntegrationTests(TestCase):
                     HTTP_HX_REQUEST="true",
                 )
                 self.assertContains(response, "Café Especial")
+
+    def test_sale_open_preselects_only_active_same_business_customer(self):
+        self.login_as(self.owner)
+        customer = create_sales_customer(business=self.business)
+        foreign = create_sales_customer(business=self.other_business)
+        url = reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
+        count = Sale.objects.count()
+
+        response = self.client.get(url, {"customer": customer.pk})
+        self.assertEqual(response.context["form"].initial["customer"], customer)
+        self.assertEqual(Sale.objects.count(), count)
+
+        customer.is_active = False
+        customer.save()
+        for rejected in (customer, foreign):
+            response = self.client.get(url, {"customer": rejected.pk})
+            self.assertNotIn("customer", response.context["form"].initial)
+        self.assertEqual(Sale.objects.count(), count)
 
     def test_workspace_category_filter_is_tenant_scoped(self):
         self.login_as(self.owner)
