@@ -108,5 +108,13 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             quick_customer = page.locator("#quick-customer-panel")
             quick_customer.locator('input[name="name"]').fill("Cliente E2E rápido")
             page.get_by_role("button", name="Crear y seleccionar").click()
-            expect(page.get_by_text("Cliente E2E rápido")).to_be_visible()
+            customer_select = page.locator('#workspace-header select[name="customer"]')
+            expect(customer_select.locator("option:checked")).to_have_text(
+                "Cliente E2E rápido"
+            )
+            expect(
+                page.locator(
+                    '#workspace-header input[name="customer_mode"][value="customer"]'
+                )
+            ).to_be_checked()
             browser.close()
