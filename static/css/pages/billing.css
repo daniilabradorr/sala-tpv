@@ -1,0 +1,28 @@
+.billing-page { display: grid; gap: var(--nx-space-5); }
+.billing-nav, .billing-workspace-tabs { display: flex; gap: var(--nx-space-2); overflow-x: auto; }
+.billing-nav a, .billing-workspace-tabs a { color: var(--nx-text-muted); padding: var(--nx-space-3); text-decoration: none; white-space: nowrap; }
+.billing-nav a[aria-current="page"], .billing-workspace-tabs a[aria-current="page"] { color: var(--nx-text); border-bottom: 3px solid var(--nx-primary); font-weight: 700; }
+.billing-filters { align-items: end; display: grid; grid-template-columns: repeat(6, minmax(8rem, 1fr)); }
+.billing-clickable { cursor: pointer; }
+.billing-clickable:focus-visible, .billing-card:focus-visible { outline: 2px solid var(--nx-focus); outline-offset: 2px; }
+.billing-cards { display: none; }
+.billing-card { color: inherit; display: grid; gap: var(--nx-space-2); text-decoration: none; }
+.billing-total { background: var(--nx-surface); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-lg); display: grid; gap: var(--nx-space-3); padding: var(--nx-space-5); }
+.billing-total > strong { font-size: clamp(2rem, 6vw, 3.5rem); }
+.billing-total dl, .billing-numbering dl { display: flex; flex-wrap: wrap; gap: var(--nx-space-5); margin: 0; }
+.billing-total dd, .billing-numbering dd { font-weight: 700; margin: 0; }
+.billing-history-note { color: var(--nx-text-muted); }
+.billing-workspace { min-width: 0; }
+.billing-callout { border-left: 4px solid var(--nx-primary); margin-top: var(--nx-space-4); padding: var(--nx-space-4); }
+.billing-pagination { align-items: center; display: flex; gap: var(--nx-space-3); justify-content: center; margin-top: var(--nx-space-4); }
+.billing-series-form { margin-inline: auto; max-width: 48rem; }
+@media (max-width: 767px) {
+  .billing-table { display: none; }
+  .billing-cards { display: grid; gap: var(--nx-space-3); }
+  .billing-filters { grid-template-columns: 1fr; }
+  .billing-detail-header { align-items: flex-start; flex-direction: column; }
+  .billing-total dl { display: grid; grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 768px) and (max-width: 1199px) {
+  .billing-filters { grid-template-columns: repeat(3, 1fr); }
+}

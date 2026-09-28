@@ -25,6 +25,17 @@ from apps.users.models import RoleChoices
 from apps.users.tests.factories import create_user
 
 
+def open_purchase_tab(page, purchase_tabs, name, query, heading):
+    with page.expect_response(
+        lambda response: query in response.url and response.status == 200
+    ):
+        purchase_tabs.get_by_role("link", name=name, exact=True).click()
+    workspace = page.locator("#purchase-workspace")
+    expect(workspace).to_have_count(1)
+    expect(workspace.get_by_role("heading", name=heading, exact=True)).to_be_visible()
+    return workspace
+
+
 @override_settings(
     STORAGES={
         "staticfiles": {
@@ -302,14 +313,25 @@ class PurchasesBrowserTests(StaticLiveServerTestCase):
             self.assertEqual(purchase_status, PurchaseStatusChoices.RECEIVED)
 
             purchase_tabs = page.get_by_label("Detalle de compra")
-            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
-            purchase_tabs.get_by_role("link", name="Resumen", exact=True).click()
-            purchase_tabs.get_by_role("link", name="Productos", exact=True).click()
-            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
-            purchase_tabs.get_by_role("link", name="Resumen", exact=True).click()
-            expect(page.locator("#purchase-workspace")).to_have_count(1)
-            purchase_tabs.get_by_role("link", name="Recepciones", exact=True).click()
-            movement_link = page.locator(".stock-impact a")
+            open_purchase_tab(
+                page, purchase_tabs, "Recepciones", "tab=receipts", "Recepciones"
+            )
+            open_purchase_tab(
+                page, purchase_tabs, "Resumen", "tab=summary", "Recepción"
+            )
+            open_purchase_tab(
+                page, purchase_tabs, "Productos", "tab=products", "Productos"
+            )
+            open_purchase_tab(
+                page, purchase_tabs, "Recepciones", "tab=receipts", "Recepciones"
+            )
+            open_purchase_tab(
+                page, purchase_tabs, "Resumen", "tab=summary", "Recepción"
+            )
+            workspace = open_purchase_tab(
+                page, purchase_tabs, "Recepciones", "tab=receipts", "Recepciones"
+            )
+            movement_link = workspace.locator(".stock-impact a")
             expect(movement_link).to_have_count(2)
             movement_pk = self._db_value(
                 lambda: (
