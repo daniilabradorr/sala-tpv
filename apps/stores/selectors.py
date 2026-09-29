@@ -28,9 +28,13 @@ def get_store_for_business(*, business, store, for_update=False):
     if store is None or not getattr(store, "pk", None):
         return None
 
-    queryset = Store.objects.select_related("business", "business__profile")
+    queryset = Store.objects.select_related("business")
     if for_update:
         queryset = queryset.select_for_update()
+    else:
+        # Contact fallback is useful for reads, but BusinessProfile is an
+        # optional relation and must never enter a PostgreSQL FOR UPDATE query.
+        queryset = queryset.select_related("business__profile")
 
     return queryset.filter(
         pk=store.pk,

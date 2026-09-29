@@ -1,6 +1,7 @@
 """Real-browser coverage for FE-21 Stores and CashRegister administration."""
 
 import re
+from contextlib import contextmanager
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
@@ -110,105 +111,118 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         )
 
+    @contextmanager
+    def open_browser(self, playwright, **kwargs):
+        """Always close Chromium, including when an assertion aborts a test."""
+        browser = playwright.chromium.launch(headless=True, **kwargs)
+        try:
+            yield browser
+        finally:
+            browser.close()
+
     def test_owner_list_filters_navigation_menu_and_responsive_surfaces(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 812})
-            self.login(page, self.owner)
-            expect(
-                page.locator("#app-sidebar").get_by_role("link", name="Tiendas")
-            ).to_be_visible()
-            page.keyboard.press("Control+k")
-            page.locator("[data-command-input]").fill("tiendas")
-            expect(
-                page.locator("[data-command-dialog]").get_by_role(
-                    "link", name="Tiendas"
-                )
-            ).to_be_visible()
-            page.keyboard.press("Escape")
-            page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
-            kpis = page.get_by_label("Resumen de tiendas")
-            expect(kpis.get_by_text("Tiendas activas", exact=True)).to_be_visible()
-            expect(kpis.get_by_text("Inactivas", exact=True)).to_be_visible()
-            expect(kpis.get_by_text("Predeterminada", exact=True)).to_be_visible()
-            expect(
-                page.locator(".stores-table").get_by_role(
-                    "button", name=f"Acciones de {self.default.name}"
-                )
-            ).to_be_visible()
-            for query, expected in (
-                ("Gran Vía", "Gran Vía"),
-                ("ARCHIVO", "Archivo"),
-                ("Salamanca", "Centro"),
-            ):
-                page.get_by_placeholder("Buscar tienda...").fill(query)
+            with self.open_browser(playwright) as browser:
+                page = browser.new_page(viewport={"width": 1280, "height": 812})
+                self.login(page, self.owner)
+                expect(
+                    page.locator("#app-sidebar").get_by_role("link", name="Tiendas")
+                ).to_be_visible()
+                page.keyboard.press("Control+k")
+                page.locator("[data-command-input]").fill("tiendas")
+                expect(
+                    page.locator("[data-command-dialog]").get_by_role(
+                        "link", name="Tiendas"
+                    )
+                ).to_be_visible()
+                page.keyboard.press("Escape")
+                page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
+                kpis = page.get_by_label("Resumen de tiendas")
+                expect(kpis.get_by_text("Tiendas activas", exact=True)).to_be_visible()
+                expect(kpis.get_by_text("Inactivas", exact=True)).to_be_visible()
+                expect(kpis.get_by_text("Predeterminada", exact=True)).to_be_visible()
+                expect(
+                    page.locator(
+                        ".stores-table "
+                        f'summary[aria-label="Acciones de {self.default.name}"]'
+                    )
+                ).to_be_visible()
+                for query, expected in (
+                    ("Gran Vía", "Gran Vía"),
+                    ("ARCHIVO", "Archivo"),
+                    ("Salamanca", "Centro"),
+                ):
+                    page.get_by_placeholder("Buscar tienda...").fill(query)
+                    page.get_by_role("button", name="Filtrar").click()
+                    expect(
+                        page.locator(".stores-table").get_by_role(
+                            "link", name=expected, exact=True
+                        )
+                    ).to_be_visible()
+                page.get_by_placeholder("Buscar tienda...").fill("")
+                page.get_by_label("Estado").select_option("inactive")
                 page.get_by_role("button", name="Filtrar").click()
                 expect(
                     page.locator(".stores-table").get_by_role(
-                        "link", name=expected, exact=True
+                        "link", name="Archivo", exact=True
                     )
                 ).to_be_visible()
-            page.get_by_placeholder("Buscar tienda...").fill("")
-            page.get_by_label("Estado").select_option("inactive")
-            page.get_by_role("button", name="Filtrar").click()
-            expect(
-                page.locator(".stores-table").get_by_role(
-                    "link", name="Archivo", exact=True
+                expect(page).to_have_url(re.compile(r"[?&]status=inactive(?:&|$)"))
+                for width in (375, 767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 812})
+                    self.assert_no_overflow(page)
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
                 )
-            ).to_be_visible()
-            expect(page).to_have_url(re.compile(r"[?&]status=inactive(?:&|$)"))
-            for width in (375, 767, 768, 1280):
-                page.set_viewport_size({"width": width, "height": 812})
-                self.assert_no_overflow(page)
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
-            )
-            for width in (375, 767, 768, 1280):
-                page.set_viewport_size({"width": width, "height": 812})
-                expect(
-                    page.get_by_role("navigation", name="Secciones de la tienda")
-                ).to_be_visible()
-                self.assert_no_overflow(page)
-            page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
-            )
-            for width in (375, 767, 768, 1280):
-                page.set_viewport_size({"width": width, "height": 812})
-                self.assert_no_overflow(page)
-            browser.close()
+                for width in (375, 767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 812})
+                    expect(
+                        page.get_by_role("navigation", name="Secciones de la tienda")
+                    ).to_be_visible()
+                    self.assert_no_overflow(page)
+                page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+                )
+                for width in (375, 767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 812})
+                    self.assert_no_overflow(page)
 
     def test_owner_create_and_active_store_remains_separate_from_default(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            self.login(page, self.owner)
-            page.goto(f"{self.live_server_url}{reverse('stores:store_create')}")
-            for field in ("business", "code", "is_active", "is_default"):
-                expect(page.locator(f'[name="{field}"]')).to_have_count(0)
-            page.get_by_label("Nombre").fill("Nueva tienda")
-            page.get_by_label("País").fill("ES")
-            page.get_by_role("button", name="Crear tienda").click()
-            expect(page.get_by_role("heading", name="Nueva tienda")).to_be_visible()
-            expect(page.locator(".store-hero strong")).not_to_be_empty()
-            expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
-            )
-            page.get_by_role("button", name="Usar esta tienda").click()
-            expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
-            page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
-            expect(page.get_by_label("Resumen de tiendas")).to_contain_text("Centro")
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
-            )
-            page.get_by_role("link", name="Configuración").click()
-            page.get_by_role("link", name="Hacer predeterminada").click()
-            expect(page.get_by_text("Actual")).to_be_visible()
-            expect(page.get_by_text(self.default.name, exact=True)).to_be_visible()
-            page.get_by_role("button", name="Hacer predeterminada").click()
-            expect(page.get_by_text("★ Predeterminada", exact=True)).to_be_visible()
-            expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
-            browser.close()
+            with self.open_browser(playwright) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(f"{self.live_server_url}{reverse('stores:store_create')}")
+                for field in ("business", "code", "is_active", "is_default"):
+                    expect(page.locator(f'[name="{field}"]')).to_have_count(0)
+                page.get_by_label("Nombre").fill("Nueva tienda")
+                page.get_by_label("País").fill("ES")
+                page.get_by_role("button", name="Crear tienda").click()
+                expect(page.get_by_role("heading", name="Nueva tienda")).to_be_visible()
+                expect(page.locator(".store-hero strong")).not_to_be_empty()
+                expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+                )
+                page.get_by_role("button", name="Usar esta tienda").click()
+                expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
+                page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
+                expect(page.get_by_label("Resumen de tiendas")).to_contain_text(
+                    "Centro"
+                )
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+                )
+                store_tabs = page.get_by_role(
+                    "navigation", name="Secciones de la tienda"
+                )
+                store_tabs.get_by_role("link", name="Configuración", exact=True).click()
+                page.get_by_role("link", name="Hacer predeterminada").click()
+                expect(page.get_by_text("Actual")).to_be_visible()
+                expect(page.get_by_text(self.default.name, exact=True)).to_be_visible()
+                page.get_by_role("button", name="Hacer predeterminada").click()
+                expect(page.get_by_text("★ Predeterminada", exact=True)).to_be_visible()
+                expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
 
         created = Store.objects.get(name="Nueva tienda")
         self.assertEqual(created.business, self.business)
@@ -221,57 +235,62 @@ class BrowserStoresTests(StaticLiveServerTestCase):
 
     def test_manager_admin_scope_and_cashier_read_only_scope(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            manager_page = browser.new_page()
-            self.login(manager_page, self.manager)
-            manager_page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
-            expect(
-                manager_page.locator(".stores-table").get_by_role(
-                    "link", name="Gran Vía", exact=True
+            with self.open_browser(playwright) as browser:
+                manager_page = browser.new_page()
+                self.login(manager_page, self.manager)
+                manager_page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_list')}"
                 )
-            ).to_be_visible()
-            manager_page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}?tab=operation"
-            )
-            expect(manager_page.get_by_text("Ir al TPV")).to_have_count(0)
-            manager_page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
-            )
-            expect(manager_page.get_by_role("heading", name="Cajas")).to_be_visible()
+                expect(
+                    manager_page.locator(".stores-table").get_by_role(
+                        "link", name="Gran Vía", exact=True
+                    )
+                ).to_be_visible()
+                manager_page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}?tab=operation"
+                )
+                expect(manager_page.get_by_text("Ir al TPV")).to_have_count(0)
+                manager_page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+                )
+                expect(
+                    manager_page.get_by_role("heading", name="Cajas")
+                ).to_be_visible()
 
-            cashier_page = browser.new_page()
-            self.login(cashier_page, self.cashier)
-            expect(
-                cashier_page.locator("#app-sidebar").get_by_role("link", name="Tiendas")
-            ).to_have_count(0)
-            cashier_page.keyboard.press("Control+k")
-            cashier_page.locator("[data-command-input]").fill("tiendas")
-            expect(
-                cashier_page.locator("[data-command-dialog]").get_by_role(
-                    "link", name="Tiendas"
+                cashier_page = browser.new_page()
+                self.login(cashier_page, self.cashier)
+                expect(
+                    cashier_page.locator("#app-sidebar").get_by_role(
+                        "link", name="Tiendas"
+                    )
+                ).to_have_count(0)
+                cashier_page.keyboard.press("Control+k")
+                cashier_page.locator("[data-command-input]").fill("tiendas")
+                expect(
+                    cashier_page.locator("[data-command-dialog]").get_by_role(
+                        "link", name="Tiendas"
+                    )
+                ).to_have_count(0)
+                cashier_page.keyboard.press("Escape")
+                cashier_page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.default.pk])}"
                 )
-            ).to_have_count(0)
-            cashier_page.keyboard.press("Escape")
-            cashier_page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.default.pk])}"
-            )
-            for text in (
-                "Nueva tienda",
-                "Editar",
-                "Gestionar cajas",
-                "Gestionar usuarios",
-                "Eliminar tienda",
-            ):
-                expect(cashier_page.get_by_text(text, exact=True)).to_have_count(0)
-            response = cashier_page.goto(
-                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
-            )
-            self.assertIn(response.status, (403, 404))
-            response = cashier_page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.default.pk])}"
-            )
-            self.assertEqual(response.status, 403)
-            browser.close()
+                for text in (
+                    "Nueva tienda",
+                    "Editar",
+                    "Gestionar cajas",
+                    "Gestionar usuarios",
+                    "Eliminar tienda",
+                ):
+                    expect(cashier_page.get_by_text(text, exact=True)).to_have_count(0)
+                response = cashier_page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+                )
+                self.assertIn(response.status, (403, 404))
+                response = cashier_page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.default.pk])}"
+                )
+                self.assertEqual(response.status, 403)
 
     def test_store_and_register_open_session_guards_and_register_lifecycle(self):
         session = CashSession.objects.create(
@@ -290,50 +309,52 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             code="LIFE-01",
         )
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            self.login(page, self.owner)
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_deactivate', args=[self.second.pk])}"
-            )
-            page.get_by_role("button", name="Desactivar tienda").click()
-            expect(
-                page.get_by_text(
-                    "No puedes desactivar esta tienda porque tiene una sesión de caja abierta",
-                    exact=False,
+            with self.open_browser(playwright) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_deactivate', args=[self.second.pk])}"
                 )
-            ).to_be_visible()
-            page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
-            )
-            page.get_by_role("button", name="Desactivar").click()
-            expect(
-                page.get_by_text(
-                    "No puedes desactivar esta caja porque tiene una sesión abierta",
-                    exact=False,
+                page.get_by_role("button", name="Desactivar tienda").click()
+                expect(
+                    page.get_by_text(
+                        "No puedes desactivar esta tienda porque tiene una sesión de caja abierta",
+                        exact=False,
+                    )
+                ).to_be_visible()
+                page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
                 )
-            ).to_be_visible()
-            page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[clean_store.pk])}"
-            )
-            clean_card = page.locator(".store-card").filter(
-                has_text="Lifecycle register"
-            )
-            clean_card.get_by_role("button", name="Desactivar").click()
-            expect(clean_card.get_by_text("○ Inactiva", exact=True)).to_be_visible()
-            clean_card.get_by_role("button", name="Activar").click()
-            expect(clean_card.get_by_text("● Activa", exact=True)).to_be_visible()
+                page.get_by_role("button", name="Desactivar").click()
+                expect(
+                    page.get_by_text(
+                        "No puedes desactivar esta caja porque tiene una sesión abierta",
+                        exact=False,
+                    )
+                ).to_be_visible()
+                page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[clean_store.pk])}"
+                )
+                clean_card = page.locator(".store-card").filter(
+                    has_text="Lifecycle register"
+                )
+                clean_card.get_by_role("button", name="Desactivar").click()
+                expect(clean_card.get_by_text("○ Inactiva", exact=True)).to_be_visible()
+                clean_card.get_by_role("button", name="Activar").click()
+                expect(clean_card.get_by_text("● Activa", exact=True)).to_be_visible()
 
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_deactivate', args=[clean_store.pk])}"
-            )
-            page.get_by_role("button", name="Desactivar tienda").click()
-            expect(page.get_by_text("○ Inactiva", exact=True)).to_be_visible()
-            page.get_by_role("link", name="Configuración").click()
-            page.get_by_role("link", name="Activar tienda").click()
-            page.get_by_role("button", name="Activar tienda").click()
-            expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
-            browser.close()
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_deactivate', args=[clean_store.pk])}"
+                )
+                page.get_by_role("button", name="Desactivar tienda").click()
+                expect(page.get_by_text("○ Inactiva", exact=True)).to_be_visible()
+                store_tabs = page.get_by_role(
+                    "navigation", name="Secciones de la tienda"
+                )
+                store_tabs.get_by_role("link", name="Configuración", exact=True).click()
+                page.get_by_role("link", name="Activar tienda").click()
+                page.get_by_role("button", name="Activar tienda").click()
+                expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
 
         self.second.refresh_from_db()
         self.register.refresh_from_db()
@@ -376,50 +397,56 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             business=self.business, name="Creada por error", code="ERROR"
         )
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            self.login(page, self.owner)
-            page.goto(
-                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
-            )
-            page.get_by_role("link", name="Nueva caja").click()
-            page.get_by_label("Nombre").fill("Caja secundaria")
-            page.get_by_label("Código").fill("CAJA-02")
-            page.get_by_role("button", name="Guardar caja").click()
-            page.locator(".store-card").filter(has_text="Caja secundaria").get_by_role(
-                "link", name="Editar"
-            ).click()
-            page.get_by_label("Nombre").fill("Caja mostrador")
-            page.get_by_label("Código").fill("CAJA-03")
-            page.get_by_role("button", name="Guardar caja").click()
-            edited_card = page.locator(".store-card").filter(has_text="Caja mostrador")
-            expect(edited_card.get_by_text("CAJA-03", exact=True)).to_be_visible()
+            with self.open_browser(playwright) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+                )
+                page.get_by_role("link", name="Nueva caja").click()
+                page.get_by_label("Nombre").fill("Caja secundaria")
+                page.get_by_label("Código").fill("CAJA-02")
+                page.get_by_role("button", name="Guardar caja").click()
+                page.locator(".store-card").filter(
+                    has_text="Caja secundaria"
+                ).get_by_role("link", name="Editar").click()
+                page.get_by_label("Nombre").fill("Caja mostrador")
+                page.get_by_label("Código").fill("CAJA-03")
+                page.get_by_role("button", name="Guardar caja").click()
+                edited_card = page.locator(".store-card").filter(
+                    has_text="Caja mostrador"
+                )
+                expect(edited_card.get_by_text("CAJA-03", exact=True)).to_be_visible()
 
-            page.goto(
-                f"{self.live_server_url}{reverse('stores:store_delete', args=[clean_store.pk])}"
-            )
-            page.get_by_label("Escribe ELIMINAR para confirmar").fill("INCORRECTO")
-            page.get_by_role("button", name="Eliminar tienda").click()
-            expect(
-                page.get_by_text("Escribe ELIMINAR para confirmar", exact=False)
-            ).to_be_visible()
-            page.get_by_label("Escribe ELIMINAR para confirmar").fill("ELIMINAR")
-            page.get_by_role("button", name="Eliminar tienda").click()
-            expect(page.get_by_role("heading", name="Tiendas")).to_be_visible()
-            expect(page.get_by_text("Creada por error", exact=True)).to_have_count(0)
+                page.goto(
+                    f"{self.live_server_url}{reverse('stores:store_delete', args=[clean_store.pk])}"
+                )
+                page.get_by_label("Escribe ELIMINAR para confirmar").fill("INCORRECTO")
+                page.get_by_role("button", name="Eliminar tienda").click()
+                expect(
+                    page.get_by_role("alert").get_by_text(
+                        "Escribe ELIMINAR para confirmar el borrado definitivo.",
+                        exact=True,
+                    )
+                ).to_be_visible()
+                page.get_by_label("Escribe ELIMINAR para confirmar").fill("ELIMINAR")
+                page.get_by_role("button", name="Eliminar tienda").click()
+                expect(page.get_by_role("heading", name="Tiendas")).to_be_visible()
+                expect(page.get_by_text("Creada por error", exact=True)).to_have_count(
+                    0
+                )
 
-            for path in (
-                reverse("stores:store_detail", args=[other.store.pk]),
-                reverse("stores:store_update", args=[other.store.pk]),
-                reverse("cash_register:register_admin", args=[other.store.pk]),
-                reverse(
-                    "cash_register:register_update",
-                    args=[other.store.pk, other_register.pk],
-                ),
-            ):
-                response = page.request.get(f"{self.live_server_url}{path}")
-                self.assertIn(response.status, (403, 404))
-            browser.close()
+                for path in (
+                    reverse("stores:store_detail", args=[other.store.pk]),
+                    reverse("stores:store_update", args=[other.store.pk]),
+                    reverse("cash_register:register_admin", args=[other.store.pk]),
+                    reverse(
+                        "cash_register:register_update",
+                        args=[other.store.pk, other_register.pk],
+                    ),
+                ):
+                    response = page.request.get(f"{self.live_server_url}{path}")
+                    self.assertIn(response.status, (403, 404))
 
         secondary = CashRegister.objects.get(code="CAJA-03")
         self.assertEqual(secondary.name, "Caja mostrador")
