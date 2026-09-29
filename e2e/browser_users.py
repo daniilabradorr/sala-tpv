@@ -126,9 +126,37 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 page.set_viewport_size({"width": 375, "height": 812})
                 expect(users_table).to_be_hidden()
                 expect(cards).to_be_visible()
+                manager_card = cards.locator(".user-card", has_text="Laura Martín")
+                manager_card.get_by_label("Acciones para Laura Martín").click()
+                menu = manager_card.locator(".user-menu nav")
+                expect(menu.get_by_role("link", name="Editar")).to_be_visible()
+                expect(
+                    menu.get_by_role("link", name="Gestionar tiendas")
+                ).to_be_visible()
+                expect(menu.get_by_role("link", name="Desactivar")).to_be_visible()
+                card_box = manager_card.bounding_box()
+                menu_box = menu.bounding_box()
+                self.assertIsNotNone(card_box)
+                self.assertIsNotNone(menu_box)
+                self.assertGreaterEqual(menu_box["x"], card_box["x"])
+                self.assertLessEqual(
+                    menu_box["x"] + menu_box["width"],
+                    card_box["x"] + card_box["width"],
+                )
                 self.assertLessEqual(
                     page.evaluate("document.documentElement.scrollWidth"), 375
                 )
+                for width in (767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    self.assertLessEqual(
+                        page.evaluate("document.documentElement.scrollWidth"), width
+                    )
+                page.set_viewport_size({"width": 767, "height": 900})
+                expect(users_table).to_be_hidden()
+                expect(cards).to_be_visible()
+                page.set_viewport_size({"width": 768, "height": 900})
+                expect(users_table).to_be_visible()
+                expect(cards).to_be_hidden()
 
     def test_owner_creates_manager_with_store_matrix(self):
         with sync_playwright() as p:
