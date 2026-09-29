@@ -18,6 +18,7 @@ from apps.sales.models import Sale, SaleStatusChoices
 from apps.sales.tests.factories import create_sale
 from apps.stores.models import Store
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
+from apps.users.helpers import can_view_activity
 
 
 class ActivityFixture(TestCase):
@@ -239,6 +240,43 @@ class ActivityHTTPTests(ActivityFixture):
         self.client.logout()
         self.assertEqual(self.client.get(url).status_code, 302)
 
+    def test_superuser_requires_business_context_and_never_gets_global_activity(self):
+        orphan = CustomUser.objects.create_superuser(
+            email="activity-root@example.com",
+            password="password",
+            role=RoleChoices.OWNER,
+            first_name="Root",
+            last_name="Sin tenant",
+            phone="600000099",
+        )
+        self.assertFalse(can_view_activity(orphan))
+        self.client.force_login(orphan)
+        self.assertEqual(self.client.get(reverse("audit:activity")).status_code, 403)
+
+        scoped = CustomUser.objects.create_superuser(
+            business=self.business,
+            email="activity-root-scoped@example.com",
+            password="password",
+            role=RoleChoices.OWNER,
+            first_name="Root",
+            last_name="Scoped",
+            phone="600000098",
+        )
+        log_event(
+            business=self.other_business,
+            store=self.other_store,
+            user=self.other_owner,
+            event_type=AuditEventType.SALE_COMPLETED,
+            module=AuditModule.SALES,
+            message="Evento cross-tenant oculto al superuser",
+        )
+        self.assertTrue(can_view_activity(scoped))
+        self.client.force_login(scoped)
+        response = self.client.get(reverse("audit:activity"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Visible A")
+        self.assertNotContains(response, "Evento cross-tenant oculto al superuser")
+
     def test_get_only_and_htmx_invalid_filter_contract(self):
         self.client.force_login(self.owner)
         url = reverse("audit:activity")
@@ -401,7 +439,7 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertContains(response, "No encontramos actividad")
         self.assertContains(response, "con estos filtros.")
         self.assertContains(response, "Prueba a ampliar el periodo")
-        self.assertContains(response, ">Limpiar filtros</a>", html=False)
+        self.assertContains(response, ">LIMPIAR FILTROS</a>", html=False)
         self.assertContains(response, 'hx-target="#activity-workspace"')
         self.assertContains(response, 'id="activity-workspace"', count=1)
         self.assertContains(response, 'id="activity-filters"', count=1)

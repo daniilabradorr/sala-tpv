@@ -216,7 +216,7 @@ def can_view_activity(user):
     if not is_authenticated_user(user):
         return False
     if user.is_superuser:
-        return True
+        return bool(getattr(user, "business_id", None))
     return is_owner(user) or is_manager(user)
 
 

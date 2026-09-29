@@ -208,11 +208,12 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(
                     page.locator("#activity-drawer").get_by_text("20,00 €", exact=True)
                 ).to_be_visible()
+                token_row = page.locator("#activity-drawer").get_by_role(
+                    "row", name=re.compile(r"Token")
+                )
                 expect(
-                    page.locator("#activity-drawer table").get_by_text(
-                        "Dato protegido", exact=True
-                    )
-                ).to_be_visible()
+                    token_row.get_by_role("cell", name="Dato protegido")
+                ).to_have_count(2)
                 self.assertNotIn("never-visible", page.content())
                 self.assertNotIn("metadata-never-visible", page.content())
                 technical.get_by_text("Información técnica", exact=True).click()
@@ -322,7 +323,7 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     page.get_by_role("heading", name="No encontramos actividad")
                 ).to_be_visible()
                 expect(page.locator("#activity-results")).to_have_count(1)
-                page.get_by_role("link", name="Limpiar filtros").click()
+                page.get_by_role("link", name="LIMPIAR FILTROS").click()
                 expect(page).to_have_url(re.compile(r"/activity/$"))
                 expect(filters.get_by_label("Buscar", exact=True)).to_have_value("")
                 expect(page.locator("#activity-workspace")).to_have_count(1)
@@ -355,8 +356,15 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 filters.get_by_label("Buscar", exact=True).fill("Actividad paginada")
                 filters.get_by_role("button", name="Aplicar filtros").click()
                 expect(page.locator(".activity-item")).to_have_count(25)
-                page.get_by_role("link", name="Siguiente").click()
+                pagination = page.get_by_role(
+                    "navigation", name="Paginación de actividad"
+                )
+                pagination.get_by_role("link", name="Siguiente").click()
                 expect(page).to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
+                expect(
+                    pagination.get_by_text(re.compile(r"Página 2 de 2"))
+                ).to_be_visible()
+                expect(pagination.get_by_role("link", name="Anterior")).to_be_visible()
                 expect(page.locator("#activity-workspace")).to_have_count(1)
                 expect(page.locator("#activity-filters")).to_have_count(1)
                 expect(page.locator("#activity-results")).to_have_count(1)
@@ -366,8 +374,11 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(filters.get_by_label("Buscar", exact=True)).to_have_value(
                     "Actividad paginada"
                 )
-                page.get_by_role("link", name="Anterior").click()
+                pagination.get_by_role("link", name="Anterior").click()
                 expect(page).not_to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
+                expect(
+                    pagination.get_by_text(re.compile(r"Página 1 de 2"))
+                ).to_be_visible()
                 expect(page.locator(".activity-item")).to_have_count(25)
             finally:
                 browser.close()
