@@ -4,6 +4,8 @@ from django.test import TestCase
 from unittest.mock import patch
 
 from apps.stores.models import Store
+from apps.cash_register.models import CashRegister, CashSession
+from apps.users.models import CustomUser, RoleChoices
 from apps.stores.services import (
     activate_store,
     deactivate_store,
@@ -374,3 +376,26 @@ class StoreServicesTests(TestCase):
 
         self.assertGreaterEqual(len(call_order), 2)
         self.assertEqual(call_order[:2], ["business", "store"])
+
+    def test_open_cash_session_blocks_store_deactivation_without_partial_mutation(self):
+        user = CustomUser.objects.create_user(
+            business=self.business,
+            email="store-cash@example.com",
+            password="test",
+            role=RoleChoices.OWNER,
+        )
+        register = CashRegister.objects.create(
+            business=self.business, store=self.store, name="Principal", code="CAJA-01"
+        )
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=user,
+        )
+        with self.assertRaisesMessage(ValidationError, "sesión de caja abierta"):
+            deactivate_store(business=self.business, store=self.store)
+        self.store.refresh_from_db()
+        session.refresh_from_db()
+        self.assertTrue(self.store.is_active)
+        self.assertEqual(session.status, CashSession.Status.OPEN)

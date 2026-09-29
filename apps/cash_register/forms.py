@@ -5,6 +5,16 @@ from django import forms
 from apps.cash_register.models import CashMovement, CashRegister
 
 
+class CashRegisterAdminForm(forms.ModelForm):
+    class Meta:
+        model = CashRegister
+        fields = ("name", "code")
+        labels = {"name": "Nombre", "code": "Código"}
+
+    def clean_code(self):
+        return (self.cleaned_data.get("code") or "").strip().upper()
+
+
 class CashSessionOpenForm(forms.Form):
     cash_register = forms.ModelChoiceField(
         label="Caja", queryset=CashRegister.objects.none()

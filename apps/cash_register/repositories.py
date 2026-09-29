@@ -34,6 +34,10 @@ class CashRegisterRepository:
             business=business,
         )
 
+    def get_store_for_update(self, *, business: Business, store_id: int) -> Store:
+        """Lock the Store before its registers, matching Store lifecycle order."""
+        return Store.objects.select_for_update().get(pk=store_id, business=business)
+
     def get_cash_register_for_update(
         self,
         *,

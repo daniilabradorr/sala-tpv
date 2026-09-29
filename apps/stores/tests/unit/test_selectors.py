@@ -265,3 +265,47 @@ class StoreSelectorsTests(TestCase):
             stores,
             [self.default_store, self.secondary_store, self.inactive_store],
         )
+
+
+class StoreAdminSelectorTests(TestCase):
+    def setUp(self):
+        self.business = create_business(name="Selector admin", slug="selector-admin")
+        self.name_match = create_store(
+            business=self.business, name="Centro", code="CTR"
+        )
+        self.code_match = create_store(
+            business=self.business, name="Norte", code="SPECIAL"
+        )
+        self.city_match = create_store(
+            business=self.business,
+            name="Sur",
+            code="SUR",
+            is_active=False,
+        )
+        for store, city in (
+            (self.name_match, "Madrid"),
+            (self.code_match, "Bilbao"),
+            (self.city_match, "Salamanca"),
+        ):
+            store.city = city
+            store.save(update_fields=["city", "updated_at"])
+
+    def test_search_name_code_and_city_and_status(self):
+        from apps.stores.selectors import get_store_admin_list
+
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="centro")),
+            [self.name_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="special")),
+            [self.code_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="salamanca")),
+            [self.city_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, status="inactive")),
+            [self.city_match],
+        )

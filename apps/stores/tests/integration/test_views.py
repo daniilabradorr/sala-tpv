@@ -413,6 +413,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         response = self.client.post(
             reverse("stores:store_delete", kwargs={"pk": self.store.pk}),
+            {"confirmation": "ELIMINAR"},
         )
 
         self.assertRedirects(
@@ -493,7 +494,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_superuser_owner_without_business_can_view_store_detail(self):
+    def test_superuser_owner_without_business_cannot_view_store_detail(self):
         superuser = CustomUser.objects.create_superuser(
             email="admin-owner@stores.com",
             password=self.password,
@@ -505,9 +506,9 @@ class StoreViewsIntegrationTests(TestCase):
             reverse("stores:store_detail", kwargs={"pk": self.store.pk})
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
-    def test_superuser_manager_without_business_can_view_store_detail(self):
+    def test_superuser_manager_without_business_cannot_view_store_detail(self):
         superuser = CustomUser.objects.create_superuser(
             email="admin-manager@stores.com",
             password=self.password,
@@ -519,7 +520,7 @@ class StoreViewsIntegrationTests(TestCase):
             reverse("stores:store_detail", kwargs={"pk": self.store.pk})
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
     def test_cashier_detail_requires_active_store_access(self):
         self.login_as(self.cashier)
@@ -555,7 +556,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_mutation_endpoints_do_not_accept_get(self):
+    def test_lifecycle_get_only_shows_confirmation_and_does_not_mutate(self):
         self.login_as(self.owner)
 
         for route in (
@@ -567,7 +568,10 @@ class StoreViewsIntegrationTests(TestCase):
                 response = self.client.get(
                     reverse(f"stores:{route}", kwargs={"pk": self.store.pk})
                 )
-                self.assertEqual(response.status_code, 405)
+                self.assertEqual(response.status_code, 200)
+        self.store.refresh_from_db()
+        self.assertTrue(self.store.is_active)
+        self.assertTrue(self.store.is_default)
 
     def test_manager_cannot_modify_store_from_other_business(self):
         self.login_as(self.manager)

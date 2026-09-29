@@ -26,6 +26,78 @@ ZERO = Decimal("0.00")
 MONEY_STEP = Decimal("0.01")
 
 
+def _locked_admin_register(*, business, store, cash_register):
+    if not business or not store or store.business_id != business.pk:
+        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    try:
+        return CashRegister.objects.select_for_update().get(
+            pk=cash_register.pk, business=business, store=store
+        )
+    except CashRegister.DoesNotExist as exc:
+        raise ValidationError("La caja no pertenece a esta tienda.") from exc
+
+
+@transaction.atomic
+def create_cash_register(*, business, store, name, code):
+    """Create a register from trusted tenant and Store context."""
+    locked_store = (
+        Store.objects.select_for_update()
+        .filter(pk=getattr(store, "pk", None), business=business)
+        .first()
+    )
+    if locked_store is None:
+        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    register = CashRegister(
+        business=business, store=locked_store, name=name, code=code, is_active=True
+    )
+    register.full_clean()
+    register.save()
+    return register
+
+
+@transaction.atomic
+def update_cash_register(*, business, store, cash_register, name, code):
+    locked = _locked_admin_register(
+        business=business, store=store, cash_register=cash_register
+    )
+    locked.name, locked.code = name, code
+    locked.full_clean()
+    locked.save(update_fields=["name", "code", "updated_at"])
+    return locked
+
+
+@transaction.atomic
+def activate_cash_register(*, business, store, cash_register):
+    locked = _locked_admin_register(
+        business=business, store=store, cash_register=cash_register
+    )
+    if not locked.is_active:
+        locked.is_active = True
+        locked.save(update_fields=["is_active", "updated_at"])
+    return locked
+
+
+@transaction.atomic
+def deactivate_cash_register(*, business, store, cash_register):
+    # Lock order Store -> CashRegister matches session opening and Store lifecycle.
+    locked_store = Store.objects.select_for_update().get(pk=store.pk, business=business)
+    locked = _locked_admin_register(
+        business=business, store=locked_store, cash_register=cash_register
+    )
+    if not locked.is_active:
+        return locked
+    if CashSession.objects.filter(
+        cash_register=locked, status=CashSession.Status.OPEN
+    ).exists():
+        raise ValidationError(
+            "No puedes desactivar esta caja porque tiene una sesión abierta. "
+            "Cierra la sesión antes de desactivarla."
+        )
+    locked.is_active = False
+    locked.save(update_fields=["is_active", "updated_at"])
+    return locked
+
+
 class CashRegisterService:
     """
     Casos de uso del módulo Cash Register.
@@ -167,7 +239,7 @@ class CashRegisterService:
             # ------------------------------------------------------
 
             try:
-                store = self.repository.get_store(
+                store = self.repository.get_store_for_update(
                     business=business,
                     store_id=store_id,
                 )

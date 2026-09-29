@@ -195,6 +195,20 @@ def deactivate_store(*, business, store):
     if not locked_store.is_active:
         return locked_store
 
+    # The Store lock is also acquired by CashRegisterService before opening a
+    # session.  This makes the check race-safe rather than a best-effort guard.
+    from apps.cash_register.models import CashSession
+
+    if CashSession.objects.filter(
+        business=locked_business,
+        store=locked_store,
+        status=CashSession.Status.OPEN,
+    ).exists():
+        raise ValidationError(
+            "No puedes desactivar esta tienda porque tiene una sesión de caja "
+            "abierta. Cierra las cajas abiertas antes de desactivar la tienda."
+        )
+
     was_default = locked_store.is_default
 
     locked_store.is_default = False

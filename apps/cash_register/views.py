@@ -17,6 +17,7 @@ from apps.cash_register.forms import (
     CashOutForm,
     CashSessionCloseForm,
     CashSessionOpenForm,
+    CashRegisterAdminForm,
 )
 from apps.cash_register.models import CashRegister, CashSession
 from apps.cash_register.selectors import (
@@ -30,14 +31,36 @@ from apps.cash_register.selectors import (
     get_cash_sessions_for_history,
     get_sales_for_cash_session,
 )
-from apps.cash_register.services import CashRegisterService
+from apps.cash_register.services import (
+    CashRegisterService,
+    activate_cash_register,
+    create_cash_register,
+    deactivate_cash_register,
+    update_cash_register,
+)
 from apps.core.htmx import add_hx_trigger
 from apps.stores.models import Store
 from apps.users.helpers import (
     can_access_store,
     can_close_cash_register,
     can_open_cash_register,
+    can_manage_cash_registers,
 )
+
+
+def _admin_store(request, store_id):
+    if not can_manage_cash_registers(request.user):
+        raise PermissionDenied("No tienes permiso para administrar cajas.")
+    return get_object_or_404(Store, pk=store_id, business=request.user.business)
+
+
+def _admin_register(request, store, cash_register_id):
+    return get_object_or_404(
+        CashRegister,
+        pk=cash_register_id,
+        business=request.user.business,
+        store=store,
+    )
 
 
 def _hx(request):
@@ -100,6 +123,99 @@ def register_list(request, store_id):
             "can_open": can_open_cash_register(request.user, store),
         },
     )
+
+
+@login_required
+def register_admin(request, store_id):
+    store = _admin_store(request, store_id)
+    return render(
+        request,
+        "cash_register/admin_list.html",
+        {
+            "store": store,
+            "cash_registers": get_cash_registers_for_store(
+                business=request.user.business, store=store
+            ),
+        },
+    )
+
+
+@login_required
+def register_create(request, store_id):
+    store = _admin_store(request, store_id)
+    form = CashRegisterAdminForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            create_cash_register(
+                business=request.user.business, store=store, **form.cleaned_data
+            )
+        except ValidationError as exc:
+            _service_errors(form, exc)
+        else:
+            messages.success(request, "Caja creada correctamente.")
+            return redirect("cash_register:register_admin", store_id=store.pk)
+    return render(
+        request,
+        "cash_register/admin_form.html",
+        {"store": store, "form": form, "title": "Nueva caja"},
+        status=422 if request.method == "POST" else 200,
+    )
+
+
+@login_required
+def register_update(request, store_id, cash_register_id):
+    store = _admin_store(request, store_id)
+    register = _admin_register(request, store, cash_register_id)
+    form = CashRegisterAdminForm(request.POST or None, instance=register)
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_cash_register(
+                business=request.user.business,
+                store=store,
+                cash_register=register,
+                **form.cleaned_data,
+            )
+        except ValidationError as exc:
+            _service_errors(form, exc)
+        else:
+            messages.success(request, "Caja actualizada correctamente.")
+            return redirect("cash_register:register_admin", store_id=store.pk)
+    return render(
+        request,
+        "cash_register/admin_form.html",
+        {"store": store, "form": form, "title": "Editar caja"},
+        status=422 if request.method == "POST" else 200,
+    )
+
+
+@login_required
+def register_activate(request, store_id, cash_register_id):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    store = _admin_store(request, store_id)
+    register = _admin_register(request, store, cash_register_id)
+    activate_cash_register(
+        business=request.user.business, store=store, cash_register=register
+    )
+    messages.success(request, "Caja activada correctamente.")
+    return redirect("cash_register:register_admin", store_id=store.pk)
+
+
+@login_required
+def register_deactivate(request, store_id, cash_register_id):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    store = _admin_store(request, store_id)
+    register = _admin_register(request, store, cash_register_id)
+    try:
+        deactivate_cash_register(
+            business=request.user.business, store=store, cash_register=register
+        )
+    except ValidationError as exc:
+        messages.error(request, " ".join(exc.messages))
+    else:
+        messages.success(request, "Caja desactivada correctamente.")
+    return redirect("cash_register:register_admin", store_id=store.pk)
 
 
 @login_required

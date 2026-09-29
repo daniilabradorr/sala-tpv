@@ -35,6 +35,20 @@ def is_owner_or_manager(user):
     return is_owner(user) or is_manager(user)
 
 
+def can_manage_stores(user):
+    """Administrative Store scope; deliberately independent of StoreAccess."""
+    if not is_authenticated_user(user):
+        return False
+    if user.is_superuser:
+        return bool(getattr(user, "business_id", None))
+    return bool(user.business_id) and is_owner_or_manager(user)
+
+
+def can_manage_cash_registers(user):
+    """Manage register definitions, not day-to-day cash permissions."""
+    return can_manage_stores(user)
+
+
 def belongs_to_business(user, business):
     """Comprueba si el usuario pertenece al negocio indicado."""
 

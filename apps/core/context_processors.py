@@ -5,7 +5,7 @@ from apps.core.shell import resolve_active_store
 from apps.users.helpers import (
     can_manage_business_settings,
     can_manage_users,
-    is_owner_or_manager,
+    can_manage_stores,
 )
 
 
@@ -42,7 +42,7 @@ def app_shell(request):
         "shell_navigation": navigation,
         "shell_quick_actions": quick_actions,
         "shell_capabilities": {
-            "can_manage_stores": is_owner_or_manager(user),
+            "can_manage_stores": can_manage_stores(user),
             "can_manage_users": can_manage_users(user),
             "can_manage_business": can_manage_business_settings(user),
             "can_sell": any(action["id"] == "new-sale" for action in quick_actions),
