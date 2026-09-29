@@ -7,6 +7,7 @@ from apps.users.helpers import (
     can_manage_users,
     can_sell_in_store,
     can_view_reports,
+    can_view_activity,
     is_owner_or_manager,
 )
 
@@ -97,6 +98,18 @@ def build_shell_navigation(request, *, active_store):
                 "analysis",
                 "informes análisis ventas pagos caja fiscal inventario compras",
                 app_name == "reports",
+            )
+        )
+    if can_view_activity(user):
+        items.append(
+            _item(
+                "activity",
+                "Actividad",
+                "activity",
+                reverse("audit:activity"),
+                "analysis",
+                "actividad auditoría historial cambios",
+                app_name == "audit",
             )
         )
 

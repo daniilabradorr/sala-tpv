@@ -1,0 +1,11 @@
+<form id="activity-filters" class="card activity-filters" method="get" action="{% url 'audit:activity' %}" hx-get="{% url 'audit:activity' %}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true" novalidate>
+  {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form %}
+    <div class="form-field{% if field.errors %} form-field-error{% endif %}{% if field.name == 'date_from' or field.name == 'date_to' %} activity-custom-date{% endif %}">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}<small id="{{ field.auto_id }}-errors" role="alert">{{ field.errors|striptags }}</small>{% endif %}
+    </div>
+  {% endfor %}
+  <button class="button" type="submit">Aplicar filtros</button>
+</form>

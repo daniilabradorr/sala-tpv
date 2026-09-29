@@ -150,6 +150,9 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
                             page.get_by_role("heading", name="Actividad reciente")
                         ).to_be_visible()
                         expect(
+                            page.get_by_role("link", name="Ver toda la actividad")
+                        ).to_have_attribute("href", "/activity/")
+                        expect(
                             page.get_by_text("Actividad Dashboard E2E")
                         ).to_be_visible()
                         expect(page.get_by_text("Sistema")).to_be_visible()

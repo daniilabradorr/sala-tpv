@@ -21,6 +21,10 @@ idempotentes retornan el resultado existente antes de Audit y no crean otro even
   `AuditEvent.objects.for_business(...)`. El admin es read-only, exige el permiso
   Django `audit.view_auditevent`, limita queryset y filtros al tenant, y solo el
   superusuario tiene visibilidad global.
+- La superficie pública `/activity/` es exclusivamente GET. Owner consulta todo
+  su Business (incluidos eventos sin Store); Manager queda limitado, en el
+  QuerySet, a sus `UserStoreAccess` activos y nunca recibe eventos `store=NULL`;
+  Cashier no tiene acceso. Los filtros solo estrechan ese ámbito autorizado.
 - Cada payload se construye con una allowlist pequeña. El sanitizer recursivo
   redacta contraseñas, PIN, tokens, cookies, credenciales, claves y otros secretos.
   Conserva identificadores legítimos como `cash_session_id`, configuración no

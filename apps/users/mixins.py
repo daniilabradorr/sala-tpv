@@ -11,6 +11,7 @@ from apps.users.helpers import (
     can_manage_users,
     can_manage_business_settings,
     can_view_reports,
+    can_view_activity,
     can_perform_sensitive_action,
     can_access_store,
     can_sell_in_store,
@@ -177,6 +178,13 @@ class CanViewReportsMixin(BasePermissionMixin):
 
     permission_checker = staticmethod(can_view_reports)
     permission_denied_message = "No tienes permiso para ver reportes."
+
+
+class CanViewActivityMixin(BasePermissionMixin):
+    """Autoriza la superficie global de actividad; el scope se aplica en queryset."""
+
+    permission_checker = staticmethod(can_view_activity)
+    permission_denied_message = "No tienes permiso para ver la actividad."
 
 
 class CanPerformSensitiveActionMixin(BasePermissionMixin):

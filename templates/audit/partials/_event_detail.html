@@ -1,0 +1,12 @@
+{% load tz %}
+<header class="activity-detail-header"><div><p class="erp-eyebrow">Detalle de actividad</p><h2 id="activity-detail-title">{{ activity.event_label }}</h2></div><button type="button" class="button button-secondary" data-nx-drawer-close aria-label="Cerrar detalle">×</button></header>
+<dl class="activity-detail-summary">
+  <div><dt>Actor</dt><dd>{{ activity.actor }}</dd></div>
+  <div><dt>Fecha</dt><dd><time datetime="{{ activity.event.created_at|date:'c' }}">{{ activity.created_at|date:"d/m/Y H:i:s" }}</time></dd></div>
+  {% if activity.event.store %}<div><dt>Tienda</dt><dd>{{ activity.event.store.name }}</dd></div>{% endif %}
+  <div><dt>Módulo</dt><dd>{{ activity.module_label }}</dd></div>
+</dl>
+<section><h3>Mensaje</h3><p>{{ activity.event.message }}</p></section>
+{% if activity.event.entity_type %}<section><h3>Entidad</h3><dl class="activity-detail-summary"><div><dt>Tipo</dt><dd>{{ activity.entity_label }}</dd></div><div><dt>ID</dt><dd>{{ activity.event.entity_id }}</dd></div></dl>{% if activity.entity_link %}<a class="button" href="{{ activity.entity_link.url }}">{{ activity.entity_link.label }}</a>{% endif %}</section>{% endif %}
+{% if activity.changes %}<section><h3>Cambios</h3><div class="table-scroll"><table><thead><tr><th>Campo</th><th>Antes</th><th>Después</th></tr></thead><tbody>{% for change in activity.changes %}<tr><th scope="row">{{ change.field }}</th><td>{{ change.before }}</td><td>{{ change.after }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+<details class="activity-technical"><summary>Información técnica</summary><dl class="activity-detail-summary"><div><dt>Evento</dt><dd>{{ activity.event.event_type }}</dd></div><div><dt>Tipo de entidad</dt><dd>{{ activity.event.entity_type|default:"—" }}</dd></div><div><dt>ID de entidad</dt><dd>{{ activity.event.entity_id|default:"—" }}</dd></div>{% if show_private_technical and activity.event.ip_address %}<div><dt>Dirección IP</dt><dd>{{ activity.event.ip_address }}</dd></div>{% endif %}</dl></details>

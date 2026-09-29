@@ -6,13 +6,14 @@ from django.db.models import Q
 from django.utils import formats, timezone
 
 from apps.audit.selectors import get_audit_events
+from apps.audit.presentation import present_event
 from apps.cash_register.selectors import get_cash_registers_for_store
 from apps.inventory.selectors import get_inventory_items_for_business
 from apps.purchases.models import PurchaseStatusChoices
 from apps.purchases.selectors import get_purchases_for_user
 from apps.reports.periods import report_period_for_day, report_period_from_dates
 from apps.reports.selectors import dashboard_summary
-from apps.users.helpers import is_owner_or_manager
+from apps.users.helpers import can_view_activity, is_owner, is_owner_or_manager
 
 PERIOD_OPTIONS = {
     "today": ("Hoy", 1),
@@ -117,11 +118,14 @@ def build_dashboard_context(*, business, store, user, period_key, today=None):
                 )
             )[:5]
         )
-        activity = list(
-            get_audit_events(business=business).filter(
+        activity_query = get_audit_events(business=business)
+        if is_owner(user):
+            activity_query = activity_query.filter(
                 Q(store=store) | Q(store__isnull=True)
-            )[:4]
-        )
+            )
+        else:
+            activity_query = activity_query.filter(store=store)
+        activity = [present_event(event, user=user) for event in activity_query[:4]]
     trend = _trend_rows(summary=summary, today=today)
     return {
         "dashboard": summary,
@@ -148,4 +152,5 @@ def build_dashboard_context(*, business, store, user, period_key, today=None):
         "pending_purchases": purchases,
         "show_management_blocks": can_view_management,
         "recent_activity": activity,
+        "can_view_activity": can_view_activity(user),
     }

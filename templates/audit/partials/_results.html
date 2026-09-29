@@ -1,0 +1,28 @@
+{% load tz %}
+<section id="activity-results" class="activity-results" aria-live="polite" aria-busy="false">
+  {% if chips %}<nav class="activity-chips" aria-label="Filtros activos">
+    {% for chip in chips %}<a class="activity-chip" href="{{ chip.url }}" aria-label="Eliminar filtro {{ chip.label }}" hx-get="{{ chip.url }}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true">{{ chip.label }} <span aria-hidden="true">×</span></a>{% endfor %}
+    <a class="activity-clear" href="{% url 'audit:activity' %}" hx-get="{% url 'audit:activity' %}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true">Limpiar todo</a>
+  </nav>{% endif %}
+  {% if activity_groups %}
+    <div class="activity-timeline">
+    {% for group in activity_groups %}<section aria-labelledby="activity-day-{{ group.day|date:'Y-m-d' }}">
+      <h2 id="activity-day-{{ group.day|date:'Y-m-d' }}">{{ group.label|capfirst }}</h2>
+      <ol>{% for item in group.items %}<li class="activity-item activity-module-{{ item.event.module }}">
+        <time datetime="{{ item.event.created_at|date:'c' }}">{{ item.created_at|time:"H:i" }}</time>
+        <div class="activity-item-body">
+          <div class="activity-item-heading"><strong>{{ item.actor }}</strong><span class="badge">{{ item.module_label }}</span></div>
+          <p>{{ item.event.message }}</p>
+          <div class="activity-item-meta">{% if item.event.store %}<span>{{ item.event.store.name }}</span>{% endif %}<span>{{ item.event_label }}</span></div>
+          <button class="button button-secondary activity-detail-trigger" type="button" data-nx-drawer-trigger="activity-drawer" hx-get="{% url 'audit:activity_detail' pk=item.event.pk %}" hx-target="#activity-drawer-content" hx-swap="innerHTML">Ver detalle</button>
+        </div>
+      </li>{% endfor %}</ol>
+    </section>{% endfor %}
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}<nav class="activity-pagination" aria-label="Paginación de actividad">
+      {% if page_obj.has_previous %}<a class="button button-secondary" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" hx-get="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true">Anterior</a>{% endif %}
+      <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a class="button button-secondary" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-get="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true">Siguiente</a>{% endif %}
+    </nav>{% endif %}
+  {% else %}<div class="card activity-empty"><h2>Sin actividad</h2><p>No hay eventos que coincidan con estos filtros.</p></div>{% endif %}
+</section>
