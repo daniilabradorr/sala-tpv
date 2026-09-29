@@ -127,9 +127,10 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             ).to_be_visible()
             page.keyboard.press("Escape")
             page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
-            expect(page.get_by_text("Tiendas activas")).to_be_visible()
-            expect(page.get_by_text("Inactivas", exact=True)).to_be_visible()
-            expect(page.get_by_text("Predeterminada", exact=True)).to_be_visible()
+            kpis = page.get_by_label("Resumen de tiendas")
+            expect(kpis.get_by_text("Tiendas activas", exact=True)).to_be_visible()
+            expect(kpis.get_by_text("Inactivas", exact=True)).to_be_visible()
+            expect(kpis.get_by_text("Predeterminada", exact=True)).to_be_visible()
             expect(
                 page.locator(".stores-table").get_by_role(
                     "button", name=f"Acciones de {self.default.name}"
@@ -187,28 +188,36 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             page.get_by_label("Nombre").fill("Nueva tienda")
             page.get_by_label("País").fill("ES")
             page.get_by_role("button", name="Crear tienda").click()
-            created = Store.objects.get(name="Nueva tienda")
-            self.assertEqual(created.business, self.business)
-            self.assertTrue(created.code)
-            self.assertTrue(created.is_active)
+            expect(page.get_by_role("heading", name="Nueva tienda")).to_be_visible()
+            expect(page.locator(".store-hero strong")).not_to_be_empty()
+            expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
             page.goto(
                 f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
             )
             page.get_by_role("button", name="Usar esta tienda").click()
-            self.default.refresh_from_db()
-            self.second.refresh_from_db()
-            self.assertTrue(self.default.is_default)
-            self.assertFalse(self.second.is_default)
+            expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
+            page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
+            expect(page.get_by_label("Resumen de tiendas")).to_contain_text("Centro")
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+            )
             page.get_by_role("link", name="Configuración").click()
             page.get_by_role("link", name="Hacer predeterminada").click()
             expect(page.get_by_text("Actual")).to_be_visible()
             expect(page.get_by_text(self.default.name, exact=True)).to_be_visible()
             page.get_by_role("button", name="Hacer predeterminada").click()
-            self.default.refresh_from_db()
-            self.second.refresh_from_db()
-            self.assertFalse(self.default.is_default)
-            self.assertTrue(self.second.is_default)
+            expect(page.get_by_text("★ Predeterminada", exact=True)).to_be_visible()
+            expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
             browser.close()
+
+        created = Store.objects.get(name="Nueva tienda")
+        self.assertEqual(created.business, self.business)
+        self.assertTrue(created.code)
+        self.assertTrue(created.is_active)
+        self.default.refresh_from_db()
+        self.second.refresh_from_db()
+        self.assertFalse(self.default.is_default)
+        self.assertTrue(self.second.is_default)
 
     def test_manager_admin_scope_and_cashier_read_only_scope(self):
         with sync_playwright() as playwright:
@@ -271,6 +280,15 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             cash_register=self.register,
             opened_by=self.owner,
         )
+        clean_store = Store.objects.create(
+            business=self.business, name="Lifecycle", code="LIFECYCLE"
+        )
+        clean_register = CashRegister.objects.create(
+            business=self.business,
+            store=clean_store,
+            name="Lifecycle register",
+            code="LIFE-01",
+        )
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
@@ -285,10 +303,6 @@ class BrowserStoresTests(StaticLiveServerTestCase):
                     exact=False,
                 )
             ).to_be_visible()
-            self.second.refresh_from_db()
-            session.refresh_from_db()
-            self.assertTrue(self.second.is_active)
-            self.assertEqual(session.status, CashSession.Status.OPEN)
             page.goto(
                 f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
             )
@@ -299,9 +313,38 @@ class BrowserStoresTests(StaticLiveServerTestCase):
                     exact=False,
                 )
             ).to_be_visible()
-            self.register.refresh_from_db()
-            self.assertTrue(self.register.is_active)
+            page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[clean_store.pk])}"
+            )
+            clean_card = page.locator(".store-card").filter(
+                has_text="Lifecycle register"
+            )
+            clean_card.get_by_role("button", name="Desactivar").click()
+            expect(clean_card.get_by_text("○ Inactiva", exact=True)).to_be_visible()
+            clean_card.get_by_role("button", name="Activar").click()
+            expect(clean_card.get_by_text("● Activa", exact=True)).to_be_visible()
+
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_deactivate', args=[clean_store.pk])}"
+            )
+            page.get_by_role("button", name="Desactivar tienda").click()
+            expect(page.get_by_text("○ Inactiva", exact=True)).to_be_visible()
+            page.get_by_role("link", name="Configuración").click()
+            page.get_by_role("link", name="Activar tienda").click()
+            page.get_by_role("button", name="Activar tienda").click()
+            expect(page.get_by_text("● Activa", exact=True)).to_be_visible()
             browser.close()
+
+        self.second.refresh_from_db()
+        self.register.refresh_from_db()
+        session.refresh_from_db()
+        clean_store.refresh_from_db()
+        clean_register.refresh_from_db()
+        self.assertTrue(self.second.is_active)
+        self.assertTrue(self.register.is_active)
+        self.assertEqual(session.status, CashSession.Status.OPEN)
+        self.assertTrue(clean_store.is_active)
+        self.assertTrue(clean_register.is_active)
 
     def test_cash_register_crud_delete_confirmation_and_tenant_isolation(self):
         other = OnboardingService.create_business(
@@ -343,25 +386,27 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             page.get_by_label("Nombre").fill("Caja secundaria")
             page.get_by_label("Código").fill("CAJA-02")
             page.get_by_role("button", name="Guardar caja").click()
-            secondary = CashRegister.objects.get(code="CAJA-02")
             page.locator(".store-card").filter(has_text="Caja secundaria").get_by_role(
                 "link", name="Editar"
             ).click()
             page.get_by_label("Nombre").fill("Caja mostrador")
             page.get_by_label("Código").fill("CAJA-03")
             page.get_by_role("button", name="Guardar caja").click()
-            secondary.refresh_from_db()
-            self.assertEqual(secondary.code, "CAJA-03")
+            edited_card = page.locator(".store-card").filter(has_text="Caja mostrador")
+            expect(edited_card.get_by_text("CAJA-03", exact=True)).to_be_visible()
 
             page.goto(
                 f"{self.live_server_url}{reverse('stores:store_delete', args=[clean_store.pk])}"
             )
             page.get_by_label("Escribe ELIMINAR para confirmar").fill("INCORRECTO")
             page.get_by_role("button", name="Eliminar tienda").click()
-            self.assertTrue(Store.objects.filter(pk=clean_store.pk).exists())
+            expect(
+                page.get_by_text("Escribe ELIMINAR para confirmar", exact=False)
+            ).to_be_visible()
             page.get_by_label("Escribe ELIMINAR para confirmar").fill("ELIMINAR")
             page.get_by_role("button", name="Eliminar tienda").click()
-            self.assertFalse(Store.objects.filter(pk=clean_store.pk).exists())
+            expect(page.get_by_role("heading", name="Tiendas")).to_be_visible()
+            expect(page.get_by_text("Creada por error", exact=True)).to_have_count(0)
 
             for path in (
                 reverse("stores:store_detail", args=[other.store.pk]),
@@ -374,6 +419,13 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             ):
                 response = page.request.get(f"{self.live_server_url}{path}")
                 self.assertIn(response.status, (403, 404))
-            other_register.refresh_from_db()
-            self.assertTrue(other_register.is_active)
             browser.close()
+
+        secondary = CashRegister.objects.get(code="CAJA-03")
+        self.assertEqual(secondary.name, "Caja mostrador")
+        self.assertEqual(secondary.business, self.business)
+        self.assertEqual(secondary.store, self.second)
+        self.assertTrue(secondary.is_active)
+        self.assertFalse(Store.objects.filter(pk=clean_store.pk).exists())
+        other_register.refresh_from_db()
+        self.assertTrue(other_register.is_active)

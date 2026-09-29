@@ -17,6 +17,10 @@ class CashRegisterRepository:
     - El Service controla transaction.atomic().
     """
 
+    def get_business_for_update(self, *, business: Business) -> Business:
+        """Acquire the first lock in the global cash/store hierarchy."""
+        return Business.objects.select_for_update().get(pk=business.pk)
+
     def get_store(
         self,
         *,
@@ -35,7 +39,7 @@ class CashRegisterRepository:
         )
 
     def get_store_for_update(self, *, business: Business, store_id: int) -> Store:
-        """Lock the Store before its registers, matching Store lifecycle order."""
+        """Lock Store after Business and before CashRegister."""
         return Store.objects.select_for_update().get(pk=store_id, business=business)
 
     def get_cash_register_for_update(

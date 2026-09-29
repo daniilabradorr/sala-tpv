@@ -26,6 +26,28 @@ ZERO = Decimal("0.00")
 MONEY_STEP = Decimal("0.01")
 
 
+def _lock_cash_business(*, business):
+    """Lock Business first so every cash definition operation shares one order."""
+    if business is None or not getattr(business, "pk", None):
+        raise ValidationError("Debes indicar un negocio válido.")
+    try:
+        return Business.objects.select_for_update().get(pk=business.pk)
+    except Business.DoesNotExist as exc:
+        raise ValidationError("El negocio indicado no existe.") from exc
+
+
+def _lock_cash_store(*, business, store):
+    """Lock a tenant Store after its Business has already been locked."""
+    locked_store = (
+        Store.objects.select_for_update()
+        .filter(pk=getattr(store, "pk", None), business=business)
+        .first()
+    )
+    if locked_store is None:
+        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    return locked_store
+
+
 def _locked_admin_register(*, business, store, cash_register):
     if not business or not store or store.business_id != business.pk:
         raise ValidationError("La tienda no pertenece al negocio indicado.")
@@ -40,15 +62,14 @@ def _locked_admin_register(*, business, store, cash_register):
 @transaction.atomic
 def create_cash_register(*, business, store, name, code):
     """Create a register from trusted tenant and Store context."""
-    locked_store = (
-        Store.objects.select_for_update()
-        .filter(pk=getattr(store, "pk", None), business=business)
-        .first()
-    )
-    if locked_store is None:
-        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
     register = CashRegister(
-        business=business, store=locked_store, name=name, code=code, is_active=True
+        business=locked_business,
+        store=locked_store,
+        name=name,
+        code=code,
+        is_active=True,
     )
     register.full_clean()
     register.save()
@@ -57,8 +78,10 @@ def create_cash_register(*, business, store, name, code):
 
 @transaction.atomic
 def update_cash_register(*, business, store, cash_register, name, code):
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
     locked = _locked_admin_register(
-        business=business, store=store, cash_register=cash_register
+        business=locked_business, store=locked_store, cash_register=cash_register
     )
     locked.name, locked.code = name, code
     locked.full_clean()
@@ -68,8 +91,10 @@ def update_cash_register(*, business, store, cash_register, name, code):
 
 @transaction.atomic
 def activate_cash_register(*, business, store, cash_register):
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
     locked = _locked_admin_register(
-        business=business, store=store, cash_register=cash_register
+        business=locked_business, store=locked_store, cash_register=cash_register
     )
     if not locked.is_active:
         locked.is_active = True
@@ -79,10 +104,11 @@ def activate_cash_register(*, business, store, cash_register):
 
 @transaction.atomic
 def deactivate_cash_register(*, business, store, cash_register):
-    # Lock order Store -> CashRegister matches session opening and Store lifecycle.
-    locked_store = Store.objects.select_for_update().get(pk=store.pk, business=business)
+    # Global lock order: Business -> Store -> CashRegister -> CashSession.
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
     locked = _locked_admin_register(
-        business=business, store=locked_store, cash_register=cash_register
+        business=locked_business, store=locked_store, cash_register=cash_register
     )
     if not locked.is_active:
         return locked
@@ -234,13 +260,29 @@ class CashRegisterService:
         # ==========================================================
 
         with transaction.atomic():
+            # Business is always locked before Store. Besides matching Store
+            # lifecycle, this prevents an INSERT's Business FK check from
+            # completing the inverse Store -> Business lock path.
+            try:
+                locked_business = self.repository.get_business_for_update(
+                    business=business
+                )
+            except Business.DoesNotExist as exc:
+                raise ValidationError(
+                    {"business": "El negocio no existe o está inactivo."}
+                ) from exc
+            if not locked_business.is_active:
+                raise ValidationError(
+                    {"business": "El negocio no existe o está inactivo."}
+                )
+
             # ------------------------------------------------------
             # Store
             # ------------------------------------------------------
 
             try:
                 store = self.repository.get_store_for_update(
-                    business=business,
+                    business=locked_business,
                     store_id=store_id,
                 )
 
@@ -260,7 +302,7 @@ class CashRegisterService:
 
             try:
                 cash_register = self.repository.get_cash_register_for_update(
-                    business=business,
+                    business=locked_business,
                     store=store,
                     cash_register_id=cash_register_id,
                 )
@@ -315,7 +357,7 @@ class CashRegisterService:
             try:
                 with transaction.atomic():
                     session = self.repository.create_cash_session(
-                        business=business,
+                        business=locked_business,
                         store=store,
                         cash_register=cash_register,
                         opened_by=user,
@@ -328,7 +370,7 @@ class CashRegisterService:
                 ) from exc
 
             log_event(
-                business=business,
+                business=locked_business,
                 store=store,
                 user=user,
                 event_type=AuditEventType.CASH_SESSION_OPENED,

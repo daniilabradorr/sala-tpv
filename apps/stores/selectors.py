@@ -28,7 +28,7 @@ def get_store_for_business(*, business, store, for_update=False):
     if store is None or not getattr(store, "pk", None):
         return None
 
-    queryset = Store.objects.select_related("business")
+    queryset = Store.objects.select_related("business", "business__profile")
     if for_update:
         queryset = queryset.select_for_update()
 
@@ -160,7 +160,7 @@ def get_stores_available_for_user(*, user, only_active=True):
     if not _is_authenticated_active_user(user):
         return Store.objects.none()
 
-    queryset = Store.objects.select_related("business")
+    queryset = Store.objects.select_related("business", "business__profile")
 
     if user.is_superuser:
         if only_active:
