@@ -1,0 +1,309 @@
+"""Real Chromium coverage for FE-22 user administration."""
+
+import re
+from contextlib import contextmanager
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.test import override_settings
+from django.urls import reverse
+from playwright.sync_api import expect, sync_playwright
+from apps.onboarding.services import OnboardingService
+from apps.stores.models import Store
+from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
+
+
+@override_settings(
+    STORAGES={
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        }
+    }
+)
+class BrowserUsersTests(StaticLiveServerTestCase):
+    password = "E2E-Users-Password-123!"
+
+    def setUp(self):
+        result = OnboardingService.create_business(
+            legal_name="Users E2E SL",
+            trade_name="Users E2E",
+            tax_identifier="B10000022",
+            phone="923000022",
+            email="users-business@example.com",
+            address_line_1="Calle Usuarios 22",
+            postal_code="37022",
+            city="Salamanca",
+            province="Salamanca",
+            country_code="ES",
+            store_name="Centro",
+            owner_first_name="Olivia",
+            owner_last_name="Owner",
+            owner_email="users-owner@example.com",
+            owner_phone="600000022",
+            owner_password=self.password,
+            owner_pin="1234",
+        )
+        self.business, self.owner, self.centre = (
+            result.business,
+            result.owner,
+            result.store,
+        )
+        self.second = Store.objects.create(
+            business=self.business, name="Gran Vía", code="GRAN-VIA"
+        )
+        self.manager = CustomUser.objects.create_user(
+            business=self.business,
+            email="users-manager@example.com",
+            password=self.password,
+            role=RoleChoices.MANAGER,
+            first_name="Laura",
+            last_name="Martín",
+            phone="600000023",
+        )
+        self.cashier = CustomUser.objects.create_user(
+            business=self.business,
+            email="users-cashier@example.com",
+            password=self.password,
+            role=RoleChoices.CASHIER,
+            first_name="Carlos",
+            last_name="Caja",
+            phone="600000024",
+        )
+        UserStoreAccess.objects.create(
+            business=self.business, user=self.manager, store=self.centre
+        )
+        UserStoreAccess.objects.create(
+            business=self.business, user=self.cashier, store=self.centre
+        )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.second,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=True,
+        )
+
+    @contextmanager
+    def browser(self, playwright):
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            yield browser
+        finally:
+            browser.close()
+
+    def login(self, page, user):
+        page.goto(f"{self.live_server_url}{reverse('users:login')}")
+        page.get_by_label("Correo electrónico").fill(user.email)
+        page.get_by_label("Contraseña").fill(self.password)
+        page.get_by_role("button", name="Iniciar sesión").click()
+        page.wait_for_url(f"{self.live_server_url}/")
+
+    def test_owner_list_filters_and_real_responsive_cards(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page(viewport={"width": 1280, "height": 812})
+                self.login(page, self.owner)
+                expect(
+                    page.locator("#app-sidebar").get_by_role("link", name="Usuarios")
+                ).to_be_visible()
+                page.keyboard.press("Control+k")
+                expect(
+                    page.locator("[data-command-dialog]").get_by_role(
+                        "link", name="Usuarios"
+                    )
+                ).to_be_visible()
+                page.keyboard.press("Escape")
+                page.goto(f"{self.live_server_url}{reverse('users:user_list')}")
+                users_table = page.locator(".users-table")
+                cards = page.locator(".user-cards")
+                expect(page.get_by_role("heading", name="Usuarios")).to_be_visible()
+                expect(users_table).to_be_visible()
+                expect(cards).to_be_hidden()
+                page.get_by_label("Buscar por nombre o email").fill("Laura")
+                page.get_by_role("button", name="Filtrar").click()
+                expect(
+                    users_table.get_by_text("users-manager@example.com", exact=True)
+                ).to_be_visible()
+                page.set_viewport_size({"width": 375, "height": 812})
+                expect(users_table).to_be_hidden()
+                expect(cards).to_be_visible()
+                manager_card = cards.locator(".user-card", has_text="Laura Martín")
+                manager_card.get_by_label("Acciones para Laura Martín").click()
+                menu = manager_card.locator(".user-menu nav")
+                expect(menu.get_by_role("link", name="Editar")).to_be_visible()
+                expect(
+                    menu.get_by_role("link", name="Gestionar tiendas")
+                ).to_be_visible()
+                expect(menu.get_by_role("link", name="Desactivar")).to_be_visible()
+                card_box = manager_card.bounding_box()
+                menu_box = menu.bounding_box()
+                self.assertIsNotNone(card_box)
+                self.assertIsNotNone(menu_box)
+                self.assertGreaterEqual(menu_box["x"], card_box["x"])
+                self.assertLessEqual(
+                    menu_box["x"] + menu_box["width"],
+                    card_box["x"] + card_box["width"],
+                )
+                self.assertLessEqual(
+                    page.evaluate("document.documentElement.scrollWidth"), 375
+                )
+                for width in (767, 768, 1280):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    self.assertLessEqual(
+                        page.evaluate("document.documentElement.scrollWidth"), width
+                    )
+                page.set_viewport_size({"width": 767, "height": 900})
+                expect(users_table).to_be_hidden()
+                expect(cards).to_be_visible()
+                page.set_viewport_size({"width": 768, "height": 900})
+                expect(users_table).to_be_visible()
+                expect(cards).to_be_hidden()
+
+    def test_owner_creates_manager_with_store_matrix(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(f"{self.live_server_url}{reverse('users:user_create')}")
+                step1 = page.locator('[data-wizard-step="1"]')
+                step2 = page.locator('[data-wizard-step="2"]')
+                expect(step1).to_be_visible()
+                expect(step2).to_be_hidden()
+                step1.get_by_label("Correo electrónico").fill("new-manager@example.com")
+                step1.get_by_label("Nombre").fill("Nueva")
+                step1.get_by_label("Apellidos").fill("Manager")
+                step1.get_by_label("Teléfono").fill("600000025")
+                step1.get_by_label("Rol").select_option("manager")
+                step1.get_by_label(re.compile(r"^Contraseña")).fill(self.password)
+                step1.get_by_label(re.compile(r"^Confirmar contraseña")).fill(
+                    self.password
+                )
+                step1.get_by_role("button", name="Continuar").click()
+                expect(step1).to_be_hidden()
+                expect(step2).to_be_visible()
+                step2.get_by_role("button", name="Volver").click()
+                expect(step1).to_be_visible()
+                step1.get_by_role("button", name="Continuar").click()
+                centre = page.locator("fieldset", has_text="Centro")
+                centre.get_by_label("Acceso").check()
+                centre.get_by_label("Vender").check()
+                centre.get_by_label("Abrir caja").check()
+                centre.get_by_label("Cerrar caja").check()
+                second = page.locator("fieldset", has_text="Gran Vía")
+                second.get_by_label("Acceso").check()
+                second.get_by_label("Vender").check()
+                second.get_by_label("Abrir caja").check()
+                page.get_by_role("button", name="Crear usuario").click()
+                expect(
+                    page.get_by_role("heading", name="Nueva Manager")
+                ).to_be_visible()
+        created = CustomUser.objects.get(email="new-manager@example.com")
+        self.assertTrue(created.check_password(self.password))
+        self.assertEqual(created.store_accesses.filter(is_active=True).count(), 2)
+
+    def test_owner_role_uses_global_access_instead_of_matrix(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(f"{self.live_server_url}{reverse('users:user_create')}")
+                page.get_by_label("Rol").select_option("owner")
+                page.get_by_role("button", name="Continuar").click()
+                expect(page.locator("[data-owner-global]")).to_be_visible()
+                expect(page.locator("[data-access-matrix]")).to_be_hidden()
+                self.assertEqual(
+                    page.locator("[data-access-matrix]").evaluate(
+                        "element => getComputedStyle(element).display"
+                    ),
+                    "none",
+                )
+                step1 = page.locator('[data-wizard-step="1"]')
+                step2 = page.locator('[data-wizard-step="2"]')
+                step2.get_by_role("button", name="Volver").click()
+                expect(step1).to_be_visible()
+                step1.get_by_label("Rol").select_option("manager")
+                step1.get_by_role("button", name="Continuar").click()
+                expect(step2).to_be_visible()
+                expect(page.locator("[data-owner-global]")).to_be_hidden()
+                expect(page.locator("[data-access-matrix]")).to_be_visible()
+                row = page.locator("fieldset", has_text="Centro")
+                expect(row.get_by_label("Acceso")).not_to_be_checked()
+                expect(row.get_by_label("Vender")).to_be_disabled()
+                expect(row.get_by_label("Abrir caja")).to_be_disabled()
+                expect(row.get_by_label("Cerrar caja")).to_be_disabled()
+
+    def test_access_off_disables_controls_and_preserves_capabilities(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_store_access_manage', kwargs={'pk': self.cashier.pk})}"
+                )
+                row = page.locator("fieldset", has_text="Gran Vía")
+                access = row.get_by_label("Acceso")
+                access.uncheck()
+                for label in ("Vender", "Abrir caja", "Cerrar caja"):
+                    expect(row.get_by_label(label)).to_be_disabled()
+                access.check()
+                for label in ("Vender", "Abrir caja", "Cerrar caja"):
+                    expect(row.get_by_label(label)).to_be_enabled()
+                access.uncheck()
+                page.get_by_role("button", name="Guardar permisos").click()
+                expect(page).to_have_url(re.compile(r"[?&]tab=stores$"))
+        saved = UserStoreAccess.objects.get(user=self.cashier, store=self.second)
+        self.assertFalse(saved.is_active)
+        self.assertTrue(saved.can_sell)
+        self.assertTrue(saved.can_open_cash)
+        self.assertTrue(saved.can_close_cash)
+
+    def test_lifecycle_preserves_access_and_self_action_is_absent(self):
+        access_id = self.cashier.store_accesses.get(store=self.centre).pk
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_detail', kwargs={'pk': self.owner.pk})}"
+                )
+                expect(
+                    page.get_by_role("link", name="Desactivar usuario")
+                ).to_have_count(0)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_deactivate', kwargs={'pk': self.cashier.pk})}"
+                )
+                expect(page.get_by_text("dejará de poder acceder")).to_be_visible()
+                page.get_by_role("button", name="Desactivar usuario").click()
+                details = page.locator(".details-grid")
+                expect(details.get_by_text("Inactiva", exact=True)).to_be_visible()
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_activate', kwargs={'pk': self.cashier.pk})}"
+                )
+                page.get_by_role("button", name="Reactivar usuario").click()
+                details = page.locator(".details-grid")
+                expect(details.get_by_text("Activa", exact=True)).to_be_visible()
+        self.cashier.refresh_from_db()
+        self.assertTrue(self.cashier.is_active)
+        self.assertTrue(UserStoreAccess.objects.filter(pk=access_id).exists())
+
+    def test_manager_owner_read_only_and_cashier_denied(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.manager)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_detail', kwargs={'pk': self.owner.pk})}"
+                )
+                expect(page.get_by_role("heading", name="Olivia Owner")).to_be_visible()
+                expect(page.get_by_role("link", name="Editar")).to_have_count(0)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_update', kwargs={'pk': self.owner.pk})}"
+                )
+                expect(
+                    page.get_by_role("heading", name="No tienes acceso a esta sección")
+                ).to_be_visible()
+                page.context.clear_cookies()
+                self.login(page, self.cashier)
+                page.goto(f"{self.live_server_url}{reverse('users:user_list')}")
+                expect(
+                    page.get_by_role("heading", name="No tienes acceso a esta sección")
+                ).to_be_visible()

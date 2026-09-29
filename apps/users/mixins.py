@@ -52,9 +52,8 @@ class BusinessUserQuerysetMixin:
             .order_by("email")
         )
 
-        if self.request.user.is_superuser:
-            return qs
-
+        if not self.request.user.business_id:
+            return qs.none()
         return qs.filter(business=self.request.user.business)
 
 
