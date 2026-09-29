@@ -14,6 +14,8 @@ from apps.audit.selectors import get_audit_events
 from apps.audit.services import log_event
 from apps.core.models import Business
 from apps.reports.periods import report_period_from_dates
+from apps.sales.models import Sale, SaleStatusChoices
+from apps.sales.tests.factories import create_sale
 from apps.stores.models import Store
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
@@ -300,13 +302,23 @@ class ActivityHTTPTests(ActivityFixture):
             )
         self.client.force_login(self.owner)
         url = reverse("audit:activity")
-        with CaptureQueriesContext(connection) as queries:
+        with CaptureQueriesContext(connection) as single_queries:
+            single_response = self.client.get(
+                url,
+                {
+                    "period": "30d",
+                    "module": AuditModule.SALES,
+                    "q": "paginado 00",
+                },
+            )
+            list(single_response.context["page_obj"].object_list)
+        with CaptureQueriesContext(connection) as page_queries:
             response = self.client.get(
                 url,
                 {"period": "30d", "module": AuditModule.SALES, "q": "paginado"},
             )
             list(response.context["page_obj"].object_list)
-        self.assertLessEqual(len(queries), 10)
+        self.assertEqual(len(page_queries), len(single_queries))
         self.assertEqual(len(response.context["page_obj"]), 25)
         self.assertContains(response, "Siguiente")
         self.assertContains(response, "module=sales")
@@ -352,22 +364,38 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertIn("q=Visible", module_chip["url"])
 
     def test_snapshot_diff_does_not_read_mutated_source_entity(self):
+        sale = create_sale(
+            business=self.business,
+            store=self.store_a,
+            opened_by=self.owner,
+            status=SaleStatusChoices.OPEN,
+        )
         event = self.event(
             store=self.store_a,
             user=self.owner,
-            entity=self.store_a,
-            old_payload={"name": "Centro histórico"},
-            new_payload={"name": "Centro auditado"},
+            entity=sale,
+            old_payload={"status": "Estado auditado anterior"},
+            new_payload={"status": "Estado auditado posterior"},
         )
-        self.store_a.name = "Centro actual modificado"
-        self.store_a.save(update_fields=["name"])
+        Sale.objects.filter(pk=sale.pk).update(status=SaleStatusChoices.CANCELLED)
         self.client.force_login(self.owner)
         response = self.client.get(
             reverse("audit:activity_detail", kwargs={"pk": event.pk})
         )
-        self.assertContains(response, "Centro histórico")
-        self.assertContains(response, "Centro auditado")
-        self.assertNotContains(response, "Centro actual modificado")
+        self.assertContains(response, "Estado auditado anterior")
+        self.assertContains(response, "Estado auditado posterior")
+
+    def test_empty_state_has_htmx_clear_action_and_default_destination(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("audit:activity"),
+            {"period": "30d", "q": "resultado-inexistente"},
+        )
+        self.assertContains(response, "No encontramos actividad")
+        self.assertContains(response, "con estos filtros.")
+        self.assertContains(response, "Prueba a ampliar el periodo")
+        self.assertContains(response, ">Limpiar filtros</a>", html=False)
+        self.assertContains(response, 'hx-target="#activity-workspace"')
 
     def test_detail_uses_snapshots_redacts_secrets_and_hides_manager_ip(self):
         event = self.event(
@@ -377,6 +405,10 @@ class ActivityHTTPTests(ActivityFixture):
             old_payload={"amount": "10.00", "password": "real-password"},
             new_payload={"amount": "20.00", "token": "real-token"},
             ip_address="192.0.2.20",
+            metadata={
+                "safe_context": "Referencia técnica permitida",
+                "token": "metadata-secret-value",
+            },
         )
         url = reverse("audit:activity_detail", kwargs={"pk": event.pk})
         self.client.force_login(self.owner)
@@ -384,11 +416,15 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertContains(response, "Sistema")
         self.assertContains(response, "Dato protegido")
         self.assertContains(response, "192.0.2.20")
+        self.assertContains(response, "Referencia técnica permitida")
+        self.assertContains(response, "Dato protegido")
+        self.assertNotContains(response, "metadata-secret-value")
         self.assertNotContains(response, "real-password")
         self.assertNotContains(response, "real-token")
         self.client.force_login(self.manager)
         response = self.client.get(url)
         self.assertNotContains(response, "192.0.2.20")
+        self.assertNotContains(response, "Referencia técnica permitida")
 
     def test_payload_diff_never_exposes_unsanitized_secret_defensively(self):
         event = AuditEvent(

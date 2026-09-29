@@ -1,5 +1,6 @@
 .activity-page, .activity-workspace { display: grid; gap: var(--nx-space-5); min-width: 0; }
 .activity-filter-panel > summary { display: none; }
+.activity-filter-close { display: none; }
 .activity-filter-panel > #activity-filters { display: grid; }
 .activity-filters { align-items: end; display: grid; gap: var(--nx-space-3); grid-template-columns: minmax(12rem, 2fr) repeat(6, minmax(8rem, 1fr)) auto; }
 .activity-filters .form-field { margin: 0; min-width: 0; }
@@ -30,6 +31,7 @@
 @media (max-width: 1199px) { .activity-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .activity-filter-panel > summary { display: inline-flex; list-style: none; }
+  .activity-filter-close { display: inline-flex; }
   .activity-filter-panel > summary::-webkit-details-marker { display: none; }
   .activity-filter-panel:not([open]) > #activity-filters { display: none; }
   .activity-filter-panel[open]::before { background: rgb(15 23 42 / 60%); content: ""; inset: 0; position: fixed; z-index: 39; }

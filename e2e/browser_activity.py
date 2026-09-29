@@ -162,8 +162,10 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     page.locator("#activity-drawer").get_by_text("Sistema", exact=True)
                 ).to_be_visible()
                 page.get_by_role("button", name="Cerrar detalle").click()
-                page.get_by_label("Módulo").select_option("sales")
-                page.get_by_role("button", name="Aplicar filtros").click()
+                filters = page.locator("#activity-filters")
+                expect(filters).to_be_visible()
+                filters.get_by_label("Módulo", exact=True).select_option("sales")
+                filters.get_by_role("button", name="Aplicar filtros").click()
                 expect(page).to_have_url(re.compile(r"module=sales"))
                 expect(page.locator("#activity-results")).to_have_count(1)
                 sale_item = page.locator(".activity-item", has_text="Venta #")
@@ -221,6 +223,17 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     self.assertLessEqual(
                         page.evaluate("document.documentElement.scrollWidth"), width
                     )
+                    filters = page.locator("#activity-filters")
+                    if width <= 767:
+                        trigger = page.locator(".activity-filter-panel > summary")
+                        expect(filters).to_be_hidden()
+                        trigger.click()
+                        expect(filters).to_be_visible()
+                        page.keyboard.press("Escape")
+                        expect(filters).to_be_hidden()
+                        expect(trigger).to_be_focused()
+                    else:
+                        expect(filters).to_be_visible()
             finally:
                 browser.close()
 
@@ -231,39 +244,108 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
                 self._login(page, self.EMAIL)
                 page.goto(f"{self.live_server_url}/activity/")
-                page.get_by_label("Periodo").select_option("7d")
-                page.get_by_label("Tienda").select_option(str(self.store_a_id))
-                page.get_by_label("Actor").select_option(str(self.owner_id))
-                page.get_by_label("Módulo").select_option("sales")
-                page.get_by_label("Buscar").fill("Venta")
-                page.get_by_role("button", name="Aplicar filtros").click()
+                filters = page.locator("#activity-filters")
+                filters.get_by_label("Periodo", exact=True).select_option("7d")
+                filters.get_by_label("Tienda", exact=True).select_option(
+                    str(self.store_a_id)
+                )
+                filters.get_by_label("Actor", exact=True).select_option(
+                    str(self.owner_id)
+                )
+                filters.get_by_label("Módulo", exact=True).select_option("sales")
+                filters.get_by_label("Buscar", exact=True).fill("Venta")
+                filters.get_by_role("button", name="Aplicar filtros").click()
                 expect(page.locator("#activity-filters")).to_have_count(1)
                 expect(page.locator("#activity-results")).to_have_count(1)
-                expect(page.get_by_label("Evento")).to_have_value("")
-                expect(page.get_by_label("Evento").locator("option")).to_have_count(5)
-                page.get_by_label("Evento").select_option("SALE_COMPLETED")
-                page.get_by_role("button", name="Aplicar filtros").click()
+                expect(filters.get_by_label("Evento", exact=True)).to_have_value("")
+                expect(
+                    filters.get_by_label("Evento", exact=True).locator("option")
+                ).to_have_count(5)
+                filters.get_by_label("Evento", exact=True).select_option(
+                    "SALE_COMPLETED"
+                )
+                filters.get_by_role("button", name="Aplicar filtros").click()
                 expect(page).to_have_url(re.compile(r"event_type=SALE_COMPLETED"))
                 page.get_by_role("link", name="Eliminar filtro Ventas").click()
-                expect(page.get_by_label("Módulo")).to_have_value("")
-                expect(page.get_by_label("Evento")).to_have_value("")
+                expect(filters.get_by_label("Módulo", exact=True)).to_have_value("")
+                expect(filters.get_by_label("Evento", exact=True)).to_have_value("")
                 expect(page).not_to_have_url(re.compile(r"module=|event_type="))
                 expect(page).to_have_url(re.compile(r"period=7d"))
-                expect(page.get_by_label("Tienda")).to_have_value(str(self.store_a_id))
-                expect(page.get_by_label("Actor")).to_have_value(str(self.owner_id))
-                expect(page.get_by_label("Buscar")).to_have_value("Venta")
+                expect(filters.get_by_label("Tienda", exact=True)).to_have_value(
+                    str(self.store_a_id)
+                )
+                expect(filters.get_by_label("Actor", exact=True)).to_have_value(
+                    str(self.owner_id)
+                )
+                expect(filters.get_by_label("Buscar", exact=True)).to_have_value(
+                    "Venta"
+                )
                 page.go_back()
-                expect(page.get_by_label("Módulo")).to_have_value("sales")
+                expect(filters.get_by_label("Módulo", exact=True)).to_have_value(
+                    "sales"
+                )
                 page.go_forward()
-                expect(page.get_by_label("Módulo")).to_have_value("")
+                expect(filters.get_by_label("Módulo", exact=True)).to_have_value("")
                 page.get_by_role("link", name="Limpiar todo").click()
                 expect(page).to_have_url(re.compile(r"/activity/$"))
-                expect(page.get_by_label("Periodo")).to_have_value("30d")
-                expect(page.get_by_label("Tienda")).to_have_value("")
-                expect(page.get_by_label("Actor")).to_have_value("")
-                expect(page.get_by_label("Buscar")).to_have_value("")
+                expect(filters.get_by_label("Periodo", exact=True)).to_have_value("30d")
+                expect(filters.get_by_label("Tienda", exact=True)).to_have_value("")
+                expect(filters.get_by_label("Actor", exact=True)).to_have_value("")
+                expect(filters.get_by_label("Buscar", exact=True)).to_have_value("")
                 expect(page.locator("#activity-filters")).to_have_count(1)
                 expect(page.locator("#activity-results")).to_have_count(1)
+                filters.get_by_label("Buscar", exact=True).fill(
+                    "resultado-e2e-inexistente"
+                )
+                filters.get_by_role("button", name="Aplicar filtros").click()
+                expect(
+                    page.get_by_role("heading", name="No encontramos actividad")
+                ).to_be_visible()
+                page.get_by_role("link", name="Limpiar filtros").click()
+                expect(page).to_have_url(re.compile(r"/activity/$"))
+                expect(filters.get_by_label("Buscar", exact=True)).to_have_value("")
+                expect(page.locator("#activity-workspace")).to_have_count(1)
+            finally:
+                browser.close()
+
+    def test_pagination_keeps_single_workspace_and_selected_filters(self):
+        business = Store.objects.get(pk=self.store_a_id).business
+        store = Store.objects.get(pk=self.store_a_id)
+        owner = CustomUser.objects.get(pk=self.owner_id)
+        for index in range(27):
+            log_event(
+                business=business,
+                store=store,
+                user=owner,
+                event_type=AuditEventType.SALE_COMPLETED,
+                module=AuditModule.SALES,
+                message=f"Actividad paginada E2E {index:02d}",
+            )
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1280, "height": 900})
+                self._login(page, self.EMAIL)
+                page.goto(f"{self.live_server_url}/activity/")
+                filters = page.locator("#activity-filters")
+                filters.get_by_label("Módulo", exact=True).select_option("sales")
+                filters.get_by_label("Buscar", exact=True).fill("Actividad paginada")
+                filters.get_by_role("button", name="Aplicar filtros").click()
+                expect(page.locator(".activity-item")).to_have_count(25)
+                page.get_by_role("link", name="Siguiente").click()
+                expect(page).to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
+                expect(page.locator("#activity-workspace")).to_have_count(1)
+                expect(page.locator("#activity-filters")).to_have_count(1)
+                expect(page.locator("#activity-results")).to_have_count(1)
+                expect(filters.get_by_label("Módulo", exact=True)).to_have_value(
+                    "sales"
+                )
+                expect(filters.get_by_label("Buscar", exact=True)).to_have_value(
+                    "Actividad paginada"
+                )
+                page.get_by_role("link", name="Anterior").click()
+                expect(page).not_to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
+                expect(page.locator(".activity-item")).to_have_count(25)
             finally:
                 browser.close()
 

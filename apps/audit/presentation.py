@@ -278,6 +278,14 @@ def payload_diff(event):
     return rows
 
 
+def metadata_items(event):
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    return [
+        {"field": _field_label(key), "value": _safe_value(key, value)}
+        for key, value in sorted(metadata.items())
+    ]
+
+
 def present_event(event, *, user, detail=False):
     local_created = timezone.localtime(event.created_at)
     result = {
@@ -290,6 +298,8 @@ def present_event(event, *, user, detail=False):
     }
     if detail:
         result.update(
-            changes=payload_diff(event), entity_link=entity_link(event, user=user)
+            changes=payload_diff(event),
+            entity_link=entity_link(event, user=user),
+            metadata=metadata_items(event) if user.role == "owner" else [],
         )
     return result

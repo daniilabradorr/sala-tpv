@@ -24,5 +24,5 @@
       <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
       {% if page_obj.has_next %}<a class="button button-secondary" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-get="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-target="#activity-workspace" hx-swap="outerHTML" hx-push-url="true">Siguiente</a>{% endif %}
     </nav>{% endif %}
-  {% else %}<div class="card activity-empty"><h2>Sin actividad</h2><p>No hay eventos que coincidan con estos filtros.</p></div>{% endif %}
+  {% else %}<div class="card activity-empty"><h2>No encontramos actividad</h2><p>con estos filtros.</p><p>Prueba a ampliar el periodo o eliminar algún filtro.</p><a class="button" href="{% url 'audit:activity' %}" hx-get="{% url 'audit:activity' %}" hx-target="#activity-workspace" hx-swap="outerHTML" hx-push-url="true">Limpiar filtros</a></div>{% endif %}
 </section>
