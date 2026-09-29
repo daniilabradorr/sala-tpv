@@ -182,6 +182,12 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Continuar").click()
                 expect(page.locator("[data-owner-global]")).to_be_visible()
                 expect(page.locator("[data-access-matrix]")).to_be_hidden()
+                self.assertEqual(
+                    page.locator("[data-access-matrix]").evaluate(
+                        "element => getComputedStyle(element).display"
+                    ),
+                    "none",
+                )
                 page.get_by_label("Rol").select_option("manager")
                 expect(page.locator("[data-owner-global]")).to_be_hidden()
                 expect(page.locator("[data-access-matrix]")).to_be_visible()

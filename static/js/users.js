@@ -13,7 +13,10 @@
   };
   const updateRolePresentation = () => {
     const owner = role?.value === "owner";
-    if (matrix && wizard) matrix.hidden = owner;
+    if (matrix && wizard) {
+      matrix.hidden = owner;
+      matrix.classList.toggle("is-hidden", owner);
+    }
     if (ownerGlobal) ownerGlobal.hidden = !owner;
     matrix?.querySelectorAll("[data-access-row]").forEach((row) => {
       const access = row.querySelector("[data-access-toggle] input");
