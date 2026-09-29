@@ -91,10 +91,9 @@
 
         {% if show_management_blocks %}
         <section class="card dashboard-panel activity-panel" aria-labelledby="activity-title">
-            <div class="dashboard-panel-heading"><div><span class="eyebrow">Últimos cambios</span><h2 id="activity-title">Actividad reciente</h2></div></div>
-            {% if recent_activity %}<ol class="activity-list">{% for event in recent_activity %}<li><time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|localtime|time:"H:i" }}</time><div>{% if event.user %}<strong>{{ event.user }}</strong>{% else %}<strong>Sistema</strong>{% endif %}<p>{{ event.message }}</p></div></li>{% endfor %}</ol>
+            <div class="dashboard-panel-heading"><div><span class="eyebrow">Últimos cambios</span><h2 id="activity-title">Actividad reciente</h2></div>{% if can_view_activity %}<a href="{% url 'audit:activity' %}">Ver toda la actividad</a>{% endif %}</div>
+            {% if recent_activity %}<ol class="activity-list">{% for item in recent_activity %}<li><time datetime="{{ item.event.created_at|date:'c' }}">{{ item.created_at|time:"H:i" }}</time><div><strong>{{ item.actor }}</strong><p>{{ item.event.message }}</p></div></li>{% endfor %}</ol>
             {% else %}<p class="dashboard-empty">Aún no hay actividad reciente</p>{% endif %}
-            {# TODO(FE-24): enlazar a Auditoría cuando exista una URL pública autorizada. #}
         </section>
         {% endif %}
     {% else %}

@@ -210,6 +210,16 @@ def can_view_reports(user):
     return is_owner(user) or is_manager(user)
 
 
+def can_view_activity(user):
+    """Owner y manager pueden consultar la actividad de su ámbito autorizado."""
+
+    if not is_authenticated_user(user):
+        return False
+    if user.is_superuser:
+        return bool(getattr(user, "business_id", None))
+    return is_owner(user) or is_manager(user)
+
+
 def can_perform_sensitive_action(user):
     """Permiso base para acciones sensibles."""
 

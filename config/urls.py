@@ -25,6 +25,7 @@ urlpatterns = [
     path("payments/", include("apps.payments.urls", namespace="payments")),
     path("billing/", include("apps.billing.urls", namespace="billing")),
     path("reports/", include("apps.reports.urls", namespace="reports")),
+    path("activity/", include("apps.audit.urls", namespace="audit")),
     path(
         "cash-register/", include("apps.cash_register.urls", namespace="cash_register")
     ),

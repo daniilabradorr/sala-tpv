@@ -1,0 +1,7 @@
+<div id="activity-workspace" class="activity-workspace">
+  <details class="activity-filter-panel" open>
+    <summary class="button button-secondary">Filtros</summary>
+    {% include "audit/partials/_filters.html" %}
+  </details>
+  {% if results_ready %}{% include "audit/partials/_results.html" %}{% endif %}
+</div>

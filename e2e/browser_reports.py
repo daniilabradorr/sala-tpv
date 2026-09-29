@@ -62,23 +62,25 @@ class BrowserReportsTests(StaticLiveServerTestCase):
                 expect(
                     page.get_by_role("navigation", name="Informes").get_by_role("link")
                 ).to_have_count(7)
-                expect(page.locator("#reports-workspace")).to_have_count(1)
-                for tab in (
-                    "Ventas",
-                    "Pagos",
-                    "Caja",
-                    "Fiscal",
-                    "Inventario",
-                    "Compras",
-                    "General",
+                reports_workspace = page.locator("#reports-workspace")
+                expect(reports_workspace).to_have_count(1)
+                for tab, key in (
+                    ("Ventas", "sales"),
+                    ("Pagos", "payments"),
+                    ("Caja", "cash"),
+                    ("Fiscal", "tax"),
+                    ("Inventario", "inventory"),
+                    ("Compras", "purchases"),
+                    ("General", "general"),
                 ):
                     page.get_by_role("navigation", name="Informes").get_by_role(
                         "link", name=tab, exact=True
                     ).click()
-                    expect(page.locator("#reports-workspace")).to_have_count(1)
+                    expect(reports_workspace).to_have_attribute("data-active-tab", key)
                 page.get_by_role("navigation", name="Informes").get_by_role(
                     "link", name="Ventas", exact=True
                 ).click()
+                expect(reports_workspace).to_have_attribute("data-active-tab", "sales")
                 expect(
                     page.get_by_role("link", name="Descargar informe")
                 ).to_have_attribute("href", re.compile(r"period=30d.*store="))
