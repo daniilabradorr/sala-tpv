@@ -355,7 +355,9 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 filters.get_by_label("Módulo", exact=True).select_option("sales")
                 filters.get_by_label("Buscar", exact=True).fill("Actividad paginada")
                 filters.get_by_role("button", name="Aplicar filtros").click()
-                expect(page.locator(".activity-item")).to_have_count(25)
+                expect(
+                    page.locator(".activity-item").filter(has_text="Actividad paginada")
+                ).to_have_count(25)
                 pagination = page.get_by_role(
                     "navigation", name="Paginación de actividad"
                 )
@@ -386,7 +388,9 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(
                     pagination.get_by_text(re.compile(r"Página 1 de 2"))
                 ).to_be_visible()
-                expect(page.locator(".activity-item")).to_have_count(25)
+                expect(
+                    page.locator(".activity-item").filter(has_text="Actividad paginada")
+                ).to_have_count(25)
             finally:
                 browser.close()
 

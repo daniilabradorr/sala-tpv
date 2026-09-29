@@ -5,10 +5,11 @@ from apps.users.forms import (
     UserCreateForm,
     UserUpdateForm,
     UserPinChangeForm,
-    UserStoreAccessForm,
-    UserStoreAccessFormSet,
+    StoreAccessMatrixForm,
+    UserFilterForm,
 )
-from apps.users.models import RoleChoices, UserStoreAccess
+from apps.users.models import RoleChoices
+from apps.users.tests.factories import create_store_access
 from apps.users.tests.factories import (
     create_business,
     create_store,
@@ -60,6 +61,8 @@ class UserProfileUpdateFormTests(TestCase):
         self.assertNotIn("role", form.fields)
         self.assertNotIn("business", form.fields)
         self.assertNotIn("pin_hash", form.fields)
+        self.assertNotIn("is_active", form.fields)
+        self.assertNotIn("employee_code", form.fields)
 
 
 class UserCreateFormTests(TestCase):
@@ -241,51 +244,95 @@ class UserPinChangeFormTests(TestCase):
         self.assertIn("new_pin", form.errors)
 
 
-class UserStoreAccessFormTests(TestCase):
+class UserAdministrationFormTests(TestCase):
     def setUp(self):
-        self.business = create_business()
-        self.store = create_store(
-            business=self.business,
-            name="Tienda Centro",
-            code="CENTRO",
+        self.business = create_business(name="Forms A", slug="forms-a")
+        self.other_business = create_business(name="Forms B", slug="forms-b")
+        self.store = create_store(business=self.business, name="Centro", code="CENTRO")
+        self.inactive_store = create_store(
+            business=self.business, name="Cerrada", code="CERRADA", is_active=False
         )
-        self.user = create_user(
-            business=self.business,
-            email="cashier@test.com",
+        self.foreign_store = create_store(
+            business=self.other_business, name="Ajena", code="AJENA"
         )
+        self.user = create_user(business=self.business, role=RoleChoices.CASHIER)
 
-    def test_user_store_access_form_has_expected_fields(self):
-        """Verifica que el formulario de acceso a tienda contenga los campos esperados."""
-        form = UserStoreAccessForm()
+    def test_filter_choices_and_safe_store(self):
+        form = UserFilterForm(
+            {"role": "manager", "status": "inactive", "store": str(self.store.pk)},
+            stores=[self.store],
+        )
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["store"], self.store)
 
-        self.assertIn("store", form.fields)
-        self.assertIn("can_sell", form.fields)
-        self.assertIn("can_open_cash", form.fields)
-        self.assertIn("can_close_cash", form.fields)
-        self.assertIn("is_active", form.fields)
+    def test_filter_rejects_cross_business_store(self):
+        form = UserFilterForm(
+            {"status": "all", "store": str(self.foreign_store.pk)}, stores=[self.store]
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("store", form.errors)
 
-    def test_user_store_access_form_does_not_expose_business_or_user(self):
-        """Verifica que el formulario no exponga los campos business y user."""
-        form = UserStoreAccessForm()
-
+    def test_matrix_has_server_defined_row_per_store_without_scope_fields(self):
+        form = StoreAccessMatrixForm(stores=[self.store, self.inactive_store])
+        self.assertEqual(len(form.matrix_rows), 2)
         self.assertNotIn("business", form.fields)
         self.assertNotIn("user", form.fields)
+        self.assertNotIn(f"store_{self.foreign_store.pk}_active", form.fields)
 
-    def test_user_store_access_formset_is_valid_with_correct_data(self):
-        """Verifica que el formset de acceso a tiendas sea válido con datos correctos."""
-        formset = UserStoreAccessFormSet(
-            data={
-                "store_accesses-TOTAL_FORMS": "1",
-                "store_accesses-INITIAL_FORMS": "0",
-                "store_accesses-MIN_NUM_FORMS": "0",
-                "store_accesses-MAX_NUM_FORMS": "1000",
-                "store_accesses-0-store": str(self.store.pk),
-                "store_accesses-0-can_sell": "on",
-                "store_accesses-0-can_open_cash": "on",
-                "store_accesses-0-is_active": "on",
+    def test_matrix_uses_access_initial_values_and_keeps_inactive_store(self):
+        access = create_store_access(
+            business=self.business,
+            user=self.user,
+            store=self.store,
+            is_active=True,
+            can_sell=False,
+            can_open_cash=True,
+            can_close_cash=True,
+        )
+        form = StoreAccessMatrixForm(
+            stores=[self.store, self.inactive_store], accesses=[access]
+        )
+        self.assertTrue(form.fields[f"store_{self.store.pk}_active"].initial)
+        self.assertFalse(form.fields[f"store_{self.store.pk}_sell"].initial)
+        self.assertTrue(form.fields[f"store_{self.store.pk}_open"].initial)
+        self.assertTrue(form.fields[f"store_{self.store.pk}_close"].initial)
+        self.assertEqual(form.matrix_rows[1]["store"], self.inactive_store)
+
+    def test_matrix_normalizes_operational_permissions(self):
+        data = {
+            f"store_{self.store.pk}_active": "on",
+            f"store_{self.store.pk}_sell": "on",
+            f"store_{self.store.pk}_open": "on",
+            f"store_{self.store.pk}_close": "on",
+        }
+        form = StoreAccessMatrixForm(data, stores=[self.store])
+        self.assertTrue(form.is_valid())
+        self.assertEqual(
+            form.normalized_accesses()[self.store.pk],
+            {
+                "is_active": True,
+                "can_sell": True,
+                "can_open_cash": True,
+                "can_close_cash": True,
             },
-            queryset=UserStoreAccess.objects.none(),
-            prefix="store_accesses",
         )
 
-        self.assertTrue(formset.is_valid())
+    def test_matrix_rejects_arbitrary_store_key(self):
+        form = StoreAccessMatrixForm(
+            {f"store_{self.foreign_store.pk}_active": "on"}, stores=[self.store]
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("tienda no autorizada", str(form.non_field_errors()))
+
+    def test_update_exposes_only_safe_fields(self):
+        form = UserUpdateForm(instance=self.user)
+        self.assertEqual(set(form.fields), {"first_name", "last_name", "phone", "role"})
+
+    def test_manager_role_choices_exclude_owner(self):
+        manager = create_user(
+            business=self.business,
+            email="manager-forms@test.com",
+            role=RoleChoices.MANAGER,
+        )
+        form = UserUpdateForm(instance=self.user, actor=manager)
+        self.assertNotIn(RoleChoices.OWNER, dict(form.fields["role"].choices))

@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 
 from apps.users.helpers import is_manager
-from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
+from apps.users.models import CustomUser, RoleChoices
 
 
 def set_accessible_field_attrs(form):
@@ -216,7 +216,7 @@ class StoreAccessMatrixForm(forms.Form):
             access = current.get(store.pk)
             for suffix, label, default in (
                 ("active", "Acceso", False),
-                ("sell", "Vender", True),
+                ("sell", "Vender", False),
                 ("open", "Abrir caja", False),
                 ("close", "Cerrar caja", False),
             ):
@@ -254,6 +254,18 @@ class StoreAccessMatrixForm(forms.Form):
             }
             for s in self.stores
         }
+
+    def clean(self):
+        cleaned = super().clean()
+        allowed = {
+            f"store_{store.pk}_{suffix}"
+            for store in self.stores
+            for suffix in ("active", "sell", "open", "close")
+        }
+        submitted = {key for key in self.data if key.startswith("store_")}
+        if submitted - allowed:
+            raise forms.ValidationError("La matriz contiene una tienda no autorizada.")
+        return cleaned
 
 
 class UserPinChangeForm(forms.Form):
@@ -300,21 +312,3 @@ class UserPinChangeForm(forms.Form):
             raise forms.ValidationError("Los PIN no coinciden.")
 
         return cleaned_data
-
-
-class UserStoreAccessForm(forms.ModelForm):
-    """
-    Formulario para un acceso concreto de usuario a tienda.
-
-    Cada formulario representa un registro UserStoreAccess.
-    """
-
-    class Meta:
-        model = UserStoreAccess
-        fields = [
-            "store",
-            "can_sell",
-            "can_open_cash",
-            "can_close_cash",
-            "is_active",
-        ]

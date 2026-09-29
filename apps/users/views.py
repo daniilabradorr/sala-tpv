@@ -1,6 +1,7 @@
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.utils import timezone
 from apps.audit.presentation import present_event
+from apps.audit.presentation import MODULE_LABELS
 from apps.audit.selectors import get_audit_events
 from apps.reports.periods import report_period_from_dates
 from apps.stores.selectors import get_stores_available_for_user
@@ -192,6 +193,12 @@ class UserDetailView(AdminUsersMixin, View):
             a.store_id: a for a in target.store_accesses.select_related("store")
         }
         activity = []
+        activity_period = request.GET.get("period", "30d")
+        if activity_period not in {"7d", "30d"}:
+            activity_period = "30d"
+        activity_module = request.GET.get("module", "")
+        if activity_module not in MODULE_LABELS:
+            activity_module = ""
         if tab == "activity":
             scope = (
                 None
@@ -200,12 +207,18 @@ class UserDetailView(AdminUsersMixin, View):
             )
             end = timezone.localdate()
             period = report_period_from_dates(
-                date_from=end - timezone.timedelta(days=29), date_to=end
+                date_from=end
+                - timezone.timedelta(days=6 if activity_period == "7d" else 29),
+                date_to=end,
             )
             activity = [
                 present_event(e, user=request.user)
                 for e in get_audit_events(
-                    business=self.business(), stores=scope, user=target, period=period
+                    business=self.business(),
+                    stores=scope,
+                    user=target,
+                    period=period,
+                    module=activity_module,
                 )[:25]
             ]
         return render(
@@ -219,6 +232,9 @@ class UserDetailView(AdminUsersMixin, View):
                 ],
                 "activity": activity,
                 "can_manage_target": can_manage_user(request.user, target),
+                "activity_period": activity_period,
+                "activity_module": activity_module,
+                "activity_modules": MODULE_LABELS.items(),
             },
         )
 
@@ -256,7 +272,6 @@ class UserCreateView(AdminUsersMixin, View):
             request,
             self.template_name,
             {"form": form, "matrix": matrix, "stores": stores},
-            status=422,
         )
 
 
@@ -264,6 +279,8 @@ class UserUpdateView(AdminUsersMixin, View):
     template_name = "users/user_update.html"
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         if not can_manage_user(request.user, self.target()):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -292,7 +309,6 @@ class UserUpdateView(AdminUsersMixin, View):
             request,
             self.template_name,
             {"form": form, "target_user": target},
-            status=422,
         )
 
 
@@ -300,6 +316,8 @@ class LifecycleView(AdminUsersMixin, View):
     activate = False
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         if not can_manage_user(request.user, self.target()):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -340,6 +358,8 @@ class UserStoreAccessManageView(AdminUsersMixin, View):
     template_name = "users/user_store_access_manage.html"
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         target = self.target()
         if (
             not can_manage_user(request.user, target)
@@ -379,5 +399,4 @@ class UserStoreAccessManageView(AdminUsersMixin, View):
             request,
             self.template_name,
             {"matrix": form, "stores": stores, "target_user": self.target()},
-            status=422,
         )
