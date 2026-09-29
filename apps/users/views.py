@@ -1,8 +1,25 @@
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.utils import timezone
+from apps.audit.presentation import present_event
+from apps.audit.selectors import get_audit_events
+from apps.reports.periods import report_period_from_dates
+from apps.stores.selectors import get_stores_available_for_user
+from apps.users.forms import UserFilterForm, StoreAccessMatrixForm
+from apps.users.helpers import can_manage_user
+from apps.users.models import RoleChoices
+from apps.users.selectors import get_users_for_admin
+from apps.users.services import (
+    activate_user,
+    create_user_with_store_accesses,
+    deactivate_user,
+    update_user,
+    update_user_store_accesses,
+)
+
 from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
 from django.contrib import messages
 from django.urls import reverse_lazy, reverse
 from django.views.generic import (
-    CreateView,
     DetailView,
     ListView,
     UpdateView,
@@ -10,7 +27,6 @@ from django.views.generic import (
     FormView,
 )
 from apps.users.forms import (
-    UserStoreAccessFormSet,
     UserProfileUpdateForm,
     UserCreateForm,
     UserUpdateForm,
@@ -22,11 +38,9 @@ from django.shortcuts import redirect, get_object_or_404, render
 from django.contrib.auth.mixins import LoginRequiredMixin
 
 from apps.users.mixins import (
-    BusinessUserQuerysetMixin,
     ManagerOrOwnerRequiredMixin,
-    TargetUserManagementRequiredMixin,
 )
-from apps.users.models import CustomUser, UserStoreAccess
+from apps.users.models import CustomUser
 from apps.stores.models import Store
 
 
@@ -119,381 +133,251 @@ class UserPinChangeView(LoginRequiredMixin, FormView):
         return super().form_valid(form)
 
 
-# ahora la gestion de susuarios del negocio, solo accesible para manager o owner del negocio, y el superusuario
-class UserListView(ManagerOrOwnerRequiredMixin, BusinessUserQuerysetMixin, ListView):
+# Administración pública de usuarios (FE-22)
+class AdminUsersMixin(ManagerOrOwnerRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not request.user.business_id:
+            raise PermissionDenied("Se necesita un contexto de negocio.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def business(self):
+        business = getattr(self.request.user, "business", None)
+        if business is None:
+            raise PermissionDenied("Se necesita un contexto de negocio.")
+        return business
+
+    def target(self):
+        return get_object_or_404(
+            get_users_for_admin(business=self.business(), status="all"),
+            pk=self.kwargs["pk"],
+        )
+
+
+class UserListView(AdminUsersMixin, ListView):
     model = CustomUser
     template_name = "users/user_list.html"
     context_object_name = "users"
     paginate_by = 20
 
+    def get_queryset(self):
+        data = self.request.GET.copy()
+        data.setdefault("status", "active")
+        self.filter_form = UserFilterForm(
+            data, stores=Store.objects.filter(business=self.business()).order_by("name")
+        )
+        return (
+            get_users_for_admin(
+                business=self.business(), **self.filter_form.cleaned_data
+            )
+            if self.filter_form.is_valid()
+            else CustomUser.objects.none()
+        )
 
-class UserDetailView(
-    ManagerOrOwnerRequiredMixin,
-    BusinessUserQuerysetMixin,
-    DetailView,
-):
-    model = CustomUser
-    template_name = "users/user_detail.html"
-    context_object_name = "target_user"
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        query = self.request.GET.copy()
+        query.pop("page", None)
+        context.update(filter_form=self.filter_form, pagination_query=query.urlencode())
+        return context
 
 
-class UserCreateView(ManagerOrOwnerRequiredMixin, CreateView):
-    model = CustomUser
-    form_class = UserCreateForm
+class UserDetailView(AdminUsersMixin, View):
+    def get(self, request, pk):
+        target = self.target()
+        tab = request.GET.get("tab", "summary")
+        if tab not in {"summary", "stores", "activity"}:
+            tab = "summary"
+        stores = Store.objects.filter(business=self.business()).order_by("name")
+        access_map = {
+            a.store_id: a for a in target.store_accesses.select_related("store")
+        }
+        activity = []
+        if tab == "activity":
+            scope = (
+                None
+                if request.user.role == RoleChoices.OWNER
+                else get_stores_available_for_user(user=request.user, only_active=False)
+            )
+            end = timezone.localdate()
+            period = report_period_from_dates(
+                date_from=end - timezone.timedelta(days=29), date_to=end
+            )
+            activity = [
+                present_event(e, user=request.user)
+                for e in get_audit_events(
+                    business=self.business(), stores=scope, user=target, period=period
+                )[:25]
+            ]
+        return render(
+            request,
+            "users/user_detail.html",
+            {
+                "target_user": target,
+                "active_tab": tab,
+                "store_rows": [
+                    {"store": s, "access": access_map.get(s.pk)} for s in stores
+                ],
+                "activity": activity,
+                "can_manage_target": can_manage_user(request.user, target),
+            },
+        )
+
+
+class UserCreateView(AdminUsersMixin, View):
     template_name = "users/user_create.html"
 
-    def get_form_kwargs(self):
-        # para mandar al form el business del usuario logueado, para que el nuevo usuario se cree en el mismo negocio
-        # y asi no puede poner otro negocio, ni el superusuario puede poner otro negocio, porque el form lo ignora y pone el del usuario logueado
-        kwargs = super().get_form_kwargs()
+    def forms(self, data=None):
+        stores = list(Store.objects.filter(business=self.business()).order_by("name"))
+        return (
+            UserCreateForm(data, business=self.business(), actor=self.request.user),
+            StoreAccessMatrixForm(data, stores=stores),
+            stores,
+        )
 
-        if not self.request.user.is_superuser:
-            kwargs["business"] = self.request.user.business
-        kwargs["actor"] = self.request.user
+    def get(self, request):
+        form, matrix, stores = self.forms()
+        return render(
+            request,
+            self.template_name,
+            {"form": form, "matrix": matrix, "stores": stores},
+        )
 
-        return kwargs
-
-    def form_valid(self, form):
-        new_user = form.save(commit=False)
-
-        if not self.request.user.is_superuser:
-            new_user.business = self.request.user.business
-
-        password = form.cleaned_data.get("password")
-        if password:
-            new_user.set_password(password)
-
-        new_user.save()
-        form.save_m2m()
-
-        messages.success(self.request, "Usuario creado correctamente.")
-        self.object = new_user
-        return redirect(self.get_success_url())
-
-    def get_success_url(self):
-        return reverse("users:user_detail", kwargs={"pk": self.object.pk})
+    def post(self, request):
+        form, matrix, stores = self.forms(request.POST)
+        if form.is_valid() and matrix.is_valid():
+            user = create_user_with_store_accesses(
+                actor=request.user,
+                user_data=form.cleaned_data.copy(),
+                accesses=matrix.normalized_accesses(),
+            )
+            messages.success(request, "Usuario creado correctamente.")
+            return redirect("users:user_detail", pk=user.pk)
+        return render(
+            request,
+            self.template_name,
+            {"form": form, "matrix": matrix, "stores": stores},
+            status=422,
+        )
 
 
-class UserUpdateView(
-    ManagerOrOwnerRequiredMixin,
-    TargetUserManagementRequiredMixin,
-    BusinessUserQuerysetMixin,
-    UpdateView,
-):
-    model = CustomUser
-    form_class = UserUpdateForm
+class UserUpdateView(AdminUsersMixin, View):
     template_name = "users/user_update.html"
-    context_object_name = "target_user"
 
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["actor"] = self.request.user
-        return kwargs
+    def dispatch(self, request, *args, **kwargs):
+        if not can_manage_user(request.user, self.target()):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
 
-    def form_valid(self, form):
-        messages.success(self.request, "Usuario actualizado correctamente.")
-        return super().form_valid(form)
-
-    def get_success_url(self):
-        return reverse("users:user_detail", kwargs={"pk": self.object.pk})
-
-
-class UserDeactivateView(
-    ManagerOrOwnerRequiredMixin,
-    TargetUserManagementRequiredMixin,
-    BusinessUserQuerysetMixin,
-    View,
-):
-    """
-    Desactiva un usuario sin borrarlo.
-    Debe hacerse por POST.
-    """
-
-    def post(self, request, *args, **kwargs):
-        target_user = get_object_or_404(
-            self.get_queryset(),
-            pk=kwargs["pk"],
+    def get(self, request, pk):
+        target = self.target()
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": UserUpdateForm(instance=target, actor=request.user),
+                "target_user": target,
+            },
         )
 
-        if target_user == request.user:
-            messages.error(request, "No puedes desactivar tu propio usuario.")
-            return redirect("users:user_detail", pk=target_user.pk)
-
-        target_user.is_active = False
-        target_user.save(update_fields=["is_active", "updated_at"])
-
-        messages.success(request, "Usuario desactivado correctamente.")
-        return redirect("users:user_list")
-
-
-class UserActivateView(
-    ManagerOrOwnerRequiredMixin,
-    TargetUserManagementRequiredMixin,
-    BusinessUserQuerysetMixin,
-    View,
-):
-    """
-    Reactiva un usuario desactivado.
-    Debe hacerse por POST.
-    """
-
-    def post(self, request, *args, **kwargs):
-        target_user = get_object_or_404(
-            self.get_queryset(),
-            pk=kwargs["pk"],
+    def post(self, request, pk):
+        target = self.target()
+        form = UserUpdateForm(request.POST, instance=target, actor=request.user)
+        if form.is_valid():
+            target = update_user(
+                actor=request.user, target_user=target, data=form.cleaned_data
+            )
+            messages.success(request, "Usuario actualizado correctamente.")
+            return redirect("users:user_detail", pk=target.pk)
+        return render(
+            request,
+            self.template_name,
+            {"form": form, "target_user": target},
+            status=422,
         )
 
-        target_user.is_active = True
-        target_user.save(update_fields=["is_active", "updated_at"])
 
-        messages.success(request, "Usuario activado correctamente.")
-        return redirect("users:user_detail", pk=target_user.pk)
+class LifecycleView(AdminUsersMixin, View):
+    activate = False
+
+    def dispatch(self, request, *args, **kwargs):
+        if not can_manage_user(request.user, self.target()):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, pk):
+        return render(
+            request,
+            "users/user_lifecycle_confirm.html",
+            {"target_user": self.target(), "activate": self.activate},
+        )
+
+    def post(self, request, pk):
+        try:
+            (activate_user if self.activate else deactivate_user)(
+                actor=request.user, target_user=self.target()
+            )
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return redirect("users:user_detail", pk=pk)
+        messages.success(
+            request,
+            "Usuario reactivado correctamente."
+            if self.activate
+            else "Usuario desactivado correctamente.",
+        )
+        return redirect("users:user_detail", pk=pk)
 
 
-# GESTIÓN DE ACCESOS A TIENDAS
-class UserStoreAccessManageView(
-    ManagerOrOwnerRequiredMixin,
-    TargetUserManagementRequiredMixin,
-    BusinessUserQuerysetMixin,
-    View,
-):
-    """
-    Vista para gestionar los accesos de un usuario a las tiendas del negocio.
+class UserDeactivateView(LifecycleView):
+    pass
 
-    Esta vista NO crea usuarios.
-    Esta vista NO crea tiendas.
-    Esta vista NO abre ni cierra cajas.
 
-    Solo gestiona registros de UserStoreAccess, es decir:
+class UserActivateView(LifecycleView):
+    activate = True
 
-        Usuario X puede acceder a Tienda Y
-        Usuario X puede vender en Tienda Y
-        Usuario X puede abrir caja en Tienda Y
-        Usuario X puede cerrar caja en Tienda Y
-        Usuario X tiene ese acceso activo/inactivo
 
-    Se usa porque en el sistema no relacionamos directamente User con CashRegister.
-    La relación correcta es:
-
-        User -> UserStoreAccess -> Store -> CashRegister
-
-    Por eso los permisos de caja se controlan a nivel de tienda.
-    """
-
+class UserStoreAccessManageView(AdminUsersMixin, View):
     template_name = "users/user_store_access_manage.html"
 
-    def get_target_user(self):
-        """
-        Obtiene el usuario al que vamos a gestionar los accesos.
+    def dispatch(self, request, *args, **kwargs):
+        target = self.target()
+        if (
+            not can_manage_user(request.user, target)
+            or target.role == RoleChoices.OWNER
+        ):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
 
-        El pk viene de la URL, por ejemplo:
+    def form(self, data=None):
+        target = self.target()
+        stores = list(Store.objects.filter(business=self.business()).order_by("name"))
+        return StoreAccessMatrixForm(
+            data, stores=stores, accesses=target.store_accesses.all()
+        ), stores
 
-            /users/5/store-access/
-
-        Pero NO buscamos el usuario directamente con CustomUser.objects.get(pk=5),
-        porque eso permitiría acceder a usuarios de otros negocios si alguien manipula la URL.
-
-        Usamos self.get_queryset(), que viene de BusinessUserQuerysetMixin.
-        Ese queryset ya está filtrado por business, salvo si el usuario actual es superuser.
-
-        Resultado:
-            - Un owner/manager solo puede gestionar usuarios de su propio negocio.
-            - Un superuser puede gestionar todos.
-        """
-        return get_object_or_404(
-            self.get_queryset(),
-            pk=self.kwargs["pk"],
-        )
-
-    def get_access_queryset(self, target_user):
-        """
-        Obtiene los accesos actuales del usuario a tiendas.
-
-        Aquí buscamos registros UserStoreAccess del usuario que estamos editando.
-
-        Ejemplo de resultados:
-            - Tienda Centro: puede vender, puede abrir caja, no puede cerrar caja
-            - Tienda Norte: puede vender, no puede abrir caja, no puede cerrar caja
-
-        Filtramos por:
-            business=target_user.business
-            user=target_user
-
-        Esto evita mezclar accesos de otro negocio.
-
-        select_related("store"):
-            Carga también la tienda relacionada para evitar consultas extra
-            cuando en el template mostremos access.store.name.
-
-        order_by("store__name"):
-            Ordena los accesos por nombre de tienda.
-        """
-        return (
-            UserStoreAccess.objects.filter(
-                business=target_user.business,
-                user=target_user,
-            )
-            .select_related("store")
-            .order_by("store__name")
-        )
-
-    def build_formset(self, target_user, data=None):
-        """
-        Construye el formset de accesos a tiendas.
-
-        ¿Por qué usamos un formset?
-
-        Porque un usuario puede tener varios accesos, uno por cada tienda.
-
-        Ejemplo:
-            Formulario 1 -> Tienda Centro
-            Formulario 2 -> Tienda Norte
-            Formulario 3 -> Tienda Online
-
-        Cada formulario representa un UserStoreAccess.
-
-        data=None:
-            Se usa cuando entramos por GET.
-            Muestra los datos actuales.
-
-        data=request.POST:
-            Se usa cuando enviamos el formulario por POST.
-            Valida y guarda los cambios enviados.
-
-        prefix="store_accesses":
-            Sirve para identificar este formset en el HTML.
-            Es útil si en la misma página hubiera más formularios.
-        """
-        formset = UserStoreAccessFormSet(
-            data=data,
-            queryset=self.get_access_queryset(target_user),
-            prefix="store_accesses",
-        )
-
-        """
-        Aquí limitamos el campo 'store' de cada formulario.
-
-        ¿Por qué?
-
-        Porque no queremos que aparezcan tiendas de otros negocios.
-        Solo deben poder seleccionarse tiendas activas del negocio del usuario.
-
-        Esto también protege contra manipulación del HTML:
-        aunque alguien modifique el formulario desde el navegador,
-        el queryset del campo store solo acepta tiendas válidas.
-        """
-        for form in formset.forms:
-            if "store" in form.fields:
-                form.fields["store"].queryset = Store.objects.filter(
-                    business=target_user.business,
-                    is_active=True,
-                ).order_by("name")
-
-        return formset
-
-    def get(self, request, *args, **kwargs):
-        """
-        Método que se ejecuta cuando entramos a la página.
-
-        Flujo:
-            1. Busca el usuario que vamos a gestionar.
-            2. Construye el formset con sus accesos actuales.
-            3. Renderiza la plantilla.
-
-        En la plantilla tendremos:
-            target_user -> usuario gestionado
-            formset -> formularios de accesos a tiendas
-        """
-        target_user = self.get_target_user()
-        formset = self.build_formset(target_user)
-
+    def get(self, request, pk):
+        form, stores = self.form()
         return render(
             request,
             self.template_name,
-            {
-                "target_user": target_user,
-                "formset": formset,
-            },
+            {"matrix": form, "stores": stores, "target_user": self.target()},
         )
 
-    def post(self, request, *args, **kwargs):
-        """
-        Método que se ejecuta cuando enviamos el formulario.
-
-        Flujo:
-            1. Busca el usuario que vamos a gestionar.
-            2. Construye el formset con los datos enviados por POST.
-            3. Valida el formset.
-            4. Si es válido:
-                - Guarda accesos nuevos o modificados.
-                - Borra accesos marcados para eliminar.
-                - Redirige al detalle del usuario.
-            5. Si no es válido:
-                - Vuelve a mostrar la plantilla con errores.
-        """
-        target_user = self.get_target_user()
-        formset = self.build_formset(target_user, data=request.POST)
-
-        if formset.is_valid():
-            """
-            save(commit=False) crea los objetos modificados,
-            pero todavía NO los guarda en base de datos.
-
-            ¿Por qué no guardamos directamente?
-
-            Porque antes necesitamos asignar campos protegidos:
-                access.business = target_user.business
-                access.user = target_user
-
-            Estos campos no deberían venir del formulario.
-            Los controlamos nosotros desde backend.
-            """
-            instances = formset.save(commit=False)
-
-            """
-            Si el formset permite borrar registros con can_delete=True,
-            aquí eliminamos los accesos marcados para borrar.
-
-            Ejemplo:
-                Quitar acceso del usuario a Tienda Norte.
-            """
-            for deleted_object in formset.deleted_objects:
-                deleted_object.delete()
-
-            """
-            Guardamos cada acceso nuevo o modificado.
-
-            Forzamos:
-                business = negocio del usuario gestionado
-                user = usuario gestionado
-
-            Así evitamos que alguien pueda manipular el POST
-            para asignar accesos a otro usuario o a otro negocio.
-            """
-            for access in instances:
-                access.business = target_user.business
-                access.user = target_user
-                access.save()
-
-            messages.success(
-                request,
-                "Accesos a tiendas actualizados correctamente.",
+    def post(self, request, pk):
+        form, stores = self.form(request.POST)
+        if form.is_valid():
+            update_user_store_accesses(
+                actor=request.user,
+                target_user=self.target(),
+                accesses=form.normalized_accesses(),
             )
-
-            """
-            Cuando todo se guarda bien, mandamos al detalle del usuario.
-            """
-            return redirect("users:user_detail", pk=target_user.pk)
-
-        """
-        Si el formset no es válido, volvemos a mostrar la página
-        con los errores de validación.
-        """
+            messages.success(request, "Accesos a tiendas actualizados correctamente.")
+            return redirect(
+                reverse("users:user_detail", kwargs={"pk": pk}) + "?tab=stores"
+            )
         return render(
             request,
             self.template_name,
-            {
-                "target_user": target_user,
-                "formset": formset,
-            },
+            {"matrix": form, "stores": stores, "target_user": self.target()},
+            status=422,
         )
