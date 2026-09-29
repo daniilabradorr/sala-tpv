@@ -142,12 +142,7 @@ class UserCreateForm(forms.ModelForm):
 
 
 class UserUpdateForm(forms.ModelForm):
-    """
-    Formulario para editar usuarios del negocio.
-
-    Aquí sí permitimos cambiar el rol y activar/desactivar,
-    porque esta vista será usada por owner/manager.
-    """
+    """Edita datos administrativos; el estado usa el lifecycle explícito."""
 
     class Meta:
         model = CustomUser
@@ -211,9 +206,9 @@ class StoreAccessMatrixForm(forms.Form):
     def __init__(self, *args, stores, accesses=(), **kwargs):
         super().__init__(*args, **kwargs)
         self.stores = list(stores)
-        current = {a.store_id: a for a in accesses}
+        self.current = {a.store_id: a for a in accesses}
         for store in self.stores:
-            access = current.get(store.pk)
+            access = self.current.get(store.pk)
             for suffix, label, default in (
                 ("active", "Acceso", False),
                 ("sell", "Vender", False),
@@ -245,15 +240,23 @@ class StoreAccessMatrixForm(forms.Form):
         ]
 
     def normalized_accesses(self):
-        return {
-            s.pk: {
-                "is_active": self.cleaned_data[f"store_{s.pk}_active"],
-                "can_sell": self.cleaned_data[f"store_{s.pk}_sell"],
-                "can_open_cash": self.cleaned_data[f"store_{s.pk}_open"],
-                "can_close_cash": self.cleaned_data[f"store_{s.pk}_close"],
+        normalized = {}
+        for store in self.stores:
+            active = self.cleaned_data[f"store_{store.pk}_active"]
+            existing = self.current.get(store.pk)
+            normalized[store.pk] = {
+                "is_active": active,
+                "can_sell": self.cleaned_data[f"store_{store.pk}_sell"]
+                if active
+                else getattr(existing, "can_sell", False),
+                "can_open_cash": self.cleaned_data[f"store_{store.pk}_open"]
+                if active
+                else getattr(existing, "can_open_cash", False),
+                "can_close_cash": self.cleaned_data[f"store_{store.pk}_close"]
+                if active
+                else getattr(existing, "can_close_cash", False),
             }
-            for s in self.stores
-        }
+        return normalized
 
     def clean(self):
         cleaned = super().clean()

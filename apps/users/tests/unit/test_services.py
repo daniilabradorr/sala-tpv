@@ -29,6 +29,9 @@ class UserServicesTests(TestCase):
         self.manager = create_user(
             self.business, "manager-services@test.com", role=RoleChoices.MANAGER
         )
+        self.cashier = create_user(
+            self.business, "cashier-services@test.com", role=RoleChoices.CASHIER
+        )
         self.target = create_user(self.business, "target-services@test.com")
         self.foreign = create_user(self.other, "foreign-services@test.com")
 
@@ -77,6 +80,12 @@ class UserServicesTests(TestCase):
         with self.assertRaises(PermissionDenied):
             create_user_with_store_accesses(
                 actor=self.manager, user_data=self.data(RoleChoices.OWNER), accesses={}
+            )
+
+    def test_cashier_cannot_create_user_through_service(self):
+        with self.assertRaises(PermissionDenied):
+            create_user_with_store_accesses(
+                actor=self.cashier, user_data=self.data(), accesses={}
             )
 
     def test_update_is_scoped_and_preserves_email_status_and_access(self):

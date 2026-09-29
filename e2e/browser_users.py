@@ -1,5 +1,6 @@
 """Real Chromium coverage for FE-22 user administration."""
 
+import re
 from contextlib import contextmanager
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
@@ -104,15 +105,19 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 ).to_be_visible()
                 page.keyboard.press("Escape")
                 page.goto(f"{self.live_server_url}{reverse('users:user_list')}")
+                users_table = page.locator(".users-table")
+                cards = page.locator(".user-cards")
                 expect(page.get_by_role("heading", name="Usuarios")).to_be_visible()
-                expect(page.locator(".users-table")).to_be_visible()
-                expect(page.locator(".user-cards")).to_be_hidden()
+                expect(users_table).to_be_visible()
+                expect(cards).to_be_hidden()
                 page.get_by_label("Buscar por nombre o email").fill("Laura")
                 page.get_by_role("button", name="Filtrar").click()
-                expect(page.get_by_text("users-manager@example.com")).to_be_visible()
+                expect(
+                    users_table.get_by_text("users-manager@example.com", exact=True)
+                ).to_be_visible()
                 page.set_viewport_size({"width": 375, "height": 812})
-                expect(page.locator(".users-table")).to_be_hidden()
-                expect(page.locator(".user-cards")).to_be_visible()
+                expect(users_table).to_be_hidden()
+                expect(cards).to_be_visible()
                 self.assertLessEqual(
                     page.evaluate("document.documentElement.scrollWidth"), 375
                 )
@@ -123,14 +128,25 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 page = browser.new_page()
                 self.login(page, self.owner)
                 page.goto(f"{self.live_server_url}{reverse('users:user_create')}")
-                page.get_by_label("Correo electrónico").fill("new-manager@example.com")
-                page.get_by_label("Nombre").fill("Nueva")
-                page.get_by_label("Apellidos").fill("Manager")
-                page.get_by_label("Teléfono").fill("600000025")
-                page.get_by_label("Rol").select_option("manager")
-                page.get_by_label("Contraseña", exact=True).fill(self.password)
-                page.get_by_label("Confirmar contraseña").fill(self.password)
-                page.get_by_role("button", name="Continuar").click()
+                step1 = page.locator('[data-wizard-step="1"]')
+                step2 = page.locator('[data-wizard-step="2"]')
+                expect(step1).to_be_visible()
+                expect(step2).to_be_hidden()
+                step1.get_by_label("Correo electrónico").fill("new-manager@example.com")
+                step1.get_by_label("Nombre").fill("Nueva")
+                step1.get_by_label("Apellidos").fill("Manager")
+                step1.get_by_label("Teléfono").fill("600000025")
+                step1.get_by_label("Rol").select_option("manager")
+                step1.get_by_label(re.compile(r"^Contraseña")).fill(self.password)
+                step1.get_by_label(re.compile(r"^Confirmar contraseña")).fill(
+                    self.password
+                )
+                step1.get_by_role("button", name="Continuar").click()
+                expect(step1).to_be_hidden()
+                expect(step2).to_be_visible()
+                step2.get_by_role("button", name="Volver").click()
+                expect(step1).to_be_visible()
+                step1.get_by_role("button", name="Continuar").click()
                 centre = page.locator("fieldset", has_text="Centro")
                 centre.get_by_label("Acceso").check()
                 centre.get_by_label("Vender").check()
@@ -147,6 +163,17 @@ class BrowserUsersTests(StaticLiveServerTestCase):
         created = CustomUser.objects.get(email="new-manager@example.com")
         self.assertTrue(created.check_password(self.password))
         self.assertEqual(created.store_accesses.filter(is_active=True).count(), 2)
+
+    def test_owner_role_uses_global_access_instead_of_matrix(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(f"{self.live_server_url}{reverse('users:user_create')}")
+                page.get_by_label("Rol").select_option("owner")
+                page.get_by_role("button", name="Continuar").click()
+                expect(page.locator("[data-owner-global]")).to_be_visible()
+                expect(page.locator("[data-access-matrix]")).to_be_hidden()
 
     def test_manager_owner_read_only_and_cashier_denied(self):
         with sync_playwright() as p:

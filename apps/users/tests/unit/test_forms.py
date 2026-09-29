@@ -317,6 +317,41 @@ class UserAdministrationFormTests(TestCase):
             },
         )
 
+    def test_matrix_access_off_preserves_existing_capabilities(self):
+        access = create_store_access(
+            business=self.business,
+            user=self.user,
+            store=self.store,
+            is_active=True,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=False,
+        )
+        form = StoreAccessMatrixForm({}, stores=[self.store], accesses=[access])
+        self.assertTrue(form.is_valid())
+        self.assertEqual(
+            form.normalized_accesses()[self.store.pk],
+            {
+                "is_active": False,
+                "can_sell": True,
+                "can_open_cash": True,
+                "can_close_cash": False,
+            },
+        )
+
+    def test_matrix_new_access_off_uses_false_capability_defaults(self):
+        form = StoreAccessMatrixForm({}, stores=[self.store])
+        self.assertTrue(form.is_valid())
+        self.assertEqual(
+            form.normalized_accesses()[self.store.pk],
+            {
+                "is_active": False,
+                "can_sell": False,
+                "can_open_cash": False,
+                "can_close_cash": False,
+            },
+        )
+
     def test_matrix_rejects_arbitrary_store_key(self):
         form = StoreAccessMatrixForm(
             {f"store_{self.foreign_store.pk}_active": "on"}, stores=[self.store]

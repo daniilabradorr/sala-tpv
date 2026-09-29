@@ -356,6 +356,18 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 filters.get_by_label("Buscar", exact=True).fill("Actividad paginada")
                 filters.get_by_role("button", name="Aplicar filtros").click()
                 expect(
+                    page.get_by_role("link", name="Eliminar filtro Ventas")
+                ).to_be_visible()
+                expect(
+                    page.get_by_role(
+                        "link", name=re.compile(r"Eliminar filtro .*Actividad paginada")
+                    )
+                ).to_be_visible()
+                expect(page).to_have_url(re.compile(r"[?&]module=sales(?:&|$)"))
+                expect(page).to_have_url(
+                    re.compile(r"[?&]q=Actividad(?:\+|%20)paginada")
+                )
+                expect(
                     page.locator(".activity-item").filter(has_text="Actividad paginada")
                 ).to_have_count(25)
                 pagination = page.get_by_role(

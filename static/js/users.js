@@ -14,7 +14,7 @@
     const show = (number) => wizard.dataset.step = String(number);
     wizard.querySelector("[data-wizard-next]")?.addEventListener("click", () => show(2));
     wizard.querySelector("[data-wizard-back]")?.addEventListener("click", () => show(1));
-    show(wizard.querySelector("[aria-invalid=true]") ? 1 : 1);
+    show(wizard.querySelector("[data-matrix-errors]") ? 2 : 1);
     role?.addEventListener("change", updateRolePresentation);
     updateRolePresentation();
   }
@@ -23,6 +23,7 @@
     const operational = row.querySelector("[data-operational-permissions]");
     const update = () => {
       operational?.setAttribute("aria-disabled", String(!access.checked));
+      operational?.querySelectorAll("input").forEach((input) => { input.disabled = !access.checked; });
       operational?.classList.toggle("is-disabled", !access.checked);
     };
     access?.addEventListener("change", update); update();

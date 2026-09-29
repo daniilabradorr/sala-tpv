@@ -2,12 +2,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
 from apps.stores.models import Store
-from apps.users.helpers import can_manage_user, is_manager
+from apps.users.helpers import can_manage_user, can_manage_users, is_manager
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
 
 def _assert_actor(actor, target=None, role=None):
-    if not actor.business_id:
+    if not actor.business_id or not can_manage_users(actor):
         raise PermissionDenied("Se necesita un negocio para administrar usuarios.")
     if target is not None and (
         target.business_id != actor.business_id or not can_manage_user(actor, target)
@@ -15,6 +15,17 @@ def _assert_actor(actor, target=None, role=None):
         raise PermissionDenied("No tienes permiso para gestionar este usuario.")
     if is_manager(actor) and role == RoleChoices.OWNER:
         raise PermissionDenied("Un manager no puede gestionar propietarios.")
+
+
+def _locked_target(*, actor, target_user):
+    try:
+        return CustomUser.objects.select_for_update().get(
+            pk=target_user.pk, business_id=actor.business_id
+        )
+    except CustomUser.DoesNotExist as exc:
+        raise PermissionDenied(
+            "No tienes permiso para gestionar este usuario."
+        ) from exc
 
 
 @transaction.atomic
@@ -32,7 +43,8 @@ def create_user_with_store_accesses(*, actor, user_data, accesses):
 
 @transaction.atomic
 def update_user(*, actor, target_user, data):
-    target = CustomUser.objects.select_for_update().get(pk=target_user.pk)
+    _assert_actor(actor)
+    target = _locked_target(actor=actor, target_user=target_user)
     _assert_actor(actor, target, data.get("role"))
     for field in ("first_name", "last_name", "phone", "role"):
         if field in data:
@@ -66,7 +78,8 @@ def _update_accesses(target, accesses):
 
 @transaction.atomic
 def update_user_store_accesses(*, actor, target_user, accesses):
-    target = CustomUser.objects.select_for_update().get(pk=target_user.pk)
+    _assert_actor(actor)
+    target = _locked_target(actor=actor, target_user=target_user)
     _assert_actor(actor, target)
     if target.role != RoleChoices.OWNER:
         _update_accesses(target, accesses)
@@ -75,7 +88,8 @@ def update_user_store_accesses(*, actor, target_user, accesses):
 
 @transaction.atomic
 def deactivate_user(*, actor, target_user):
-    target = CustomUser.objects.select_for_update().get(pk=target_user.pk)
+    _assert_actor(actor)
+    target = _locked_target(actor=actor, target_user=target_user)
     _assert_actor(actor, target)
     if actor.pk == target.pk:
         raise ValidationError("No puedes desactivar tu propio usuario.")
@@ -86,7 +100,8 @@ def deactivate_user(*, actor, target_user):
 
 @transaction.atomic
 def activate_user(*, actor, target_user):
-    target = CustomUser.objects.select_for_update().get(pk=target_user.pk)
+    _assert_actor(actor)
+    target = _locked_target(actor=actor, target_user=target_user)
     _assert_actor(actor, target)
     target.is_active = True
     target.save(update_fields=["is_active", "updated_at"])
