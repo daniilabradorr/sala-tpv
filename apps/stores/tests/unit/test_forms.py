@@ -151,6 +151,11 @@ class StoreUpdateFormTests(TestCase):
         form = StoreUpdateForm(instance=self.store)
 
         self.assertIn("code", form.fields)
+        self.assertEqual(form.fields["code"].label, "Código interno")
+        self.assertIn(
+            "Identificador estable utilizado por Netxodo",
+            form.fields["code"].help_text,
+        )
         self.assertNotIn("business", form.fields)
         self.assertNotIn("is_active", form.fields)
 

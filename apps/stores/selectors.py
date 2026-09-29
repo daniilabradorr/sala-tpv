@@ -5,8 +5,10 @@ Regla:
 - No modificamos estados ni relaciones.
 """
 
+from django.db.models import Q
+
 from apps.stores.models import Store
-from apps.users.models import UserStoreAccess
+from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
 
 def _is_authenticated_active_user(user):
@@ -29,6 +31,10 @@ def get_store_for_business(*, business, store, for_update=False):
     queryset = Store.objects.select_related("business")
     if for_update:
         queryset = queryset.select_for_update()
+    else:
+        # Contact fallback is useful for reads, but BusinessProfile is an
+        # optional relation and must never enter a PostgreSQL FOR UPDATE query.
+        queryset = queryset.select_related("business__profile")
 
     return queryset.filter(
         pk=store.pk,
@@ -55,6 +61,49 @@ def get_stores_for_business(*, business, for_update=False, only_active=None):
         queryset = queryset.select_for_update()
 
     return queryset.order_by("name", "pk")
+
+
+def get_store_admin_list(*, business, query="", status="all"):
+    """Shareable Store-admin search and status filters."""
+    stores = get_stores_for_business(business=business).select_related(
+        "business", "business__profile"
+    )
+    query = (query or "").strip()
+    if query:
+        stores = stores.filter(
+            Q(name__icontains=query)
+            | Q(code__icontains=query)
+            | Q(city__icontains=query)
+        )
+    if status == "active":
+        stores = stores.filter(is_active=True)
+    elif status == "inactive":
+        stores = stores.filter(is_active=False)
+    return stores
+
+
+def get_store_kpis(*, business):
+    stores = get_stores_for_business(business=business)
+    return {
+        "active": stores.filter(is_active=True).count(),
+        "inactive": stores.filter(is_active=False).count(),
+        "default": stores.filter(is_default=True)
+        .values_list("name", flat=True)
+        .first(),
+    }
+
+
+def get_store_team(*, business, store):
+    """Owners are global; other roles require an active StoreAccess."""
+    return (
+        CustomUser.objects.filter(business=business, is_active=True)
+        .filter(
+            Q(role=RoleChoices.OWNER)
+            | Q(store_accesses__store=store, store_accesses__is_active=True)
+        )
+        .distinct()
+        .order_by("role", "email")
+    )
 
 
 def get_next_active_store_for_business(
@@ -115,7 +164,7 @@ def get_stores_available_for_user(*, user, only_active=True):
     if not _is_authenticated_active_user(user):
         return Store.objects.none()
 
-    queryset = Store.objects.select_related("business")
+    queryset = Store.objects.select_related("business", "business__profile")
 
     if user.is_superuser:
         if only_active:

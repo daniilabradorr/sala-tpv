@@ -361,13 +361,13 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 )
                 pagination.get_by_role("link", name="Siguiente").click()
                 expect(page).to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
-                expect(page.locator(".activity-item")).to_have_count(2)
                 pagination = page.get_by_role(
                     "navigation", name="Paginación de actividad"
                 )
                 expect(
                     pagination.get_by_text(re.compile(r"Página 2 de 2"))
                 ).to_be_visible()
+                expect(page.locator(".activity-item")).to_have_count(2)
                 expect(pagination.get_by_role("link", name="Anterior")).to_be_visible()
                 expect(page.locator("#activity-workspace")).to_have_count(1)
                 expect(page.locator("#activity-filters")).to_have_count(1)
@@ -379,7 +379,6 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     "Actividad paginada"
                 )
                 pagination.get_by_role("link", name="Anterior").click()
-                expect(page.locator(".activity-item")).to_have_count(25)
                 expect(page).not_to_have_url(re.compile(r"[?&]page=2(?:&|$)"))
                 pagination = page.get_by_role(
                     "navigation", name="Paginación de actividad"
@@ -387,6 +386,7 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(
                     pagination.get_by_text(re.compile(r"Página 1 de 2"))
                 ).to_be_visible()
+                expect(page.locator(".activity-item")).to_have_count(25)
             finally:
                 browser.close()
 

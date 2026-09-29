@@ -5,6 +5,7 @@ from django.urls import reverse
 from apps.users.helpers import (
     can_manage_business_settings,
     can_manage_users,
+    can_manage_stores,
     can_sell_in_store,
     can_view_reports,
     can_view_activity,
@@ -168,7 +169,7 @@ def build_shell_navigation(request, *, active_store):
                 app_name == "billing",
             )
         )
-    if is_owner_or_manager(user):
+    if can_manage_stores(user):
         items.append(
             _item(
                 "stores",

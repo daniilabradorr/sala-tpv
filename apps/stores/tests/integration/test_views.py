@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 
 from apps.stores.models import Store
+from apps.core.shell import ACTIVE_STORE_SESSION_KEY
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 from apps.users.tests.factories import (
     create_business,
@@ -87,9 +88,97 @@ class StoreViewsIntegrationTests(TestCase):
         response = self.client.get(reverse("stores:store_list"))
 
         self.assertContains(response, "Editar tienda")
+        self.assertContains(response, f'aria-label="Acciones de {self.store.name}"')
         self.assertContains(
             response, reverse("stores:store_update", kwargs={"pk": self.store.pk})
         )
+
+    def test_cashier_does_not_see_store_admin_menu(self):
+        UserStoreAccess.objects.create(
+            business=self.business, user=self.cashier, store=self.store
+        )
+        self.login_as(self.cashier)
+        response = self.client.get(reverse("stores:store_list"))
+        self.assertNotContains(response, f'aria-label="Acciones de {self.store.name}"')
+        self.assertNotContains(response, "Editar tienda")
+
+    def test_default_confirmation_shows_current_and_new_store(self):
+        second_store = create_store(
+            business=self.business, name="Gran Vía", code="GRAN-VIA"
+        )
+        self.login_as(self.owner)
+        response = self.client.get(
+            reverse("stores:store_set_default", kwargs={"pk": second_store.pk})
+        )
+        self.assertContains(response, "Actual")
+        self.assertContains(response, self.store.name)
+        self.assertContains(response, "Nueva")
+        self.assertContains(response, second_store.name)
+        self.assertContains(response, "No cambiará tu tienda activa")
+
+    def test_set_default_does_not_change_active_store_session(self):
+        second_store = create_store(
+            business=self.business, name="Gran Vía", code="GRAN-VIA"
+        )
+        self.login_as(self.owner)
+        session = self.client.session
+        session[ACTIVE_STORE_SESSION_KEY] = self.store.pk
+        session.save()
+        self.client.post(
+            reverse("stores:store_set_default", kwargs={"pk": second_store.pk})
+        )
+        self.assertEqual(self.client.session[ACTIVE_STORE_SESSION_KEY], self.store.pk)
+
+    def test_team_manage_users_cta_is_permission_aware(self):
+        self.login_as(self.owner)
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            {"tab": "team"},
+        )
+        self.assertContains(response, "Gestionar usuarios")
+        self.assertContains(response, reverse("users:user_list"))
+        self.client.logout()
+        UserStoreAccess.objects.create(
+            business=self.business, user=self.cashier, store=self.store
+        )
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            {"tab": "team"},
+        )
+        self.assertNotContains(response, "Gestionar usuarios")
+
+    def test_operation_links_respect_real_permissions(self):
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            can_sell=True,
+            can_open_cash=False,
+        )
+        self.login_as(self.cashier)
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": self.store.pk}),
+            {"tab": "operation"},
+        )
+        self.assertContains(response, "Ir al TPV")
+        self.assertContains(response, "Ir a caja")
+        self.assertContains(response, "Ver stock")
+        self.assertContains(response, "Ver documentos")
+        self.assertNotContains(response, "Ver compras")
+
+        self.client.logout()
+        second_store = create_store(
+            business=self.business, name="Sin acceso", code="SIN-ACCESO"
+        )
+        self.login_as(self.manager)
+        response = self.client.get(
+            reverse("stores:store_detail", kwargs={"pk": second_store.pk}),
+            {"tab": "operation"},
+        )
+        self.assertNotContains(response, "Ir al TPV")
+        self.assertNotContains(response, "Ir a caja")
+        self.assertNotContains(response, "Ver compras")
 
     def test_store_update_rejects_cross_business_and_cashier(self):
         self.login_as(self.owner)
@@ -413,6 +502,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         response = self.client.post(
             reverse("stores:store_delete", kwargs={"pk": self.store.pk}),
+            {"confirmation": "ELIMINAR"},
         )
 
         self.assertRedirects(
@@ -493,7 +583,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_superuser_owner_without_business_can_view_store_detail(self):
+    def test_superuser_owner_without_business_cannot_view_store_detail(self):
         superuser = CustomUser.objects.create_superuser(
             email="admin-owner@stores.com",
             password=self.password,
@@ -505,9 +595,9 @@ class StoreViewsIntegrationTests(TestCase):
             reverse("stores:store_detail", kwargs={"pk": self.store.pk})
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
-    def test_superuser_manager_without_business_can_view_store_detail(self):
+    def test_superuser_manager_without_business_cannot_view_store_detail(self):
         superuser = CustomUser.objects.create_superuser(
             email="admin-manager@stores.com",
             password=self.password,
@@ -519,7 +609,7 @@ class StoreViewsIntegrationTests(TestCase):
             reverse("stores:store_detail", kwargs={"pk": self.store.pk})
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
     def test_cashier_detail_requires_active_store_access(self):
         self.login_as(self.cashier)
@@ -555,7 +645,7 @@ class StoreViewsIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_mutation_endpoints_do_not_accept_get(self):
+    def test_lifecycle_get_only_shows_confirmation_and_does_not_mutate(self):
         self.login_as(self.owner)
 
         for route in (
@@ -567,7 +657,10 @@ class StoreViewsIntegrationTests(TestCase):
                 response = self.client.get(
                     reverse(f"stores:{route}", kwargs={"pk": self.store.pk})
                 )
-                self.assertEqual(response.status_code, 405)
+                self.assertEqual(response.status_code, 200)
+        self.store.refresh_from_db()
+        self.assertTrue(self.store.is_active)
+        self.assertTrue(self.store.is_default)
 
     def test_manager_cannot_modify_store_from_other_business(self):
         self.login_as(self.manager)
