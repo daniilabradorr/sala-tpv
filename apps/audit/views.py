@@ -72,6 +72,7 @@ class ActivityView(ActivityContextMixin, View):
         groups = self._groups(presented)
         context = {
             "form": form,
+            "results_ready": True,
             "page_obj": page,
             "activity_groups": groups,
             "chips": self._chips(cleaned),

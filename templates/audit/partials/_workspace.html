@@ -3,5 +3,5 @@
     <summary class="button button-secondary">Filtros</summary>
     {% include "audit/partials/_filters.html" %}
   </details>
-  {% if page_obj %}{% include "audit/partials/_results.html" %}{% endif %}
+  {% if results_ready %}{% include "audit/partials/_results.html" %}{% endif %}
 </div>

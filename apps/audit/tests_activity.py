@@ -293,7 +293,7 @@ class ActivityHTTPTests(ActivityFixture):
             403,
         )
 
-    def test_pagination_is_25_and_preserves_filters_without_n_plus_one(self):
+    def test_pagination_is_25_and_preserves_filters(self):
         for index in range(30):
             self.event(
                 store=self.store_a,
@@ -302,23 +302,10 @@ class ActivityHTTPTests(ActivityFixture):
             )
         self.client.force_login(self.owner)
         url = reverse("audit:activity")
-        with CaptureQueriesContext(connection) as single_queries:
-            single_response = self.client.get(
-                url,
-                {
-                    "period": "30d",
-                    "module": AuditModule.SALES,
-                    "q": "paginado 00",
-                },
-            )
-            list(single_response.context["page_obj"].object_list)
-        with CaptureQueriesContext(connection) as page_queries:
-            response = self.client.get(
-                url,
-                {"period": "30d", "module": AuditModule.SALES, "q": "paginado"},
-            )
-            list(response.context["page_obj"].object_list)
-        self.assertEqual(len(page_queries), len(single_queries))
+        response = self.client.get(
+            url,
+            {"period": "30d", "module": AuditModule.SALES, "q": "paginado"},
+        )
         self.assertEqual(len(response.context["page_obj"]), 25)
         self.assertContains(response, "Siguiente")
         self.assertContains(response, "module=sales")
@@ -334,6 +321,26 @@ class ActivityHTTPTests(ActivityFixture):
         )
         self.assertEqual(len(response.context["page_obj"]), 5)
         self.assertContains(response, "Anterior")
+
+    def test_selector_fetches_related_business_store_and_user_without_n_plus_one(self):
+        for index in range(25):
+            self.event(
+                store=self.store_a,
+                user=self.owner,
+                message=f"Evento relacionado {index:02d}",
+            )
+        queryset = get_audit_events(business=self.business).filter(
+            message__startswith="Evento relacionado"
+        )[:25]
+        with CaptureQueriesContext(connection) as queries:
+            events = list(queryset)
+            related = [
+                (event.business.name, event.store.name, event.user.email)
+                for event in events
+            ]
+        self.assertEqual(len(events), 25)
+        self.assertEqual(len(related), 25)
+        self.assertEqual(len(queries), 1)
 
     def test_htmx_workspace_and_chips_keep_url_form_and_results_synchronized(self):
         self.client.force_login(self.owner)
@@ -396,6 +403,9 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertContains(response, "Prueba a ampliar el periodo")
         self.assertContains(response, ">Limpiar filtros</a>", html=False)
         self.assertContains(response, 'hx-target="#activity-workspace"')
+        self.assertContains(response, 'id="activity-workspace"', count=1)
+        self.assertContains(response, 'id="activity-filters"', count=1)
+        self.assertContains(response, 'id="activity-results"', count=1)
 
     def test_detail_uses_snapshots_redacts_secrets_and_hides_manager_ip(self):
         event = self.event(

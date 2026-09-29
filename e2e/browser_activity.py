@@ -88,6 +88,11 @@ class BrowserActivityTests(StaticLiveServerTestCase):
             entity=sale,
             old_payload={"total_amount": "10.00", "token": "never-visible"},
             new_payload={"total_amount": "20.00"},
+            metadata={
+                "safe_context": "Metadata Activity E2E",
+                "token": "metadata-never-visible",
+            },
+            ip_address="192.0.2.208",
         )
         supplier = Supplier.objects.create(
             business=result.business, name="Proveedor Activity"
@@ -184,7 +189,10 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(
                     page.locator("#activity-drawer").get_by_text("Ventas", exact=True)
                 ).to_be_visible()
-                expect(page.get_by_text("SALE_COMPLETED", exact=True)).to_be_visible()
+                technical = page.locator("#activity-drawer .activity-technical")
+                expect(
+                    technical.get_by_text("SALE_COMPLETED", exact=True)
+                ).to_be_hidden()
                 expect(page.locator("#activity-drawer time")).to_have_count(1)
                 expect(
                     page.locator("#activity-drawer").get_by_text("Venta", exact=True)
@@ -201,11 +209,23 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     page.locator("#activity-drawer").get_by_text("20,00 €", exact=True)
                 ).to_be_visible()
                 expect(
-                    page.locator("#activity-drawer").get_by_text(
+                    page.locator("#activity-drawer table").get_by_text(
                         "Dato protegido", exact=True
                     )
                 ).to_be_visible()
                 self.assertNotIn("never-visible", page.content())
+                self.assertNotIn("metadata-never-visible", page.content())
+                technical.get_by_text("Información técnica", exact=True).click()
+                expect(
+                    technical.get_by_text("SALE_COMPLETED", exact=True)
+                ).to_be_visible()
+                expect(
+                    technical.get_by_text("Metadata Activity E2E", exact=True)
+                ).to_be_visible()
+                expect(technical.get_by_text("192.0.2.208", exact=True)).to_be_visible()
+                expect(
+                    technical.get_by_text("Dato protegido", exact=True)
+                ).to_be_visible()
                 trigger = sale_item.get_by_role("button", name="Ver detalle")
                 page.get_by_role("button", name="Cerrar detalle").click()
                 expect(trigger).to_be_focused()
@@ -301,10 +321,13 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                 expect(
                     page.get_by_role("heading", name="No encontramos actividad")
                 ).to_be_visible()
+                expect(page.locator("#activity-results")).to_have_count(1)
                 page.get_by_role("link", name="Limpiar filtros").click()
                 expect(page).to_have_url(re.compile(r"/activity/$"))
                 expect(filters.get_by_label("Buscar", exact=True)).to_have_value("")
                 expect(page.locator("#activity-workspace")).to_have_count(1)
+                expect(page.locator("#activity-filters")).to_have_count(1)
+                expect(page.locator("#activity-results")).to_have_count(1)
             finally:
                 browser.close()
 
@@ -380,6 +403,18 @@ class BrowserActivityTests(StaticLiveServerTestCase):
                     f"{self.live_server_url}/activity/{self.global_event_id}/"
                 )
                 self.assertEqual(response.status, 404)
+                response = manager_page.goto(
+                    f"{self.live_server_url}/activity/{self.sale_event_id}/"
+                )
+                self.assertEqual(response.status, 200)
+                manager_technical = manager_page.locator(".activity-technical")
+                manager_technical.get_by_text("Información técnica", exact=True).click()
+                expect(
+                    manager_technical.get_by_text("192.0.2.208", exact=True)
+                ).to_have_count(0)
+                expect(
+                    manager_technical.get_by_text("Metadata Activity E2E", exact=True)
+                ).to_have_count(0)
 
                 cashier_page = browser.new_page()
                 self._login(cashier_page, self.CASHIER_EMAIL)

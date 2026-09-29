@@ -28,7 +28,7 @@ const initializeFilterPanel = (root = document) => {
 initializeFilterPanel();
 mobile.addEventListener("change", () => {
   const panel = document.querySelector(".activity-filter-panel");
-  if (panel && !mobile.matches) panel.open = true;
+  if (panel) panel.open = !mobile.matches;
 });
 document.addEventListener("htmx:afterSwap", (event) =>
   initializeFilterPanel(event.detail.target),
