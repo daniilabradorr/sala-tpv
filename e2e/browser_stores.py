@@ -218,8 +218,19 @@ class BrowserStoresTests(StaticLiveServerTestCase):
                 )
                 store_tabs.get_by_role("link", name="Configuración", exact=True).click()
                 page.get_by_role("link", name="Hacer predeterminada").click()
-                expect(page.get_by_text("Actual")).to_be_visible()
-                expect(page.get_by_text(self.default.name, exact=True)).to_be_visible()
+                default_change = page.locator(".default-change")
+                current_default = default_change.locator("div").filter(
+                    has=default_change.get_by_text("Actual", exact=True)
+                )
+                new_default = default_change.locator("div").filter(
+                    has=default_change.get_by_text("Nueva", exact=True)
+                )
+                expect(
+                    current_default.get_by_text(self.default.name, exact=True)
+                ).to_be_visible()
+                expect(
+                    new_default.get_by_text(self.second.name, exact=True)
+                ).to_be_visible()
                 page.get_by_role("button", name="Hacer predeterminada").click()
                 expect(page.get_by_text("★ Predeterminada", exact=True)).to_be_visible()
                 expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
