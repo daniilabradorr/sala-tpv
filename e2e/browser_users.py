@@ -188,7 +188,13 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                     ),
                     "none",
                 )
-                page.get_by_label("Rol").select_option("manager")
+                step1 = page.locator('[data-wizard-step="1"]')
+                step2 = page.locator('[data-wizard-step="2"]')
+                step2.get_by_role("button", name="Volver").click()
+                expect(step1).to_be_visible()
+                step1.get_by_label("Rol").select_option("manager")
+                step1.get_by_role("button", name="Continuar").click()
+                expect(step2).to_be_visible()
                 expect(page.locator("[data-owner-global]")).to_be_hidden()
                 expect(page.locator("[data-access-matrix]")).to_be_visible()
                 row = page.locator("fieldset", has_text="Centro")
@@ -239,12 +245,14 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 )
                 expect(page.get_by_text("dejará de poder acceder")).to_be_visible()
                 page.get_by_role("button", name="Desactivar usuario").click()
-                expect(page.get_by_text("Inactiva")).to_be_visible()
+                details = page.locator(".details-grid")
+                expect(details.get_by_text("Inactiva", exact=True)).to_be_visible()
                 page.goto(
                     f"{self.live_server_url}{reverse('users:user_activate', kwargs={'pk': self.cashier.pk})}"
                 )
                 page.get_by_role("button", name="Reactivar usuario").click()
-                expect(page.get_by_text("Activa")).to_be_visible()
+                details = page.locator(".details-grid")
+                expect(details.get_by_text("Activa", exact=True)).to_be_visible()
         self.cashier.refresh_from_db()
         self.assertTrue(self.cashier.is_active)
         self.assertTrue(UserStoreAccess.objects.filter(pk=access_id).exists())
