@@ -1,4 +1,6 @@
-.activity-page { display: grid; gap: var(--nx-space-5); min-width: 0; }
+.activity-page, .activity-workspace { display: grid; gap: var(--nx-space-5); min-width: 0; }
+.activity-filter-panel > summary { display: none; }
+.activity-filter-panel > #activity-filters { display: grid; }
 .activity-filters { align-items: end; display: grid; gap: var(--nx-space-3); grid-template-columns: minmax(12rem, 2fr) repeat(6, minmax(8rem, 1fr)) auto; }
 .activity-filters .form-field { margin: 0; min-width: 0; }
 .activity-filters input, .activity-filters select { max-width: 100%; width: 100%; }
@@ -27,8 +29,14 @@
 .activity-drawer section, .activity-technical { border-top: 1px solid var(--nx-border); margin-top: var(--nx-space-5); padding-top: var(--nx-space-4); }
 @media (max-width: 1199px) { .activity-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
+  .activity-filter-panel > summary { display: inline-flex; list-style: none; }
+  .activity-filter-panel > summary::-webkit-details-marker { display: none; }
+  .activity-filter-panel:not([open]) > #activity-filters { display: none; }
+  .activity-filter-panel[open]::before { background: rgb(15 23 42 / 60%); content: ""; inset: 0; position: fixed; z-index: 39; }
+  .activity-filter-panel[open] > #activity-filters { background: var(--nx-surface); border-radius: var(--nx-radius-lg) var(--nx-radius-lg) 0 0; bottom: 0; left: 0; max-height: 90dvh; overflow: auto; padding: var(--nx-space-5); position: fixed; right: 0; z-index: 40; }
   .activity-filters { grid-template-columns: minmax(0, 1fr); }
   .activity-item { grid-template-columns: 1fr; }
   .activity-detail-summary { grid-template-columns: 1fr; }
   .activity-pagination { flex-wrap: wrap; }
+  .activity-drawer { max-width: 100vw; width: 100vw; }
 }

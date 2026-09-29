@@ -1,6 +1,8 @@
 from datetime import timedelta
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -106,6 +108,70 @@ class ActivitySelectorAndFormTests(ActivityFixture):
         )
         self.assertEqual(list(filtered), [own])
 
+    def test_selector_searches_message_entity_and_actor_and_filters_module_event(self):
+        system = self.event(store=self.store_a, user=None, message="Sistema nocturno")
+        actor = self.event(
+            store=self.store_a,
+            user=self.manager,
+            message="Operación normal",
+            entity_type="sales.sale",
+            entity_id="ENTITY-908",
+        )
+        payment = self.event(
+            store=self.store_a,
+            user=self.owner,
+            message="Pago localizado",
+            event_type=AuditEventType.PAYMENT_COMPLETED,
+            module=AuditModule.PAYMENTS,
+        )
+        self.assertEqual(
+            list(get_audit_events(business=self.business, query="nocturno")), [system]
+        )
+        self.assertEqual(
+            list(get_audit_events(business=self.business, query="ENTITY-908")),
+            [actor],
+        )
+        self.assertEqual(
+            list(get_audit_events(business=self.business, query="manager@example")),
+            [actor],
+        )
+        self.assertEqual(
+            list(get_audit_events(business=self.business, user="system")), [system]
+        )
+        self.assertEqual(
+            list(
+                get_audit_events(
+                    business=self.business,
+                    module=AuditModule.PAYMENTS,
+                    event_type=AuditEventType.PAYMENT_COMPLETED,
+                )
+            ),
+            [payment],
+        )
+
+    def test_store_scope_is_authorization_boundary_and_never_crosses_business(self):
+        allowed = self.event(store=self.store_a, message="Permitida")
+        self.event(store=self.store_b, message="No autorizada")
+        log_event(
+            business=self.other_business,
+            store=self.other_store,
+            user=self.other_owner,
+            event_type=AuditEventType.SALE_COMPLETED,
+            module=AuditModule.SALES,
+            message="Otro negocio",
+        )
+        self.assertEqual(
+            list(
+                get_audit_events(
+                    business=self.business,
+                    stores=[self.store_a],
+                    store=self.store_a,
+                )
+            ),
+            [allowed],
+        )
+        self.assertFalse(get_audit_events(business=self.business, stores=[]).exists())
+
     def test_form_rejects_unauthorized_store_user_and_event_pair(self):
         data = {
             "period": "30d",
@@ -164,7 +230,7 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertNotContains(response, "Cambio global")
         response = self.client.get(url, {"period": "30d", "store": self.store_b.pk})
         self.assertEqual(response.status_code, 422)
-        self.assertNotContains(response, "Oculta B")
+        self.assertNotContains(response, "Oculta B", status_code=422)
 
         self.client.force_login(self.cashier)
         self.assertEqual(self.client.get(url).status_code, 403)
@@ -189,6 +255,119 @@ class ActivityHTTPTests(ActivityFixture):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.headers["HX-Retarget"], "#activity-filters")
         self.assertEqual(response.headers["HX-Reswap"], "outerHTML")
+        detail_url = reverse(
+            "audit:activity_detail", kwargs={"pk": self.global_event.pk}
+        )
+        for method in (
+            self.client.post,
+            self.client.put,
+            self.client.patch,
+            self.client.delete,
+        ):
+            self.assertEqual(method(detail_url).status_code, 405)
+
+    def test_manager_cannot_open_unauthorized_or_global_detail_and_cashier_gets_403(
+        self,
+    ):
+        unauthorized = self.event(store=self.store_b, message="Detalle B")
+        self.client.force_login(self.manager)
+        self.assertEqual(
+            self.client.get(
+                reverse("audit:activity_detail", kwargs={"pk": unauthorized.pk})
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("audit:activity_detail", kwargs={"pk": self.global_event.pk})
+            ).status_code,
+            404,
+        )
+        self.client.force_login(self.cashier)
+        self.assertEqual(
+            self.client.get(
+                reverse("audit:activity_detail", kwargs={"pk": unauthorized.pk})
+            ).status_code,
+            403,
+        )
+
+    def test_pagination_is_25_and_preserves_filters_without_n_plus_one(self):
+        for index in range(30):
+            self.event(
+                store=self.store_a,
+                user=self.owner,
+                message=f"Evento paginado {index:02d}",
+            )
+        self.client.force_login(self.owner)
+        url = reverse("audit:activity")
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                url,
+                {"period": "30d", "module": AuditModule.SALES, "q": "paginado"},
+            )
+            list(response.context["page_obj"].object_list)
+        self.assertLessEqual(len(queries), 10)
+        self.assertEqual(len(response.context["page_obj"]), 25)
+        self.assertContains(response, "Siguiente")
+        self.assertContains(response, "module=sales")
+        self.assertContains(response, "q=paginado")
+        response = self.client.get(
+            url,
+            {
+                "period": "30d",
+                "module": AuditModule.SALES,
+                "q": "paginado",
+                "page": 2,
+            },
+        )
+        self.assertEqual(len(response.context["page_obj"]), 5)
+        self.assertContains(response, "Anterior")
+
+    def test_htmx_workspace_and_chips_keep_url_form_and_results_synchronized(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("audit:activity"),
+            {
+                "period": "7d",
+                "store": self.store_a.pk,
+                "user": self.owner.pk,
+                "module": AuditModule.SALES,
+                "event_type": AuditEventType.SALE_COMPLETED,
+                "q": "Visible",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertTemplateUsed(response, "audit/partials/_workspace.html")
+        self.assertContains(response, 'id="activity-filters"', count=1)
+        self.assertContains(response, 'id="activity-results"', count=1)
+        self.assertContains(response, "Venta completada")
+        module_chip = next(
+            chip for chip in response.context["chips"] if chip["label"] == "Ventas"
+        )
+        self.assertNotIn("module=", module_chip["url"])
+        self.assertNotIn("event_type=", module_chip["url"])
+        self.assertIn("period=7d", module_chip["url"])
+        self.assertIn(f"store={self.store_a.pk}", module_chip["url"])
+        self.assertIn(f"user={self.owner.pk}", module_chip["url"])
+        self.assertIn("q=Visible", module_chip["url"])
+
+    def test_snapshot_diff_does_not_read_mutated_source_entity(self):
+        event = self.event(
+            store=self.store_a,
+            user=self.owner,
+            entity=self.store_a,
+            old_payload={"name": "Centro histórico"},
+            new_payload={"name": "Centro auditado"},
+        )
+        self.store_a.name = "Centro actual modificado"
+        self.store_a.save(update_fields=["name"])
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("audit:activity_detail", kwargs={"pk": event.pk})
+        )
+        self.assertContains(response, "Centro histórico")
+        self.assertContains(response, "Centro auditado")
+        self.assertNotContains(response, "Centro actual modificado")
 
     def test_detail_uses_snapshots_redacts_secrets_and_hides_manager_ip(self):
         event = self.event(

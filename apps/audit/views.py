@@ -78,7 +78,7 @@ class ActivityView(ActivityContextMixin, View):
             "pagination_query": self._query_without("page"),
         }
         if request.headers.get("HX-Request") == "true":
-            return render(request, "audit/partials/_results.html", context)
+            return render(request, "audit/partials/_workspace.html", context)
         return render(request, "audit/activity.html", context)
 
     def _groups(self, presented):

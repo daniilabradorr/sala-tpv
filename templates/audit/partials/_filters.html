@@ -1,4 +1,4 @@
-<form id="activity-filters" class="card activity-filters" method="get" action="{% url 'audit:activity' %}" hx-get="{% url 'audit:activity' %}" hx-target="#activity-results" hx-swap="outerHTML" hx-push-url="true" novalidate>
+<form id="activity-filters" class="card activity-filters" method="get" action="{% url 'audit:activity' %}" hx-get="{% url 'audit:activity' %}" hx-target="#activity-workspace" hx-swap="outerHTML" hx-push-url="true" novalidate>
   {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
   {% for field in form %}
     <div class="form-field{% if field.errors %} form-field-error{% endif %}{% if field.name == 'date_from' or field.name == 'date_to' %} activity-custom-date{% endif %}">
