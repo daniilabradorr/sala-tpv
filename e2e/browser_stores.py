@@ -220,17 +220,13 @@ class BrowserStoresTests(StaticLiveServerTestCase):
                 page.get_by_role("link", name="Hacer predeterminada").click()
                 default_change = page.locator(".default-change")
                 current_default = default_change.locator("div").filter(
-                    has=default_change.get_by_text("Actual", exact=True)
+                    has_text="Actual"
                 )
-                new_default = default_change.locator("div").filter(
-                    has=default_change.get_by_text("Nueva", exact=True)
-                )
-                expect(
-                    current_default.get_by_text(self.default.name, exact=True)
-                ).to_be_visible()
-                expect(
-                    new_default.get_by_text(self.second.name, exact=True)
-                ).to_be_visible()
+                new_default = default_change.locator("div").filter(has_text="Nueva")
+                expect(current_default.locator("dt")).to_have_text("Actual")
+                expect(current_default.locator("dd")).to_have_text(self.default.name)
+                expect(new_default.locator("dt")).to_have_text("Nueva")
+                expect(new_default.locator("dd")).to_have_text(self.second.name)
                 page.get_by_role("button", name="Hacer predeterminada").click()
                 expect(page.get_by_text("★ Predeterminada", exact=True)).to_be_visible()
                 expect(page.locator("[data-store-trigger]")).to_contain_text("Gran Vía")
