@@ -73,6 +73,14 @@ class BrowserUsersTests(StaticLiveServerTestCase):
         UserStoreAccess.objects.create(
             business=self.business, user=self.cashier, store=self.centre
         )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.second,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=True,
+        )
 
     @contextmanager
     def browser(self, playwright):
@@ -174,6 +182,66 @@ class BrowserUsersTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Continuar").click()
                 expect(page.locator("[data-owner-global]")).to_be_visible()
                 expect(page.locator("[data-access-matrix]")).to_be_hidden()
+                page.get_by_label("Rol").select_option("manager")
+                expect(page.locator("[data-owner-global]")).to_be_hidden()
+                expect(page.locator("[data-access-matrix]")).to_be_visible()
+                row = page.locator("fieldset", has_text="Centro")
+                expect(row.get_by_label("Acceso")).not_to_be_checked()
+                expect(row.get_by_label("Vender")).to_be_disabled()
+                expect(row.get_by_label("Abrir caja")).to_be_disabled()
+                expect(row.get_by_label("Cerrar caja")).to_be_disabled()
+
+    def test_access_off_disables_controls_and_preserves_capabilities(self):
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_store_access_manage', kwargs={'pk': self.cashier.pk})}"
+                )
+                row = page.locator("fieldset", has_text="Gran Vía")
+                access = row.get_by_label("Acceso")
+                access.uncheck()
+                for label in ("Vender", "Abrir caja", "Cerrar caja"):
+                    expect(row.get_by_label(label)).to_be_disabled()
+                access.check()
+                for label in ("Vender", "Abrir caja", "Cerrar caja"):
+                    expect(row.get_by_label(label)).to_be_enabled()
+                access.uncheck()
+                page.get_by_role("button", name="Guardar permisos").click()
+                expect(page).to_have_url(re.compile(r"[?&]tab=stores$"))
+        saved = UserStoreAccess.objects.get(user=self.cashier, store=self.second)
+        self.assertFalse(saved.is_active)
+        self.assertTrue(saved.can_sell)
+        self.assertTrue(saved.can_open_cash)
+        self.assertTrue(saved.can_close_cash)
+
+    def test_lifecycle_preserves_access_and_self_action_is_absent(self):
+        access_id = self.cashier.store_accesses.get(store=self.centre).pk
+        with sync_playwright() as p:
+            with self.browser(p) as browser:
+                page = browser.new_page()
+                self.login(page, self.owner)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_detail', kwargs={'pk': self.owner.pk})}"
+                )
+                expect(
+                    page.get_by_role("link", name="Desactivar usuario")
+                ).to_have_count(0)
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_deactivate', kwargs={'pk': self.cashier.pk})}"
+                )
+                expect(page.get_by_text("dejará de poder acceder")).to_be_visible()
+                page.get_by_role("button", name="Desactivar usuario").click()
+                expect(page.get_by_text("Inactiva")).to_be_visible()
+                page.goto(
+                    f"{self.live_server_url}{reverse('users:user_activate', kwargs={'pk': self.cashier.pk})}"
+                )
+                page.get_by_role("button", name="Reactivar usuario").click()
+                expect(page.get_by_text("Activa")).to_be_visible()
+        self.cashier.refresh_from_db()
+        self.assertTrue(self.cashier.is_active)
+        self.assertTrue(UserStoreAccess.objects.filter(pk=access_id).exists())
 
     def test_manager_owner_read_only_and_cashier_denied(self):
         with sync_playwright() as p:

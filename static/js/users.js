@@ -3,11 +3,27 @@
   const role = document.querySelector("#id_role");
   const matrix = document.querySelector("[data-access-matrix]");
   const ownerGlobal = document.querySelector("[data-owner-global]");
+  const updateAccessRow = (row) => {
+    const access = row.querySelector("[data-access-toggle] input");
+    const operational = row.querySelector("[data-operational-permissions]");
+    const disabled = !access?.checked;
+    operational?.setAttribute("aria-disabled", String(disabled));
+    operational?.querySelectorAll("input").forEach((input) => { input.disabled = disabled; });
+    operational?.classList.toggle("is-disabled", disabled);
+  };
   const updateRolePresentation = () => {
     const owner = role?.value === "owner";
     if (matrix && wizard) matrix.hidden = owner;
     if (ownerGlobal) ownerGlobal.hidden = !owner;
-    matrix?.querySelectorAll("input").forEach((input) => { input.disabled = owner; });
+    matrix?.querySelectorAll("[data-access-row]").forEach((row) => {
+      const access = row.querySelector("[data-access-toggle] input");
+      if (access) access.disabled = owner;
+      if (owner) {
+        row.querySelectorAll("[data-operational-permissions] input").forEach((input) => { input.disabled = true; });
+      } else {
+        updateAccessRow(row);
+      }
+    });
   };
   if (wizard) {
     wizard.classList.add("is-enhanced");
@@ -20,12 +36,7 @@
   }
   document.querySelectorAll("[data-access-row]").forEach((row) => {
     const access = row.querySelector("[data-access-toggle] input");
-    const operational = row.querySelector("[data-operational-permissions]");
-    const update = () => {
-      operational?.setAttribute("aria-disabled", String(!access.checked));
-      operational?.querySelectorAll("input").forEach((input) => { input.disabled = !access.checked; });
-      operational?.classList.toggle("is-disabled", !access.checked);
-    };
-    access?.addEventListener("change", update); update();
+    access?.addEventListener("change", () => updateAccessRow(row));
+    updateAccessRow(row);
   });
 })();
