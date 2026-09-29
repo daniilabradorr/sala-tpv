@@ -1,12 +1,16 @@
 """Real-browser coverage for FE-21 Stores and CashRegister administration."""
 
+import re
+
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
+from django.urls import reverse
 from playwright.sync_api import expect, sync_playwright
 
-from apps.cash_register.models import CashRegister
+from apps.cash_register.models import CashRegister, CashSession
 from apps.onboarding.services import OnboardingService
 from apps.stores.models import Store
+from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
 
 
 @override_settings(
@@ -39,44 +43,337 @@ class BrowserStoresTests(StaticLiveServerTestCase):
             owner_password=self.password,
             owner_pin="1234",
         )
-        self.owner, self.default = result.owner, result.store
+        self.business, self.owner, self.default = (
+            result.business,
+            result.owner,
+            result.store,
+        )
+        self.default.city = "Salamanca"
+        self.default.save(update_fields=["city", "updated_at"])
         self.second = Store.objects.create(
-            business=result.business, name="Gran Vía", code="GRAN-VIA"
+            business=result.business,
+            name="Gran Vía",
+            code="GRAN-VIA",
+            city="Madrid",
         )
-        Store.objects.create(
-            business=result.business, name="Archivo", code="ARCHIVO", is_active=False
+        self.inactive = Store.objects.create(
+            business=result.business,
+            name="Archivo",
+            code="ARCHIVO",
+            city="Ávila",
+            is_active=False,
         )
-        CashRegister.objects.create(
+        self.register = CashRegister.objects.create(
             business=result.business,
             store=self.second,
             name="Caja principal",
             code="CAJA-01",
         )
+        self.manager = CustomUser.objects.create_user(
+            business=self.business,
+            email="stores-manager.e2e@example.com",
+            password=self.password,
+            role=RoleChoices.MANAGER,
+            first_name="Manager",
+        )
+        self.cashier = CustomUser.objects.create_user(
+            business=self.business,
+            email="stores-cashier.e2e@example.com",
+            password=self.password,
+            role=RoleChoices.CASHIER,
+            first_name="Cashier",
+        )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.manager,
+            store=self.default,
+            can_sell=True,
+            can_open_cash=True,
+            can_close_cash=True,
+        )
+        UserStoreAccess.objects.create(
+            business=self.business,
+            user=self.cashier,
+            store=self.default,
+            can_sell=True,
+        )
 
-    def test_owner_store_workspace_and_responsive_layout(self):
+    def login(self, page, user):
+        page.goto(f"{self.live_server_url}{reverse('users:login')}")
+        page.get_by_label("Correo electrónico").fill(user.email)
+        page.get_by_label("Contraseña").fill(self.password)
+        page.get_by_role("button", name="Iniciar sesión").click()
+        page.wait_for_url(f"{self.live_server_url}/")
+
+    def assert_no_overflow(self, page):
+        self.assertTrue(
+            page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        )
+
+    def test_owner_list_filters_navigation_menu_and_responsive_surfaces(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
-            page.goto(f"{self.live_server_url}/login/")
-            page.get_by_label("Correo electrónico").fill(self.owner.email)
-            page.get_by_label("Contraseña").fill(self.password)
-            page.get_by_role("button", name="Iniciar sesión").click()
-            page.goto(f"{self.live_server_url}/stores/")
-            expect(page.get_by_role("heading", name="Tiendas")).to_be_visible()
-            expect(page.get_by_text("Tiendas activas")).to_be_visible()
-            page.get_by_placeholder("Buscar tienda...").fill("Gran Vía")
-            page.get_by_role("button", name="Filtrar").click()
-            expect(page.get_by_role("link", name="Gran Vía")).to_be_visible()
-            page.get_by_role("link", name="Gran Vía").click()
+            page = browser.new_page(viewport={"width": 1280, "height": 812})
+            self.login(page, self.owner)
             expect(
-                page.get_by_role("navigation", name="Secciones de la tienda")
+                page.locator("#app-sidebar").get_by_role("link", name="Tiendas")
             ).to_be_visible()
-            page.get_by_role("link", name="Operación").click()
-            page.get_by_role("link", name="Gestionar cajas").click()
-            expect(page.get_by_role("heading", name="Cajas")).to_be_visible()
+            page.keyboard.press("Control+k")
+            page.locator("[data-command-input]").fill("tiendas")
+            expect(
+                page.locator("[data-command-dialog]").get_by_role(
+                    "link", name="Tiendas"
+                )
+            ).to_be_visible()
+            page.keyboard.press("Escape")
+            page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
+            expect(page.get_by_text("Tiendas activas")).to_be_visible()
+            expect(page.get_by_text("Inactivas", exact=True)).to_be_visible()
+            expect(page.get_by_text("Predeterminada", exact=True)).to_be_visible()
+            expect(
+                page.locator(".stores-table").get_by_role(
+                    "button", name=f"Acciones de {self.default.name}"
+                )
+            ).to_be_visible()
+            for query, expected in (
+                ("Gran Vía", "Gran Vía"),
+                ("ARCHIVO", "Archivo"),
+                ("Salamanca", "Centro"),
+            ):
+                page.get_by_placeholder("Buscar tienda...").fill(query)
+                page.get_by_role("button", name="Filtrar").click()
+                expect(
+                    page.locator(".stores-table").get_by_role(
+                        "link", name=expected, exact=True
+                    )
+                ).to_be_visible()
+            page.get_by_placeholder("Buscar tienda...").fill("")
+            page.get_by_label("Estado").select_option("inactive")
+            page.get_by_role("button", name="Filtrar").click()
+            expect(
+                page.locator(".stores-table").get_by_role(
+                    "link", name="Archivo", exact=True
+                )
+            ).to_be_visible()
+            expect(page).to_have_url(re.compile(r"[?&]status=inactive(?:&|$)"))
             for width in (375, 767, 768, 1280):
                 page.set_viewport_size({"width": width, "height": 812})
-                assert page.evaluate(
-                    "document.documentElement.scrollWidth <= innerWidth"
+                self.assert_no_overflow(page)
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+            )
+            for width in (375, 767, 768, 1280):
+                page.set_viewport_size({"width": width, "height": 812})
+                expect(
+                    page.get_by_role("navigation", name="Secciones de la tienda")
+                ).to_be_visible()
+                self.assert_no_overflow(page)
+            page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+            )
+            for width in (375, 767, 768, 1280):
+                page.set_viewport_size({"width": width, "height": 812})
+                self.assert_no_overflow(page)
+            browser.close()
+
+    def test_owner_create_and_active_store_remains_separate_from_default(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self.login(page, self.owner)
+            page.goto(f"{self.live_server_url}{reverse('stores:store_create')}")
+            for field in ("business", "code", "is_active", "is_default"):
+                expect(page.locator(f'[name="{field}"]')).to_have_count(0)
+            page.get_by_label("Nombre").fill("Nueva tienda")
+            page.get_by_label("País").fill("ES")
+            page.get_by_role("button", name="Crear tienda").click()
+            created = Store.objects.get(name="Nueva tienda")
+            self.assertEqual(created.business, self.business)
+            self.assertTrue(created.code)
+            self.assertTrue(created.is_active)
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+            )
+            page.get_by_role("button", name="Usar esta tienda").click()
+            self.default.refresh_from_db()
+            self.second.refresh_from_db()
+            self.assertTrue(self.default.is_default)
+            self.assertFalse(self.second.is_default)
+            page.get_by_role("link", name="Configuración").click()
+            page.get_by_role("link", name="Hacer predeterminada").click()
+            expect(page.get_by_text("Actual")).to_be_visible()
+            expect(page.get_by_text(self.default.name, exact=True)).to_be_visible()
+            page.get_by_role("button", name="Hacer predeterminada").click()
+            self.default.refresh_from_db()
+            self.second.refresh_from_db()
+            self.assertFalse(self.default.is_default)
+            self.assertTrue(self.second.is_default)
+            browser.close()
+
+    def test_manager_admin_scope_and_cashier_read_only_scope(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            manager_page = browser.new_page()
+            self.login(manager_page, self.manager)
+            manager_page.goto(f"{self.live_server_url}{reverse('stores:store_list')}")
+            expect(
+                manager_page.locator(".stores-table").get_by_role(
+                    "link", name="Gran Vía", exact=True
                 )
+            ).to_be_visible()
+            manager_page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}?tab=operation"
+            )
+            expect(manager_page.get_by_text("Ir al TPV")).to_have_count(0)
+            manager_page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+            )
+            expect(manager_page.get_by_role("heading", name="Cajas")).to_be_visible()
+
+            cashier_page = browser.new_page()
+            self.login(cashier_page, self.cashier)
+            expect(
+                cashier_page.locator("#app-sidebar").get_by_role("link", name="Tiendas")
+            ).to_have_count(0)
+            cashier_page.keyboard.press("Control+k")
+            cashier_page.locator("[data-command-input]").fill("tiendas")
+            expect(
+                cashier_page.locator("[data-command-dialog]").get_by_role(
+                    "link", name="Tiendas"
+                )
+            ).to_have_count(0)
+            cashier_page.keyboard.press("Escape")
+            cashier_page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.default.pk])}"
+            )
+            for text in (
+                "Nueva tienda",
+                "Editar",
+                "Gestionar cajas",
+                "Gestionar usuarios",
+                "Eliminar tienda",
+            ):
+                expect(cashier_page.get_by_text(text, exact=True)).to_have_count(0)
+            response = cashier_page.goto(
+                f"{self.live_server_url}{reverse('stores:store_detail', args=[self.second.pk])}"
+            )
+            self.assertIn(response.status, (403, 404))
+            response = cashier_page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.default.pk])}"
+            )
+            self.assertEqual(response.status, 403)
+            browser.close()
+
+    def test_store_and_register_open_session_guards_and_register_lifecycle(self):
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.second,
+            cash_register=self.register,
+            opened_by=self.owner,
+        )
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self.login(page, self.owner)
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_deactivate', args=[self.second.pk])}"
+            )
+            page.get_by_role("button", name="Desactivar tienda").click()
+            expect(
+                page.get_by_text(
+                    "No puedes desactivar esta tienda porque tiene una sesión de caja abierta",
+                    exact=False,
+                )
+            ).to_be_visible()
+            self.second.refresh_from_db()
+            session.refresh_from_db()
+            self.assertTrue(self.second.is_active)
+            self.assertEqual(session.status, CashSession.Status.OPEN)
+            page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+            )
+            page.get_by_role("button", name="Desactivar").click()
+            expect(
+                page.get_by_text(
+                    "No puedes desactivar esta caja porque tiene una sesión abierta",
+                    exact=False,
+                )
+            ).to_be_visible()
+            self.register.refresh_from_db()
+            self.assertTrue(self.register.is_active)
+            browser.close()
+
+    def test_cash_register_crud_delete_confirmation_and_tenant_isolation(self):
+        other = OnboardingService.create_business(
+            legal_name="Other Stores E2E SL",
+            trade_name="Other Stores E2E",
+            tax_identifier="B10000022",
+            phone="923000022",
+            email="other-stores@example.com",
+            address_line_1="Other 22",
+            postal_code="37022",
+            city="Salamanca",
+            province="Salamanca",
+            country_code="ES",
+            store_name="Other store",
+            owner_first_name="Other",
+            owner_last_name="Owner",
+            owner_email="other-owner@example.com",
+            owner_phone="600000022",
+            owner_password=self.password,
+            owner_pin="1234",
+        )
+        other_register = CashRegister.objects.create(
+            business=other.business,
+            store=other.store,
+            name="Other register",
+            code="OTHER-01",
+        )
+        clean_store = Store.objects.create(
+            business=self.business, name="Creada por error", code="ERROR"
+        )
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self.login(page, self.owner)
+            page.goto(
+                f"{self.live_server_url}{reverse('cash_register:register_admin', args=[self.second.pk])}"
+            )
+            page.get_by_role("link", name="Nueva caja").click()
+            page.get_by_label("Nombre").fill("Caja secundaria")
+            page.get_by_label("Código").fill("CAJA-02")
+            page.get_by_role("button", name="Guardar caja").click()
+            secondary = CashRegister.objects.get(code="CAJA-02")
+            page.locator(".store-card").filter(has_text="Caja secundaria").get_by_role(
+                "link", name="Editar"
+            ).click()
+            page.get_by_label("Nombre").fill("Caja mostrador")
+            page.get_by_label("Código").fill("CAJA-03")
+            page.get_by_role("button", name="Guardar caja").click()
+            secondary.refresh_from_db()
+            self.assertEqual(secondary.code, "CAJA-03")
+
+            page.goto(
+                f"{self.live_server_url}{reverse('stores:store_delete', args=[clean_store.pk])}"
+            )
+            page.get_by_label("Escribe ELIMINAR para confirmar").fill("INCORRECTO")
+            page.get_by_role("button", name="Eliminar tienda").click()
+            self.assertTrue(Store.objects.filter(pk=clean_store.pk).exists())
+            page.get_by_label("Escribe ELIMINAR para confirmar").fill("ELIMINAR")
+            page.get_by_role("button", name="Eliminar tienda").click()
+            self.assertFalse(Store.objects.filter(pk=clean_store.pk).exists())
+
+            for path in (
+                reverse("stores:store_detail", args=[other.store.pk]),
+                reverse("stores:store_update", args=[other.store.pk]),
+                reverse("cash_register:register_admin", args=[other.store.pk]),
+                reverse(
+                    "cash_register:register_update",
+                    args=[other.store.pk, other_register.pk],
+                ),
+            ):
+                response = page.request.get(f"{self.live_server_url}{path}")
+                self.assertIn(response.status, (403, 404))
+            other_register.refresh_from_db()
+            self.assertTrue(other_register.is_active)
             browser.close()

@@ -87,7 +87,7 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_open_session_racing_store_deactivation_never_leaves_invalid_state(self):
-        self.run_threads(
+        results = self.run_threads(
             self.open_session,
             lambda: deactivate_store(business=self.business, store=self.store),
         )
@@ -95,11 +95,13 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         has_open = CashSession.objects.filter(
             store=self.store, status=CashSession.Status.OPEN
         ).exists()
+        self.assertEqual(results.count(True), 1)
         self.assertFalse(has_open and not self.store.is_active)
+        self.assertEqual((has_open, self.store.is_active), (results[0], results[0]))
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_open_session_racing_register_deactivation_never_leaves_invalid_state(self):
-        self.run_threads(
+        results = self.run_threads(
             self.open_session,
             lambda: deactivate_cash_register(
                 business=self.business,
@@ -111,7 +113,9 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         has_open = CashSession.objects.filter(
             cash_register=self.register, status=CashSession.Status.OPEN
         ).exists()
+        self.assertEqual(results.count(True), 1)
         self.assertFalse(has_open and not self.register.is_active)
+        self.assertEqual((has_open, self.register.is_active), (results[0], results[0]))
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_two_concurrent_movements_do_not_lose_updates(self):

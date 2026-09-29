@@ -96,7 +96,7 @@ class StoreUpdateForm(StoreBaseForm):
         ]
         labels = {
             "name": "Nombre",
-            "code": "Código",
+            "code": "Código interno",
             "address_line_1": "Dirección",
             "address_line_2": "Dirección adicional",
             "postal_code": "Código postal",
@@ -105,4 +105,10 @@ class StoreUpdateForm(StoreBaseForm):
             "country_code": "País",
             "phone_store": "Teléfono",
             "email_store": "Correo electrónico",
+        }
+        help_texts = {
+            "code": (
+                "Identificador estable utilizado por Netxodo. "
+                "Cámbialo únicamente si sabes que es necesario."
+            )
         }

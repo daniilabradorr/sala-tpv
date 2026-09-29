@@ -22,6 +22,7 @@ from apps.core.shell import ACTIVE_STORE_SESSION_KEY, get_shell_stores_for_user
 from apps.stores.forms import StoreCreateForm, StoreUpdateForm
 from apps.stores.models import Store
 from apps.stores.selectors import (
+    get_default_store_for_business,
     get_store_admin_list,
     get_store_kpis,
     get_store_team,
@@ -33,7 +34,14 @@ from apps.stores.services import (
     delete_store,
     set_default_store,
 )
-from apps.users.helpers import can_access_store, can_manage_stores
+from apps.users.helpers import (
+    can_access_store,
+    can_manage_stores,
+    can_manage_users,
+    can_open_cash_register,
+    can_sell_in_store,
+    is_owner_or_manager,
+)
 from apps.users.mixins import (
     BusinessRequiredMixin,
     ManagerOrOwnerRequiredMixin,
@@ -166,34 +174,51 @@ class StoreDetailView(StoreAccessRequiredMixin, DetailView):
             tab = "summary"
         store = self.object
         business = _business(self.request.user)
-        context.update(
-            tab=tab,
-            can_manage_stores=can_manage_stores(self.request.user),
-            can_operate=store.is_active and can_access_store(self.request.user, store),
-            cash_registers=get_cash_registers_for_store(business=business, store=store),
-            team=get_store_team(business=business, store=store),
-            active_store_id=self.request.session.get(ACTIVE_STORE_SESSION_KEY),
-            operation_links=[
+        has_store_access = store.is_active and can_access_store(
+            self.request.user, store
+        )
+        operation_links = []
+        if can_sell_in_store(self.request.user, store):
+            operation_links.append(
                 (
                     "Ventas",
                     "Ir al TPV",
                     reverse("sales:sale_list", kwargs={"store_id": store.pk}),
-                ),
-                (
-                    "Caja",
-                    "Ir a caja",
-                    reverse(
-                        "cash_register:register_list", kwargs={"store_id": store.pk}
+                )
+            )
+        if has_store_access:
+            operation_links.extend(
+                [
+                    (
+                        "Caja",
+                        "Ir a caja",
+                        reverse(
+                            "cash_register:register_list",
+                            kwargs={"store_id": store.pk},
+                        ),
                     ),
-                ),
-                ("Inventario", "Ver stock", reverse("inventory:dashboard")),
-                ("Compras", "Ver compras", reverse("purchases:purchase_list")),
-                (
-                    "Facturación",
-                    "Ver documentos",
-                    reverse("billing:document_list", kwargs={"store_id": store.pk}),
-                ),
-            ],
+                    ("Inventario", "Ver stock", reverse("inventory:dashboard")),
+                    (
+                        "Facturación",
+                        "Ver documentos",
+                        reverse("billing:document_list", kwargs={"store_id": store.pk}),
+                    ),
+                ]
+            )
+        if has_store_access and is_owner_or_manager(self.request.user):
+            operation_links.append(
+                ("Compras", "Ver compras", reverse("purchases:purchase_list"))
+            )
+        context.update(
+            tab=tab,
+            can_manage_stores=can_manage_stores(self.request.user),
+            can_operate=has_store_access,
+            can_manage_users=can_manage_users(self.request.user),
+            can_open_cash=can_open_cash_register(self.request.user, store),
+            cash_registers=get_cash_registers_for_store(business=business, store=store),
+            team=get_store_team(business=business, store=store),
+            active_store_id=self.request.session.get(ACTIVE_STORE_SESSION_KEY),
+            operation_links=operation_links,
         )
         return context
 
@@ -248,10 +273,15 @@ class StoreLifecycleView(ManagerOrOwnerRequiredMixin, View):
         return get_object_or_404(Store, pk=pk, business=_business(request.user))
 
     def get(self, request, pk):
+        context = {"store": self.store(request, pk), "action": self.action}
+        if self.action == "default":
+            context["current_default_store"] = get_default_store_for_business(
+                business=_business(request.user)
+            )
         return render(
             request,
             self.template_name,
-            {"store": self.store(request, pk), "action": self.action},
+            context,
         )
 
 
