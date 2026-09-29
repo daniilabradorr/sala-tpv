@@ -185,6 +185,17 @@ class POSSettingsViewTests(TestCase):
         self.assertFalse(self.settings.allow_manual_discounts)
         self.assertEqual(self.settings.max_manual_discount_percent, 0)
 
+    def test_disabled_discounts_accept_post_without_disabled_maximum_input(self):
+        data = self.valid_data()
+        data.pop("allow_manual_discounts")
+        data.pop("max_manual_discount_percent")
+        self.client.force_login(self.owner)
+        response = self.client.post(self.url, data)
+        self.assertRedirects(response, self.url)
+        self.settings.refresh_from_db()
+        self.assertFalse(self.settings.allow_manual_discounts)
+        self.assertEqual(self.settings.max_manual_discount_percent, 0)
+
     def test_discount_range_is_validated(self):
         self.client.force_login(self.owner)
         for value in ("-0.01", "100.01"):

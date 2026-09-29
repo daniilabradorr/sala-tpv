@@ -17,6 +17,7 @@
         <a class="button" href="{% url 'business_config:profile' %}" aria-current="page">Negocio</a>
         <a class="button button-secondary" href="{% url 'business_config:pos' %}">TPV</a>
     </nav>
+    {{ persisted_config|json_script:"configuration-persisted" }}
 
     <form method="post" enctype="multipart/form-data" class="stacked-form business-profile-form" novalidate>
         {% csrf_token %}
@@ -35,7 +36,7 @@
         </fieldset>
 
         <fieldset class="form-section">
-            <legend>Datos comerciales</legend>
+            <legend>Identidad comercial</legend>
             <div class="form-grid">
                 {% include "business_config/_field.html" with field=form.trade_name %}
                 {% include "business_config/_field.html" with field=form.brand_name %}
@@ -81,6 +82,7 @@
 
         <div class="actions"><button type="submit" class="button">Guardar cambios</button></div>
     </form>
+    {% include "business_config/_change_dialogs.html" %}
 </section>
 {% endblock %}
 {% block extra_js %}<script type="module" src="{% static 'js/pages/configuration.js' %}"></script>{% endblock %}

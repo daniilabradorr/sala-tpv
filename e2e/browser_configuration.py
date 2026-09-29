@@ -7,6 +7,8 @@ from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
 from apps.onboarding.services import OnboardingService
+from apps.payments.models import PaymentMethod
+from apps.users.models import CustomUser, RoleChoices
 
 
 @override_settings(
@@ -38,15 +40,31 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
             owner_pin="1234",
         )
         self.owner = result.owner
+        self.business = result.business
+        self.manager = CustomUser.objects.create_user(
+            business=self.business,
+            email="config-manager@example.com",
+            password="Configuration-Password-123!",
+            role=RoleChoices.MANAGER,
+        )
+        self.cashier = CustomUser.objects.create_user(
+            business=self.business,
+            email="config-cashier@example.com",
+            password="Configuration-Password-123!",
+            role=RoleChoices.CASHIER,
+        )
+
+    def login(self, page, email):
+        page.goto(f"{self.live_server_url}/users/login/")
+        page.get_by_label("Correo electrónico").fill(email)
+        page.get_by_label("Contraseña").fill("Configuration-Password-123!")
+        page.get_by_role("button", name="Iniciar sesión").click()
 
     def test_owner_configures_mvp_payment_method_without_horizontal_overflow(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 375, "height": 812})
-            page.goto(f"{self.live_server_url}/users/login/")
-            page.get_by_label("Correo electrónico").fill(self.owner.email)
-            page.get_by_label("Contraseña").fill("Configuration-Password-123!")
-            page.get_by_role("button", name="Iniciar sesión").click()
+            self.login(page, self.owner.email)
             page.goto(f"{self.live_server_url}/config/pos/")
             expect(
                 page.get_by_role("heading", name="Configuración", exact=True)
@@ -66,4 +84,88 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
                 page.get_by_role("heading", name="Configurar Tarjeta")
             ).to_be_visible()
             expect(page.get_by_text("card", exact=True)).to_be_visible()
+            browser.close()
+
+    def test_owner_reviews_and_persists_business_and_pos_changes(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            self.login(page, self.owner.email)
+            page.goto(f"{self.live_server_url}/config/profile/")
+            for section in (
+                "Datos legales",
+                "Identidad comercial",
+                "Contacto",
+                "Dirección",
+                "Ticket",
+                "Política de devoluciones",
+            ):
+                expect(page.get_by_text(section, exact=True)).to_be_visible()
+            page.get_by_label("NIF/CIF").fill("B10000999")
+            page.get_by_role("button", name="Guardar cambios").click()
+            expect(page.get_by_text("Antes:", exact=True)).to_be_visible()
+            expect(page.get_by_text("Después:", exact=True)).to_be_visible()
+            page.get_by_role("button", name="Seguir editando").click()
+            self.owner.business.profile.refresh_from_db()
+            self.assertEqual(self.owner.business.profile.tax_identifier, "B10000023")
+            page.get_by_role("button", name="Guardar cambios").click()
+            page.get_by_role("button", name="Confirmar y guardar").click()
+            expect(
+                page.get_by_text("Datos de empresa actualizados correctamente.")
+            ).to_be_visible()
+            page.goto(f"{self.live_server_url}/config/pos/")
+            expect(
+                page.get_by_role("heading", name="Configuración actual")
+            ).to_be_visible()
+            page.get_by_label("Permitir descuentos manuales").uncheck()
+            expect(page.locator("[data-pending-count]")).to_contain_text("cambio")
+            page.get_by_role("button", name="Guardar cambios").click()
+            page.get_by_role("button", name="Confirmar y guardar").click()
+            browser.close()
+        self.owner.business.profile.refresh_from_db()
+        self.assertEqual(self.owner.business.profile.tax_identifier, "B10000999")
+        self.owner.business.pos_settings.refresh_from_db()
+        self.assertFalse(self.owner.business.pos_settings.allow_manual_discounts)
+        self.assertEqual(
+            self.owner.business.pos_settings.max_manual_discount_percent, 0
+        )
+
+    def test_manager_and_cashier_have_no_configuration_access(self):
+        method = PaymentMethod.objects.get(business=self.business, code="card")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            for actor in (self.manager, self.cashier):
+                context = browser.new_context()
+                page = context.new_page()
+                self.login(page, actor.email)
+                expect(page.locator('a[href="/config/profile/"]')).to_have_count(0)
+                page.get_by_role("button", name="Buscar módulo o acción").click()
+                expect(
+                    page.locator('[data-command-dialog] a[href="/config/profile/"]')
+                ).to_have_count(0)
+                for path in (
+                    "/config/profile/",
+                    "/config/pos/",
+                    f"/config/payments/{method.pk}/",
+                ):
+                    response = page.goto(f"{self.live_server_url}{path}")
+                    self.assertEqual(response.status, 403)
+                context.close()
+            browser.close()
+
+    def test_configuration_has_no_overflow_at_product_breakpoints(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            for width, height in ((375, 812), (767, 900), (768, 900), (1280, 900)):
+                context = browser.new_context(
+                    viewport={"width": width, "height": height}
+                )
+                page = context.new_page()
+                self.login(page, self.owner.email)
+                for path in ("/config/profile/", "/config/pos/"):
+                    page.goto(f"{self.live_server_url}{path}")
+                    self.assertLessEqual(
+                        page.evaluate("document.documentElement.scrollWidth"), width
+                    )
+                context.close()
             browser.close()

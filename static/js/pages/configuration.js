@@ -1,9 +1,18 @@
+import { openModal } from "../core/modal.js";
+
 const form = document.querySelector(".business-profile-form, form.stacked-form");
 
 if (form) {
+  const persistedNode = document.querySelector("#configuration-persisted");
+  const persisted = persistedNode ? JSON.parse(persistedNode.textContent) : {};
+  const reviewDialog = document.querySelector("#configuration-review-dialog");
+  const discardDialog = document.querySelector("#configuration-discard-dialog");
+  const pendingCount = document.querySelector("[data-pending-count]");
+  const reviewButton = document.querySelector("[data-review-changes]");
   let dirty = false;
-  let submitting = false;
-  const initial = new FormData(form);
+  let confirmed = false;
+  let discardTarget = null;
+
   const tax = form.elements.tax_identifier;
   const stock = form.elements.enable_stock_control;
   const sellWithoutStock = form.elements.allow_sale_without_stock;
@@ -11,23 +20,87 @@ if (form) {
   const maximumDiscount = form.elements.max_manual_discount_percent;
   const receipt = form.elements.receipt_footer;
   const receiptPreview = document.querySelector("[data-receipt-preview]");
+  const asBoolean = (value) => value === "True" || value === true;
+  const display = (value) => value === true ? "Sí" : value === false ? "No" : String(value || "—");
+
+  const currentValue = (control) => {
+    if (control.type === "checkbox") return control.checked;
+    return control.value;
+  };
+  const originalValue = (control) => control.type === "checkbox"
+    ? asBoolean(persisted[control.name])
+    : String(persisted[control.name] ?? "");
+  const labelFor = (control) => form.querySelector(`label[for="${control.id}"]`)?.textContent.trim() || control.name;
+  const changes = () => {
+    const items = Array.from(form.elements)
+      .filter((control) => control.name && Object.hasOwn(persisted, control.name) && currentValue(control) !== originalValue(control))
+      .map((control) => ({ name: control.name, label: labelFor(control), before: originalValue(control), after: currentValue(control) }));
+    if (discounts && maximumDiscount && !discounts.checked && String(persisted.max_manual_discount_percent) !== "0.00") {
+      const existingMaximum = items.findIndex(({ name }) => name === maximumDiscount.name);
+      if (existingMaximum >= 0) items.splice(existingMaximum, 1);
+      items.push({ name: maximumDiscount.name, label: labelFor(maximumDiscount), before: persisted.max_manual_discount_percent, after: "0.00" });
+    }
+    return items;
+  };
 
   const updateDependencies = () => {
     if (sellWithoutStock && stock) sellWithoutStock.disabled = !stock.checked;
     if (maximumDiscount && discounts) maximumDiscount.disabled = !discounts.checked;
   };
-  form.addEventListener("input", () => { dirty = true; updateDependencies(); });
+  const renderChanges = () => {
+    const items = changes();
+    dirty = items.length > 0;
+    if (pendingCount) pendingCount.textContent = `${items.length} ${items.length === 1 ? "cambio pendiente" : "cambios pendientes"}`;
+    if (reviewButton) reviewButton.disabled = !items.length;
+    const list = reviewDialog?.querySelector("[data-change-list]");
+    if (list) {
+      list.replaceChildren(...items.map(({ label, before, after }) => {
+        const row = document.createElement("dl");
+        row.className = "change-review-row";
+        const wrapper = document.createElement("div");
+        const term = document.createElement("dt");
+        term.textContent = label;
+        const value = (prefix, content) => {
+          const detail = document.createElement("dd");
+          const strong = document.createElement("strong");
+          strong.textContent = prefix;
+          detail.append(strong, ` ${display(content)}`);
+          return detail;
+        };
+        wrapper.append(term, value("Antes:", before), value("Después:", after));
+        row.append(wrapper);
+        return row;
+      }));
+    }
+    return items;
+  };
+
+  form.addEventListener("input", () => { updateDependencies(); renderChanges(); });
   receipt?.addEventListener("input", () => { receiptPreview.textContent = receipt.value || "Tu mensaje aparecerá aquí."; });
+  reviewButton?.addEventListener("click", () => { renderChanges(); openModal(reviewDialog, reviewButton); });
   form.addEventListener("submit", (event) => {
-    if (submitting) { event.preventDefault(); return; }
-    const sensitive = [];
-    if (tax && tax.value !== initial.get("tax_identifier")) sensitive.push(`NIF / CIF\nAntes: ${initial.get("tax_identifier")}\nDespués: ${tax.value}`);
-    if (stock && !stock.checked && initial.has("enable_stock_control")) sensitive.push("Desactivar el control de stock hará que las ventas no validen inventario.");
-    const cash = form.elements.require_open_cash_register;
-    if (cash && !cash.checked && initial.has("require_open_cash_register")) sensitive.push("Las ventas dejarán de exigir una caja abierta.");
-    if (sensitive.length && !window.confirm(`Revisa los cambios:\n\n${sensitive.join("\n\n")}`)) { event.preventDefault(); return; }
-    submitting = true; dirty = false;
+    if (confirmed) { dirty = false; return; }
+    if (!renderChanges().length) return;
+    event.preventDefault();
+    openModal(reviewDialog, event.submitter);
   });
-  window.addEventListener("beforeunload", (event) => { if (dirty && !submitting) event.preventDefault(); });
+  document.querySelector("[data-confirm-changes]")?.addEventListener("click", () => {
+    confirmed = true;
+    dirty = false;
+    form.requestSubmit();
+  });
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href]");
+    if (!link || !dirty || link.target === "_blank") return;
+    event.preventDefault();
+    discardTarget = link.href;
+    openModal(discardDialog, link);
+  });
+  document.querySelector("[data-discard-changes]")?.addEventListener("click", () => {
+    dirty = false;
+    if (discardTarget) window.location.assign(discardTarget);
+  });
+  window.addEventListener("beforeunload", (event) => { if (dirty && !confirmed) event.preventDefault(); });
   updateDependencies();
+  renderChanges();
 }

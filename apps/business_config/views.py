@@ -34,12 +34,23 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
         return get_object_or_404(BusinessProfile, business=self.get_business())
 
     def get(self, request):
-        form = BusinessProfileForm(instance=self.get_profile())
-        return render(request, self.template_name, {"form": form})
+        profile = self.get_profile()
+        form = BusinessProfileForm(instance=profile)
+        return render(request, self.template_name, self.get_context(form, profile))
+
+    def get_context(self, form, profile):
+        return {
+            "form": form,
+            "persisted_config": {
+                field: str(getattr(profile, field) or "")
+                for field in BusinessProfileForm.Meta.fields
+            },
+        }
 
     def post(self, request):
         business = self.get_business()
         profile = get_object_or_404(BusinessProfile, business=business)
+        persisted_profile = BusinessProfile.objects.get(pk=profile.pk)
         form = BusinessProfileForm(
             data=request.POST, files=request.FILES, instance=profile
         )
@@ -58,7 +69,9 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
                     remove_business_logo(business=business, profile=profile)
             messages.success(request, "Datos de empresa actualizados correctamente.")
             return redirect("business_config:profile")
-        return render(request, self.template_name, {"form": form})
+        return render(
+            request, self.template_name, self.get_context(form, persisted_profile)
+        )
 
 
 class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
@@ -76,12 +89,18 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
         return get_object_or_404(POSSettings, business=self.get_business())
 
     def get(self, request):
-        form = POSSettingsForm(instance=self.get_settings())
-        return render(request, self.template_name, self.get_context(form))
+        settings = self.get_settings()
+        form = POSSettingsForm(instance=settings)
+        return render(request, self.template_name, self.get_context(form, settings))
 
-    def get_context(self, form):
+    def get_context(self, form, persisted_settings):
         return {
             "form": form,
+            "current_settings": persisted_settings,
+            "persisted_config": {
+                field: str(getattr(persisted_settings, field))
+                for field in POSSettingsForm.Meta.fields
+            },
             "payment_methods": get_mvp_payment_methods_for_business(
                 business=self.get_business()
             ),
@@ -90,6 +109,7 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
     def post(self, request):
         business = self.get_business()
         settings = get_object_or_404(POSSettings, business=business)
+        persisted_settings = POSSettings.objects.get(pk=settings.pk)
         form = POSSettingsForm(data=request.POST, instance=settings)
         if form.is_valid():
             update_pos_settings(
@@ -99,7 +119,9 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
                 request, "Configuración del TPV actualizada correctamente."
             )
             return redirect("business_config:pos")
-        return render(request, self.template_name, self.get_context(form))
+        return render(
+            request, self.template_name, self.get_context(form, persisted_settings)
+        )
 
 
 class PaymentMethodUpdateView(CanManageBusinessSettingsMixin, View):

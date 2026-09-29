@@ -71,6 +71,20 @@ class PaymentMethodAdminForm(forms.ModelForm):
         model = PaymentMethod
         fields = ("name", "is_active", "allows_refund")
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        errors = self.errors if self.is_bound else {}
+        for name, field in self.fields.items():
+            control_id = field.widget.attrs.get("id", f"id_{name}")
+            described_by = []
+            if field.help_text:
+                described_by.append(f"{control_id}-help")
+            if name in errors:
+                described_by.append(f"{control_id}-errors")
+                field.widget.attrs["aria-invalid"] = "true"
+            if described_by:
+                field.widget.attrs["aria-describedby"] = " ".join(described_by)
+
 
 class SaleOnAccountForm(forms.Form):
     """Confirmación explícita; el importe se calcula bajo lock en el Service."""

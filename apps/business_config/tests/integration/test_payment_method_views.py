@@ -81,6 +81,28 @@ class PaymentMethodConfigurationTests(TestCase):
         self.assertFalse(self.card.affects_cash_register)
         self.assertEqual(self.card.business, self.business)
 
+    def test_forged_cash_flag_cannot_break_cash_invariant(self):
+        cash = next(method for method in self.methods if method.code == "cash")
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("business_config:payment_method", args=[cash.pk]),
+            {
+                "name": "Efectivo caja",
+                "is_active": "on",
+                "allows_refund": "on",
+                "code": "card",
+                "affects_cash_register": "",
+            },
+        )
+        self.assertRedirects(response, reverse("business_config:pos"))
+        cash.refresh_from_db()
+        self.assertEqual(cash.code, "cash")
+        self.assertTrue(cash.affects_cash_register)
+        for method in self.methods:
+            method.refresh_from_db()
+            if method.code != "cash":
+                self.assertFalse(method.affects_cash_register)
+
     def test_cross_tenant_pk_is_not_disclosed(self):
         other = Business.objects.create(name="Otra", slug="otra-method")
         foreign = PaymentMethod.objects.create(

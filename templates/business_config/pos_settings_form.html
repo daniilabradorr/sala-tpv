@@ -17,8 +17,9 @@
         <a class="button button-secondary" href="{% url 'business_config:profile' %}">Negocio</a>
         <a class="button" href="{% url 'business_config:pos' %}" aria-current="page">TPV</a>
     </nav>
+    {{ persisted_config|json_script:"configuration-persisted" }}
 
-    <form method="post" class="stacked-form business-profile-form" novalidate>
+    <div class="configuration-layout"><form method="post" class="stacked-form business-profile-form" novalidate>
         {% csrf_token %}
         {% if form.non_field_errors %}
             <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
@@ -79,6 +80,22 @@
 
         <div class="actions"><button type="submit" class="button">Guardar cambios</button></div>
     </form>
+    <aside class="configuration-summary card" aria-labelledby="configuration-summary-title">
+      <h2 id="configuration-summary-title">Configuración actual</h2>
+      <dl>
+        <div><dt>Precios con IVA</dt><dd>{{ current_settings.prices_include_tax|yesno:"Sí,No" }}</dd></div>
+        <div><dt>Control de stock</dt><dd>{{ current_settings.enable_stock_control|yesno:"Sí,No" }}</dd></div>
+        <div><dt>Venta sin stock</dt><dd>{{ current_settings.allow_sale_without_stock|yesno:"Sí,No" }}</dd></div>
+        <div><dt>Precio manual</dt><dd>{{ current_settings.allow_manual_price|yesno:"Sí,No" }}</dd></div>
+        <div><dt>Descuentos</dt><dd>{% if current_settings.allow_manual_discounts %}Hasta {{ current_settings.max_manual_discount_percent }} %{% else %}No{% endif %}</dd></div>
+        <div><dt>Caja abierta obligatoria</dt><dd>{{ current_settings.require_open_cash_register|yesno:"Sí,No" }}</dd></div>
+        <div><dt>Pago dividido</dt><dd>{{ current_settings.allow_split_payments|yesno:"Sí,No" }}</dd></div>
+        <div><dt>PIN sensible</dt><dd>{{ current_settings.require_pin_for_sensitive_actions|yesno:"Sí,No" }}</dd></div>
+      </dl>
+      <p aria-live="polite"><strong data-pending-count>0 cambios pendientes</strong></p>
+      <button class="button button-secondary" type="button" data-review-changes disabled>Ver cambios</button>
+    </aside></div>
+    {% include "business_config/_change_dialogs.html" %}
 </section>
 {% endblock %}
 {% block extra_js %}<script type="module" src="{% static 'js/pages/configuration.js' %}"></script>{% endblock %}
