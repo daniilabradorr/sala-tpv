@@ -1,19 +1,21 @@
 {% extends "base.html" %}
 
-{% block title %}Configuración del TPV | Netxodo{% endblock %}
+{% load static %}
+{% block title %}Configuración · TPV | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/configuration.css' %}">{% endblock %}
 
 {% block content %}
 <section class="card business-profile-card">
     <div class="page-heading">
         <div>
-            <h1>Configuración del TPV</h1>
+            <h1>Configuración</h1>
             <p>{{ request.user.business.name }}</p>
         </div>
     </div>
 
     <nav class="config-nav" aria-label="Configuración de empresa">
-        <a class="button button-secondary" href="{% url 'business_config:profile' %}">Datos de empresa</a>
-        <a class="button" href="{% url 'business_config:pos' %}" aria-current="page">Configuración TPV</a>
+        <a class="button button-secondary" href="{% url 'business_config:profile' %}">Negocio</a>
+        <a class="button" href="{% url 'business_config:pos' %}" aria-current="page">TPV</a>
     </nav>
 
     <form method="post" class="stacked-form business-profile-form" novalidate>
@@ -30,7 +32,7 @@
         </fieldset>
 
         <fieldset class="form-section">
-            <legend>Stock</legend>
+            <legend>Inventario</legend>
             <div class="form-grid">
                 {% include "business_config/_field.html" with field=form.enable_stock_control %}
                 {% include "business_config/_field.html" with field=form.allow_sale_without_stock %}
@@ -38,7 +40,7 @@
         </fieldset>
 
         <fieldset class="form-section">
-            <legend>Ventas</legend>
+            <legend>Venta</legend>
             <div class="form-grid">
                 {% include "business_config/_field.html" with field=form.allow_manual_price %}
                 {% include "business_config/_field.html" with field=form.allow_manual_discounts %}
@@ -48,15 +50,25 @@
         </fieldset>
 
         <fieldset class="form-section">
-            <legend>Caja</legend>
-            {% include "business_config/_field.html" with field=form.require_open_cash_register %}
-            <p class="help-text">Cuando está activo, las operaciones que lo requieran necesitarán una caja/sesión abierta.</p>
-        </fieldset>
-
-        <fieldset class="form-section">
             <legend>Pagos</legend>
             {% include "business_config/_field.html" with field=form.allow_split_payments %}
             <p class="help-text">Permite utilizar distintos métodos de pago en una misma venta cuando el flujo de pagos lo admita.</p>
+            <h2>Métodos de pago</h2>
+            <div class="payment-method-grid">
+            {% for method in payment_methods %}<article class="payment-method-card">
+                <h3>{{ method.name }} <code>{{ method.code }}</code></h3>
+                <p><strong>Estado:</strong> {% if method.is_active %}Activo{% else %}Inactivo{% endif %}</p>
+                <p><strong>Afecta a caja física:</strong> {{ method.affects_cash_register|yesno:"Sí,No" }}</p>
+                <p><strong>Permitir reembolsos:</strong> {{ method.allows_refund|yesno:"Sí,No" }}</p>
+                <a class="button button-secondary" href="{% url 'business_config:payment_method' method.pk %}">Configurar</a>
+            </article>{% empty %}<p role="status">No están disponibles los métodos MVP para este negocio.</p>{% endfor %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Caja</legend>
+            {% include "business_config/_field.html" with field=form.require_open_cash_register %}
+            <p class="help-text">Cuando está activo, las operaciones que lo requieran necesitarán una caja/sesión abierta.</p>
         </fieldset>
 
         <fieldset class="form-section">
@@ -69,3 +81,4 @@
     </form>
 </section>
 {% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/configuration.js' %}"></script>{% endblock %}

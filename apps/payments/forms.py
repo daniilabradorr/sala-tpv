@@ -64,6 +64,14 @@ class PaymentCancelForm(forms.Form):
             self.fields["pin"].required = True
 
 
+class PaymentMethodAdminForm(forms.ModelForm):
+    """HTTP boundary for the only three configurable MVP attributes."""
+
+    class Meta:
+        model = PaymentMethod
+        fields = ("name", "is_active", "allows_refund")
+
+
 class SaleOnAccountForm(forms.Form):
     """Confirmación explícita; el importe se calcula bajo lock en el Service."""
 

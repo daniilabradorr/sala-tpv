@@ -1,0 +1,19 @@
+.business-profile-card { max-width: 76rem; margin-inline: auto; }
+.config-nav { display: flex; gap: var(--nx-space-2); margin-block: var(--nx-space-4); }
+.form-section { min-width: 0; margin-block: var(--nx-space-5); padding: var(--nx-space-4); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-lg); }
+.form-section legend { padding-inline: var(--nx-space-2); font-weight: 800; }
+.form-grid, .payment-method-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--nx-space-4); }
+.media-editor, .payment-method-card, .config-preview { min-width: 0; padding: var(--nx-space-4); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-md); }
+.payment-method-card code, .readonly-details code { overflow-wrap: anywhere; }
+.readonly-details > div { margin-block: var(--nx-space-3); }
+.readonly-details dt { font-weight: 700; }
+.readonly-details dd { margin: var(--nx-space-1) 0; display: grid; gap: var(--nx-space-1); }
+.config-breadcrumb { color: var(--nx-text-muted); }
+.config-preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1199px) { .business-profile-card { max-width: 100%; } }
+@media (max-width: 767px) {
+  .form-grid, .payment-method-grid { grid-template-columns: minmax(0, 1fr); }
+  .form-section { padding: var(--nx-space-3); }
+  .config-nav, .actions { flex-wrap: wrap; }
+  .config-nav .button, .actions .button { flex: 1 1 auto; }
+}

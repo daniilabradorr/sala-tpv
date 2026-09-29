@@ -13,6 +13,12 @@ from apps.business_config.services import (
     update_pos_settings,
 )
 from apps.users.mixins import CanManageBusinessSettingsMixin
+from apps.payments.forms import PaymentMethodAdminForm
+from apps.payments.selectors import (
+    get_mvp_payment_method_for_admin,
+    get_mvp_payment_methods_for_business,
+)
+from apps.payments.services import update_payment_method_configuration
 
 
 class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
@@ -71,7 +77,15 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
 
     def get(self, request):
         form = POSSettingsForm(instance=self.get_settings())
-        return render(request, self.template_name, {"form": form})
+        return render(request, self.template_name, self.get_context(form))
+
+    def get_context(self, form):
+        return {
+            "form": form,
+            "payment_methods": get_mvp_payment_methods_for_business(
+                business=self.get_business()
+            ),
+        }
 
     def post(self, request):
         business = self.get_business()
@@ -85,4 +99,41 @@ class POSSettingsUpdateView(CanManageBusinessSettingsMixin, View):
                 request, "Configuración del TPV actualizada correctamente."
             )
             return redirect("business_config:pos")
-        return render(request, self.template_name, {"form": form})
+        return render(request, self.template_name, self.get_context(form))
+
+
+class PaymentMethodUpdateView(CanManageBusinessSettingsMixin, View):
+    template_name = "business_config/payment_method_form.html"
+
+    def get_business(self):
+        business = getattr(self.request.user, "business", None)
+        if business is None:
+            raise PermissionDenied("Se necesita un negocio para gestionar sus pagos.")
+        return business
+
+    def get_method(self):
+        return get_mvp_payment_method_for_admin(
+            business=self.get_business(), pk=self.kwargs["pk"]
+        )
+
+    def get(self, request, pk):
+        method = self.get_method()
+        return render(
+            request,
+            self.template_name,
+            {"form": PaymentMethodAdminForm(instance=method), "method": method},
+        )
+
+    def post(self, request, pk):
+        method = self.get_method()
+        form = PaymentMethodAdminForm(request.POST, instance=method)
+        if form.is_valid():
+            update_payment_method_configuration(
+                actor=request.user,
+                business=self.get_business(),
+                payment_method=method,
+                **form.cleaned_data,
+            )
+            messages.success(request, "Método de pago actualizado correctamente.")
+            return redirect("business_config:pos")
+        return render(request, self.template_name, {"form": form, "method": method})

@@ -62,6 +62,20 @@ class BusinessProfileForm(forms.ModelForm):
 
 
 class POSSettingsForm(forms.ModelForm):
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("allow_manual_discounts"):
+            cleaned["max_manual_discount_percent"] = 0
+        # A disabled dependent checkbox is absent from POST. Turning stock
+        # control off must not silently overwrite the saved preference.
+        if (
+            not cleaned.get("enable_stock_control")
+            and "allow_sale_without_stock" not in self.data
+            and self.instance.pk
+        ):
+            cleaned["allow_sale_without_stock"] = self.instance.allow_sale_without_stock
+        return cleaned
+
     class Meta:
         model = POSSettings
         fields = [

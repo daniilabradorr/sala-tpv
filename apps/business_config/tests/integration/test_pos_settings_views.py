@@ -147,7 +147,7 @@ class POSSettingsViewTests(TestCase):
         self.assertNotIn("business", response.context["form"].fields)
         self.assertNotContains(response, 'name="business"')
 
-    def test_invalid_discount_combination_is_visible_and_not_persisted(self):
+    def test_discounts_off_normalizes_forged_maximum_to_zero(self):
         self.client.force_login(self.owner)
         response = self.client.post(
             self.url,
@@ -156,12 +156,21 @@ class POSSettingsViewTests(TestCase):
                 max_manual_discount_percent="20",
             ),
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "Debe ser 0 si los descuentos manuales están desactivados."
-        )
+        self.assertRedirects(response, self.url)
         self.settings.refresh_from_db()
-        self.assertTrue(self.settings.allow_manual_discounts)
+        self.assertFalse(self.settings.allow_manual_discounts)
+        self.assertEqual(self.settings.max_manual_discount_percent, 0)
+
+    def test_stock_off_preserves_sale_without_stock_when_disabled_input_is_absent(self):
+        self.settings.allow_sale_without_stock = True
+        self.settings.save()
+        data = self.valid_data(enable_stock_control=False)
+        data.pop("allow_sale_without_stock")
+        self.client.force_login(self.owner)
+        self.client.post(self.url, data)
+        self.settings.refresh_from_db()
+        self.assertFalse(self.settings.enable_stock_control)
+        self.assertTrue(self.settings.allow_sale_without_stock)
 
     def test_disabled_discounts_with_zero_are_persisted(self):
         self.client.force_login(self.owner)
