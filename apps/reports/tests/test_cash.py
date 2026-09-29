@@ -345,6 +345,18 @@ class CashReportTests(TestCase):
             cash_sessions_summary(business=self.business, period=self.period), []
         )
 
+    def test_sessions_summary_limit_is_applied_before_materialization(self):
+        self._session(opened=datetime(2026, 9, 1, tzinfo=UTC))
+        second_register = create_cash_register(business=self.business, store=self.store)
+        self._session(opened=datetime(2026, 9, 2, tzinfo=UTC), register=second_register)
+        rows = cash_sessions_summary(
+            business=self.business, period=self.period, limit=1
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["cash_register_id"], second_register.pk)
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            cash_sessions_summary(business=self.business, period=self.period, limit=0)
+
     def test_sessions_summary_query_count_is_constant_without_duplicate_open_register(
         self,
     ):

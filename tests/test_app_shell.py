@@ -281,7 +281,7 @@ class AppShellTests(TestCase):
             for group in response.context["shell_navigation"]
             for item in group["items"]
         ]
-        self.assertNotIn("Informes", labels)
+        self.assertIn("Informes", labels)
         self.assertNotIn("Actividad", labels)
 
     def test_cashier_navigation_omits_administration_and_sale_permission_rules(self):
@@ -294,6 +294,7 @@ class AppShellTests(TestCase):
         ]
         self.assertNotIn("Usuarios", labels)
         self.assertNotIn("Tiendas", labels)
+        self.assertNotIn("Informes", labels)
         self.assertIn("Nueva venta", response.content.decode())
         access = UserStoreAccess.objects.get(user=self.cashier)
         access.can_sell = False
@@ -328,6 +329,7 @@ class AppShellTests(TestCase):
             for item in group["items"]
         ]
         self.assertIn("Tiendas", labels)
+        self.assertIn("Informes", labels)
         self.assertIn("Usuarios", labels)
         self.assertNotIn("Configuración", labels)
         actions = [item["label"] for item in response.context["shell_quick_actions"]]

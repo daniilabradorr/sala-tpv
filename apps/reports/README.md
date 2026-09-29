@@ -6,6 +6,24 @@ que son fuente de verdad; no constituye una segunda contabilidad y no persiste
 ejecuciones, métricas ni snapshots. La persistencia solo se reconsiderará ante
 una necesidad real de rendimiento, precálculo o exports históricos.
 
+## Frontend FE-19
+
+La superficie pública vive en `/reports/` y conserva en la query string
+`tab`, `period`, `date_from`, `date_to`, `store` y, para Compras,
+`purchase_view`. La interfaz valida el scope antes de ejecutar selectores y
+solo carga los contratos del tab activo. `store=all` se traduce a scope de
+Business únicamente para Owner, Superuser con contexto o Manager con acceso a
+todas las Stores; nunca se agregan scopes parciales en Python.
+
+Los periodos de calendario se resuelven en servidor y se convierten con
+`report_period_from_dates()` desde fechas inclusivas de UI al intervalo aware
+`[start, end)`. Las respuestas HTMX sustituyen `#reports-workspace`; un filtro
+inválido devuelve 422 y retarget a `#reports-filters`.
+
+Ventas ofrece `/reports/sales/export.csv`, generado en servidor con los mismos
+selectores y el mismo scope que la pantalla. No existen modelos, snapshots,
+jobs ni caché propios de Reports.
+
 ## Límites obligatorios
 
 Todo selector futuro:
@@ -130,6 +148,8 @@ efectivo actual. `cash_session_summary` describe la sesión completa.
 periodo (`opened_at < end` y cierre nulo o `closed_at > start`), pero también
 describe los movimientos completos de cada sesión, no solo la fracción que cae
 en el periodo. La consulta de sesiones y la agregación de movimientos son bulk.
+El parámetro opcional `limit` acota listados UI antes de materializarlos, sin
+cambiar el scope ni el eje temporal.
 
 ## Implementado en PR 3
 
