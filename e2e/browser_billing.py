@@ -120,6 +120,26 @@ class BrowserBillingTests(StaticLiveServerTestCase):
         page.get_by_role("button", name="Iniciar sesión").click()
         page.wait_for_url(f"{self.live_server_url}/")
 
+    def install_workspace_settle_counter(self, page):
+        page.evaluate(
+            """() => {
+                window.__billingWorkspaceSettledCount = 0;
+                document.body.addEventListener("htmx:afterSettle", (event) => {
+                    if (event.detail.target?.id === "billing-document-workspace") {
+                        window.__billingWorkspaceSettledCount += 1;
+                    }
+                });
+            }"""
+        )
+
+    def open_workspace_tab(self, page, tab):
+        settled_count = page.evaluate("window.__billingWorkspaceSettledCount")
+        page.get_by_role("link", name=tab, exact=True).click()
+        page.wait_for_function(
+            "previous => window.__billingWorkspaceSettledCount > previous",
+            arg=settled_count,
+        )
+
     def test_series_workspace_create_edit_and_responsive(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
@@ -228,16 +248,17 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                     page.locator(".billing-detail-header .status-issued")
                 ).to_have_text("Emitido")
                 expect(page.locator(".billing-total")).to_contain_text("10,00")
+                self.install_workspace_settle_counter(page)
                 for tab in ("Resumen", "Líneas", "Fiscal", "Relaciones", "Resumen"):
-                    page.get_by_role("link", name=tab, exact=True).click()
+                    self.open_workspace_tab(page, tab)
                     expect(page.locator("#billing-document-workspace")).to_have_count(1)
-                page.get_by_role("link", name="Líneas", exact=True).click()
+                self.open_workspace_tab(page, "Líneas")
                 expect(page.get_by_text("Producto fiscal snapshot")).to_be_visible()
                 expect(page.get_by_text("Producto actual modificado")).to_have_count(0)
-                page.get_by_role("link", name="Fiscal", exact=True).click()
+                self.open_workspace_tab(page, "Fiscal")
                 expect(page.get_by_text("Facturación E2E SL")).to_be_visible()
                 expect(page.get_by_text("IVA")).to_be_visible()
-                page.get_by_role("link", name="Resumen", exact=True).click()
+                self.open_workspace_tab(page, "Resumen")
                 page.get_by_role("link", name="Sustituir por factura completa").click()
                 expect(page.get_by_text(self.document_number)).to_be_visible()
                 command_form = page.locator("#billing-command-form")
@@ -267,10 +288,12 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                 self.assertIsNotNone(redirect)
                 self.assertRegex(redirect, r"/billing/stores/\d+/documents/\d+/$")
                 page.wait_for_url(re.compile(r"/billing/stores/\d+/documents/\d+/$"))
-                page.get_by_role("link", name="Relaciones", exact=True).click()
+                self.install_workspace_settle_counter(page)
+                self.open_workspace_tab(page, "Relaciones")
                 expect(page.get_by_text("Sustituye a")).to_be_visible()
                 page.get_by_role("link", name=self.document_number).click()
-                page.get_by_role("link", name="Relaciones", exact=True).click()
+                self.install_workspace_settle_counter(page)
+                self.open_workspace_tab(page, "Relaciones")
                 expect(page.get_by_text("Sustituida por")).to_be_visible()
                 expect(page.locator("#billing-document-workspace")).to_have_count(1)
 
