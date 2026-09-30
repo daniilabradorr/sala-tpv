@@ -860,6 +860,27 @@ class InventoryStoreScopingIntegrationTests(TestCase):
             set(response.context["stock_movements"]), {movement_a1, movement_a2}
         )
 
+    def test_movement_history_is_paginated_and_preserves_filters(self):
+        for _ in range(26):
+            self._movement(self.item_a1)
+        self.login_as(self.owner)
+
+        response = self.client.get(
+            reverse("inventory:stock_movement_list"),
+            {"movement_type": StockMovement.TYPE_INITIAL},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["stock_movements"]), 25)
+        self.assertEqual(response.context["page_obj"].paginator.num_pages, 2)
+        self.assertContains(response, "movement_type=initial&amp;page=2")
+
+        second_page = self.client.get(
+            reverse("inventory:stock_movement_list"),
+            {"movement_type": StockMovement.TYPE_INITIAL, "page": 2},
+        )
+        self.assertEqual(len(second_page.context["stock_movements"]), 1)
+
     def test_adjustment_lists_and_details_follow_store_scope(self):
         adjustment_a1 = self._adjustment(self.store_a1)
         adjustment_a2 = self._adjustment(self.store_a2)
