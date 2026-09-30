@@ -156,8 +156,11 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Guardar cambios").click()
                 review = page.get_by_role("dialog", name="Revisar cambios")
                 expect(review).to_be_visible()
-                expect(review.get_by_text("Logo", exact=True)).to_be_visible()
-                expect(review.get_by_text("Nuevo archivo", exact=True)).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Nuevo archivo")
                 review.get_by_role("button", name="Confirmar y guardar").click()
                 expect(
                     page.get_by_text("Datos de empresa actualizados correctamente.")
@@ -170,7 +173,11 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Guardar cambios").click()
                 review = page.get_by_role("dialog", name="Revisar cambios")
                 expect(review).to_be_visible()
-                expect(review.get_by_text("Nuevo archivo", exact=True)).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Nuevo archivo")
                 review.get_by_role("button", name="Confirmar y guardar").click()
                 expect(
                     page.get_by_text("Datos de empresa actualizados correctamente.")
@@ -184,7 +191,11 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 page.get_by_role("button", name="Guardar cambios").click()
                 review = page.get_by_role("dialog", name="Revisar cambios")
                 expect(review).to_be_visible()
-                expect(review.get_by_text("Eliminar logo", exact=True)).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Eliminar logo")
                 review.get_by_role("button", name="Confirmar y guardar").click()
                 expect(
                     page.get_by_text("Datos de empresa actualizados correctamente.")
