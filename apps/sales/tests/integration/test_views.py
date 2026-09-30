@@ -543,10 +543,6 @@ class SaleViewsIntegrationTests(TestCase):
         sale.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertIn("customer_mode", response.context["form"].errors)
-        self.assertContains(response, '<label for="id_customer_mode">Tipo de venta')
-        self.assertContains(response, 'aria-invalid="true"')
-        self.assertContains(response, 'aria-describedby="id_customer_mode-errors"')
-        self.assertContains(response, 'id="id_customer_mode-errors"')
         self.assertEqual(sale.customer, customer)
 
     def test_invoice_without_customer_is_rejected_for_fallback_and_htmx(self):

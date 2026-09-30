@@ -1,12 +1,17 @@
 """Real Chromium coverage for the FE-19 Reports surface."""
 
 import re
+from decimal import Decimal
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
 from playwright.sync_api import expect, sync_playwright
 
 from apps.onboarding.services import OnboardingService
+from apps.inventory.tests.factories import (
+    create_inventory_item,
+    create_inventory_product,
+)
 from apps.stores.models import Store
 
 
@@ -43,6 +48,16 @@ class BrowserReportsTests(StaticLiveServerTestCase):
         )
         Store.objects.create(
             business=result.business, name="Norte E2E", code="NORTH-E2E"
+        )
+        product = create_inventory_product(
+            business=result.business, name="Producto bajo E2E"
+        )
+        create_inventory_item(
+            business=result.business,
+            store=result.store,
+            product=product,
+            current_stock=Decimal("1"),
+            minimum_stock=Decimal("5"),
         )
 
     def test_reports_navigation_filters_tabs_and_responsive_layout(self):
@@ -89,8 +104,32 @@ class BrowserReportsTests(StaticLiveServerTestCase):
                 expect(page).to_have_url(re.compile(r"period=7d"))
                 page.go_back()
                 expect(page).to_have_url(re.compile(r"period=30d"))
-                for width in (375, 767, 768, 1280):
+                expect(reports_workspace).to_have_attribute("data-active-tab", "sales")
+                page.get_by_role("navigation", name="Informes").get_by_role(
+                    "link", name="Inventario", exact=True
+                ).click()
+                expect(reports_workspace).to_have_attribute(
+                    "data-active-tab", "inventory"
+                )
+                responsive_table = page.locator(
+                    ".report-card", has_text="Necesitan atención"
+                ).locator("table")
+                expect(
+                    responsive_table.get_by_text("Producto bajo E2E")
+                ).to_be_visible()
+                for width, expected_display in (
+                    (375, "block"),
+                    (767, "block"),
+                    (768, "table"),
+                    (1280, "table"),
+                ):
                     page.set_viewport_size({"width": width, "height": 900})
+                    self.assertEqual(
+                        responsive_table.evaluate(
+                            "element => getComputedStyle(element).display"
+                        ),
+                        expected_display,
+                    )
                     self.assertLessEqual(
                         page.evaluate("document.documentElement.scrollWidth"), width
                     )

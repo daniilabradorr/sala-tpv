@@ -1,7 +1,6 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -202,12 +201,12 @@ class PaymentsTests(TestCase):
         account_form = SaleOnAccountForm({})
 
         cancel_html = render_to_string(
-            "payments/cancel_confirm.html",
-            {"form": cancel_form, "payment": SimpleNamespace(pk=1)},
+            "includes/erp_form_fields.html",
+            {"form": cancel_form},
         )
         account_html = render_to_string(
-            "payments/sale_on_account_confirm.html",
-            {"form": account_form, "sale": self.sale},
+            "includes/erp_form_fields.html",
+            {"form": account_form},
         )
 
         for html, field_id, label in (

@@ -19,8 +19,10 @@
 .inventory-tabs a[aria-selected="true"] { border-color: var(--nx-primary); font-weight: 700; }
 .inventory-filters { align-items: end; display: grid; gap: var(--nx-space-3); grid-template-columns: 2fr repeat(3, 1fr) auto auto; margin-bottom: var(--nx-space-4); }
 .inventory-filters label { display: grid; gap: var(--nx-space-1); }
-.inventory-table { background: var(--nx-surface); border-radius: var(--nx-radius-lg); overflow-x: auto; }
+.inventory-table { max-width: 100%; min-width: 0; background: var(--nx-surface); border-radius: var(--nx-radius-lg); overflow-x: auto; }
 .inventory-table table { width: 100%; }
+.inventory-workspace .filter-grid input,
+.inventory-workspace .filter-grid select { max-width: 100%; min-width: 0; }
 .inventory-table tbody tr[data-href] { cursor: pointer; }
 .inventory-table tbody tr[data-href]:focus { outline: 3px solid var(--nx-focus); outline-offset: -3px; }
 .inventory-status { font-weight: 700; white-space: nowrap; }

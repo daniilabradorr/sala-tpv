@@ -123,8 +123,25 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
                     ),
                     expected_display,
                 )
+                overflow_diagnostics = page.evaluate(
+                    """() => [...document.querySelectorAll('body *')]
+                        .map(element => {
+                            const rect = element.getBoundingClientRect();
+                            return {
+                                tag: element.tagName,
+                                id: element.id,
+                                className: typeof element.className === 'string'
+                                    ? element.className : '',
+                                left: rect.left,
+                                right: rect.right,
+                            };
+                        })
+                        .filter(item => item.right > window.innerWidth + 1 || item.left < -1)"""
+                )
                 self.assertLessEqual(
-                    page.evaluate("document.documentElement.scrollWidth"), width
+                    page.evaluate("document.documentElement.scrollWidth"),
+                    width,
+                    overflow_diagnostics,
                 )
             browser.close()
 
