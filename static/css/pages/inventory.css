@@ -33,7 +33,7 @@
   .inventory-table th:nth-child(4),
   .inventory-table td:nth-child(4) { display: none; }
 }
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .inventory-header { align-items: flex-start; flex-direction: column; }
   .inventory-header .actions { width: 100%; }
   .inventory-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

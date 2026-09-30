@@ -18,6 +18,7 @@ from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
+from apps.core.forms import wire_field_accessibility
 from apps.billing.models import BillingSeries
 from apps.payments.models import PaymentMethod
 from apps.sales.models import (
@@ -190,7 +191,6 @@ class SaleFilterForm(forms.Form):
             "name",
             "pk",
         )
-
         self.fields["opened_by"].queryset = CustomUser.objects.filter(
             business=business,
             is_active=True,
@@ -444,6 +444,7 @@ class SaleHeaderUpdateForm(forms.Form):
             "name",
             "pk",
         )
+        wire_field_accessibility(self)
 
     def clean(self):
         cleaned_data = super().clean()
@@ -673,6 +674,7 @@ class SaleLineCreateForm(BaseSaleLineForm):
                 "pk",
             )
         )
+        wire_field_accessibility(self)
 
     def get_reference_price(
         self,
@@ -721,6 +723,7 @@ class SaleLineUpdateForm(BaseSaleLineForm):
 
         if self.pos_settings and not self.pos_settings.allow_manual_discounts:
             self.fields.pop("discount_amount")
+        wire_field_accessibility(self)
 
     def get_reference_price(
         self,
@@ -772,6 +775,7 @@ class SaleCancelForm(forms.Form):
 
         if self.pos_settings and self.pos_settings.require_pin_for_sensitive_actions:
             self.fields["pin"].required = True
+        wire_field_accessibility(self)
 
     def clean_pin(self):
         pin = self.cleaned_data.get(

@@ -63,6 +63,7 @@ class PaymentCancelForm(forms.Form):
         super().__init__(*args, **kwargs)
         if pos_settings and pos_settings.require_pin_for_sensitive_actions:
             self.fields["pin"].required = True
+        wire_field_accessibility(self)
 
 
 class PaymentMethodAdminForm(forms.ModelForm):
@@ -81,3 +82,7 @@ class SaleOnAccountForm(forms.Form):
     """Confirmación explícita; el importe se calcula bajo lock en el Service."""
 
     confirm = forms.BooleanField(label="Confirmar venta a cuenta")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        wire_field_accessibility(self)

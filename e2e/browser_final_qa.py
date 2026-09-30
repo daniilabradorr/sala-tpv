@@ -45,6 +45,19 @@ class BrowserFinalQATests(StaticLiveServerTestCase):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 900})
+            javascript_errors = []
+            critical_asset_errors = []
+            page.on("pageerror", lambda error: javascript_errors.append(str(error)))
+            page.on(
+                "response",
+                lambda response: (
+                    critical_asset_errors.append(f"{response.status} {response.url}")
+                    if response.status >= 400
+                    and response.request.resource_type in {"script", "stylesheet"}
+                    and response.url.startswith(self.live_server_url)
+                    else None
+                ),
+            )
             try:
                 page.goto(f"{self.live_server_url}/users/login/")
                 page.get_by_label("Correo electrónico").fill(self.email)
@@ -99,5 +112,15 @@ class BrowserFinalQATests(StaticLiveServerTestCase):
                     self.assertLessEqual(
                         page.evaluate("document.documentElement.scrollWidth"), width
                     )
+                    overflow = page.evaluate(
+                        """() => ({
+                            html: getComputedStyle(document.documentElement).overflowX,
+                            body: getComputedStyle(document.body).overflowX,
+                        })"""
+                    )
+                    self.assertNotIn(overflow["html"], {"hidden", "clip"})
+                    self.assertNotIn(overflow["body"], {"hidden", "clip"})
+                self.assertEqual(javascript_errors, [])
+                self.assertEqual(critical_asset_errors, [])
             finally:
                 browser.close()

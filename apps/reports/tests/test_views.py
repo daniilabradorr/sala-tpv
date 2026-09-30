@@ -101,6 +101,39 @@ class ReportsViewTests(TestCase):
         self.assertIn("30/09/2026", html)
         self.assertIn("10,00 €", html)
 
+    def test_general_chart_has_equivalent_accessible_data_table(self):
+        html = render_to_string(
+            "reports/partials/_general.html",
+            {
+                "report_data": {
+                    "dashboard": {
+                        "sales": {
+                            "net_sales": 8,
+                            "ticket_count": 1,
+                            "average_ticket": 10,
+                            "returns_amount": 2,
+                        },
+                        "sales_timeseries": [
+                            {
+                                "day": date(2026, 9, 30),
+                                "net_sales": 8,
+                                "net_sales_height": 80,
+                            }
+                        ],
+                        "payments": {"net_amount": 8},
+                        "purchases": {"total_amount": 3},
+                        "inventory": {"low_stock_count": 1},
+                        "tax": {"effective_total_amount": 2},
+                    }
+                }
+            },
+        )
+
+        self.assertIn('class="reports-chart" aria-hidden="true"', html)
+        self.assertIn("Datos de la evolución diaria de ventas netas", html)
+        self.assertIn("30/09/2026", html)
+        self.assertIn("8,00 €", html)
+
     def test_invalid_tab_falls_back_to_general(self):
         response = self.client.get(
             self.url, {"tab": "unknown", "period": "today", "store": self.store.pk}

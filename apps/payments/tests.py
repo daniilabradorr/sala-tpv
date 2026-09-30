@@ -1,12 +1,14 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connections
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.urls import reverse
 
@@ -20,7 +22,7 @@ from apps.customers.models import (
     EntryTypeChoices,
 )
 from apps.customers.services import CustomerAccountService
-from apps.payments.forms import PaymentCreateForm
+from apps.payments.forms import PaymentCancelForm, PaymentCreateForm, SaleOnAccountForm
 from apps.payments.models import (
     Payment,
     PaymentMethod,
@@ -191,6 +193,32 @@ class PaymentsTests(TestCase):
             store=self.store,
         )
         self.assertFalse(invalid.is_valid())
+
+    def test_invalid_confirmation_forms_render_accessible_errors(self):
+        pos_settings = self.business.pos_settings
+        pos_settings.require_pin_for_sensitive_actions = True
+        pos_settings.save(update_fields=["require_pin_for_sensitive_actions"])
+        cancel_form = PaymentCancelForm({}, pos_settings=pos_settings)
+        account_form = SaleOnAccountForm({})
+
+        cancel_html = render_to_string(
+            "payments/cancel_confirm.html",
+            {"form": cancel_form, "payment": SimpleNamespace(pk=1)},
+        )
+        account_html = render_to_string(
+            "payments/sale_on_account_confirm.html",
+            {"form": account_form, "sale": self.sale},
+        )
+
+        for html, field_id, label in (
+            (cancel_html, "id_pin", "Pin"),
+            (account_html, "id_confirm", "Confirmar venta a cuenta"),
+        ):
+            with self.subTest(field_id=field_id):
+                self.assertIn(f'<label for="{field_id}">{label}', html)
+                self.assertIn('aria-invalid="true"', html)
+                self.assertIn(f'aria-describedby="{field_id}-errors"', html)
+                self.assertIn(f'id="{field_id}-errors"', html)
 
     def test_payment_view_preserves_validated_customer_return_context(self):
         customer = create_sales_customer(business=self.business)
