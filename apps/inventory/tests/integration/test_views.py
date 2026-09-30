@@ -874,6 +874,9 @@ class InventoryStoreScopingIntegrationTests(TestCase):
         self.assertEqual(len(response.context["stock_movements"]), 25)
         self.assertEqual(response.context["page_obj"].paginator.num_pages, 2)
         self.assertContains(response, "movement_type=initial&amp;page=2")
+        self.assertContains(
+            response, '<th scope="col" aria-label="Acción"></th>', html=True
+        )
 
         second_page = self.client.get(
             reverse("inventory:stock_movement_list"),
