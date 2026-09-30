@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connections
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
@@ -27,13 +27,14 @@ from apps.payments.models import (
     PaymentStatusChoices,
     PaymentTypeChoices,
 )
-from apps.payments.selectors import get_sale_payment_summary
+from apps.payments.selectors import get_active_payment_methods, get_sale_payment_summary
 from apps.payments.services import (
     recalculate_sale_payment_state,
     cancel_payment,
     register_refund,
     register_sale_payment,
     register_sale_on_account,
+    update_payment_method_configuration,
 )
 from apps.sales.models import (
     PaymentStatusChoices as SalePaymentStatus,
@@ -90,6 +91,78 @@ class PaymentsTests(TestCase):
             idempotency_key=key or uuid.uuid4(),
             cash_session_id=self.session.pk,
         )
+
+    def test_payment_method_configuration_service_owner_and_permissions(self):
+        updated = update_payment_method_configuration(
+            actor=self.user,
+            business=self.business,
+            payment_method=self.card,
+            name="Tarjeta bancaria",
+            is_active=True,
+            allows_refund=True,
+        )
+        self.assertEqual(updated.name, "Tarjeta bancaria")
+        for role in (RoleChoices.MANAGER, RoleChoices.CASHIER):
+            actor = create_sales_user(business=self.business, role=role)
+            with self.subTest(role=role), self.assertRaises(PermissionDenied):
+                update_payment_method_configuration(
+                    actor=actor,
+                    business=self.business,
+                    payment_method=self.card,
+                    name="Denegado",
+                    is_active=False,
+                    allows_refund=False,
+                )
+        outsider = create_sales_user(
+            business=self.other_business, role=RoleChoices.OWNER
+        )
+        with self.assertRaises(PermissionDenied):
+            update_payment_method_configuration(
+                actor=outsider,
+                business=self.business,
+                payment_method=self.card,
+                name="Denegado",
+                is_active=False,
+                allows_refund=False,
+            )
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.name, "Tarjeta bancaria")
+
+    def test_deactivation_and_refund_configuration_preserve_historical_payment(self):
+        historical = self.pay("25.00", method=self.card)
+        original_status = historical.status
+        update_payment_method_configuration(
+            actor=self.user,
+            business=self.business,
+            payment_method=self.card,
+            name=self.card.name,
+            is_active=False,
+            allows_refund=True,
+        )
+        historical.refresh_from_db()
+        self.assertEqual(historical.method, self.card)
+        self.assertEqual(historical.amount, Decimal("25.00"))
+        self.assertEqual(historical.status, original_status)
+        self.assertNotIn(
+            self.card,
+            get_active_payment_methods(business=self.business),
+        )
+
+        update_payment_method_configuration(
+            actor=self.user,
+            business=self.business,
+            payment_method=self.card,
+            name=self.card.name,
+            is_active=True,
+            allows_refund=False,
+        )
+        self.assertIn(self.card, get_active_payment_methods(business=self.business))
+        self.assertNotIn(
+            self.card,
+            get_active_payment_methods(business=self.business, for_refund=True),
+        )
+        historical.refresh_from_db()
+        self.assertEqual(historical.method, self.card)
 
     def test_method_enforces_cash_register_flag_and_business_code_unique(self):
         self.assertFalse(self.card.affects_cash_register)

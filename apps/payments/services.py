@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
@@ -21,7 +21,10 @@ from apps.payments.models import (
     PaymentStatusChoices,
     PaymentTypeChoices,
 )
-from apps.payments.selectors import get_sale_return_refund_summary
+from apps.payments.selectors import (
+    MVP_PAYMENT_METHOD_ORDER,
+    get_sale_return_refund_summary,
+)
 from apps.sales.models import (
     PaymentStatusChoices as SalePaymentStatusChoices,
     Sale,
@@ -29,9 +32,37 @@ from apps.sales.models import (
     SaleReturnStatusChoices,
     SaleStatusChoices,
 )
-from apps.users.helpers import can_perform_sensitive_action, can_sell_in_store
+from apps.users.helpers import (
+    can_manage_business_settings,
+    can_perform_sensitive_action,
+    can_sell_in_store,
+)
 
 ZERO = Decimal("0.00")
+
+
+@transaction.atomic
+def update_payment_method_configuration(
+    *, actor, business, payment_method, name, is_active, allows_refund
+):
+    if (
+        not can_manage_business_settings(actor)
+        or actor.business_id != business.pk
+        or payment_method.business_id != business.pk
+        or payment_method.code not in MVP_PAYMENT_METHOD_ORDER
+    ):
+        raise PermissionDenied("No puedes configurar métodos de este negocio.")
+    try:
+        locked = PaymentMethod.objects.select_for_update().get(
+            business=business, pk=payment_method.pk
+        )
+    except PaymentMethod.DoesNotExist as exc:
+        raise PermissionDenied("El método no pertenece a este negocio.") from exc
+    locked.name = name
+    locked.is_active = is_active
+    locked.allows_refund = allows_refund
+    locked.save(update_fields=("name", "is_active", "allows_refund", "updated_at"))
+    return locked
 
 
 def _validate_business(business):

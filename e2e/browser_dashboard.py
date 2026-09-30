@@ -172,6 +172,7 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
                             page.locator('[data-dashboard-shell="stable"]')
                         ).to_have_count(1)
 
+                        period_select = page.locator("#dashboard-period")
                         period_select.select_option("30d")
                         expect(page).to_have_url(re.compile(r"[?&]period=30d(?:&|$)"))
                         expect(page.locator("#dashboard-period")).to_have_value("30d")

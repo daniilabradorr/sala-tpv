@@ -6,6 +6,7 @@ from django.core.exceptions import PermissionDenied
 from apps.audit.constants import AuditEventType, AuditModule
 from apps.audit.services import log_event
 from apps.business_config.models import BusinessProfile, POSSettings
+from apps.users.helpers import can_manage_business_settings
 
 
 BUSINESS_PROFILE_EDITABLE_FIELDS = (
@@ -51,7 +52,8 @@ def _validate_actor(*, business, updated_by):
         updated_by is None
         or not updated_by.is_authenticated
         or not updated_by.is_active
-        or (not updated_by.is_superuser and updated_by.business_id != business.pk)
+        or updated_by.business_id != business.pk
+        or not can_manage_business_settings(updated_by)
     ):
         raise PermissionDenied("El actor no puede actualizar este negocio.")
 

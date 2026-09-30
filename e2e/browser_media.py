@@ -154,12 +154,34 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 page.goto(profile_url)
                 page.get_by_label("Seleccionar nuevo logo").set_input_files(first_file)
                 page.get_by_role("button", name="Guardar cambios").click()
+                review = page.get_by_role("dialog", name="Revisar cambios")
+                expect(review).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Nuevo archivo")
+                review.get_by_role("button", name="Confirmar y guardar").click()
+                expect(
+                    page.get_by_text("Datos de empresa actualizados correctamente.")
+                ).to_be_visible()
                 page.goto(profile_url)
                 logo = page.locator("img.media-preview--logo")
                 self._wait_for_loaded_image(page, logo)
                 source_a = logo.get_attribute("src")
                 page.get_by_label("Seleccionar nuevo logo").set_input_files(second_file)
                 page.get_by_role("button", name="Guardar cambios").click()
+                review = page.get_by_role("dialog", name="Revisar cambios")
+                expect(review).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Nuevo archivo")
+                review.get_by_role("button", name="Confirmar y guardar").click()
+                expect(
+                    page.get_by_text("Datos de empresa actualizados correctamente.")
+                ).to_be_visible()
                 page.goto(profile_url)
                 self.assertNotEqual(
                     source_a,
@@ -167,6 +189,17 @@ class BrowserMediaTests(StaticLiveServerTestCase):
                 )
                 page.get_by_label("Eliminar logo").check()
                 page.get_by_role("button", name="Guardar cambios").click()
+                review = page.get_by_role("dialog", name="Revisar cambios")
+                expect(review).to_be_visible()
+                logo_change = review.locator(".change-review-row").filter(
+                    has_text="Logo"
+                )
+                expect(logo_change.locator("dt")).to_have_text("Logo")
+                expect(logo_change).to_contain_text("Eliminar logo")
+                review.get_by_role("button", name="Confirmar y guardar").click()
+                expect(
+                    page.get_by_text("Datos de empresa actualizados correctamente.")
+                ).to_be_visible()
                 page.goto(profile_url)
                 self.assertIn(
                     "media-placeholder",

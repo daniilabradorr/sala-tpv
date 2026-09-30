@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Case, IntegerField, Sum, When
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
@@ -12,6 +12,30 @@ from apps.payments.models import (
     PaymentTypeChoices,
 )
 from apps.sales.models import Sale, SaleReturnStatusChoices
+
+MVP_PAYMENT_METHOD_ORDER = ("cash", "card", "bizum", "transfer")
+
+
+def get_mvp_payment_methods_for_business(*, business):
+    commercial_order = Case(
+        *[
+            When(code=code, then=position)
+            for position, code in enumerate(MVP_PAYMENT_METHOD_ORDER)
+        ],
+        output_field=IntegerField(),
+    )
+    return PaymentMethod.objects.filter(
+        business=business, code__in=MVP_PAYMENT_METHOD_ORDER
+    ).order_by(commercial_order)
+
+
+def get_mvp_payment_method_for_admin(*, business, pk):
+    return get_object_or_404(
+        PaymentMethod,
+        business=business,
+        pk=pk,
+        code__in=MVP_PAYMENT_METHOD_ORDER,
+    )
 
 
 def get_payment_detail(*, business, pk):

@@ -22,8 +22,8 @@ class UpdateBusinessProfileTests(TestCase):
         self.user = CustomUser.objects.create_user(
             email="admin@example.com",
             password="test",
+            business=self.business,
             role=RoleChoices.OWNER,
-            is_superuser=True,
         )
         self.profile, _ = create_business_configuration(
             business=self.business,
@@ -52,10 +52,18 @@ class UpdateBusinessProfileTests(TestCase):
 
     def test_does_not_create_a_missing_profile(self):
         missing_business = Business.objects.create(name="Sin perfil", slug="sin-perfil")
+        missing_owner = CustomUser.objects.create_user(
+            email="missing-profile-owner@example.com",
+            password="test",
+            business=missing_business,
+            role=RoleChoices.OWNER,
+        )
 
         with self.assertRaises(BusinessProfile.DoesNotExist):
             update_business_profile(
-                business=missing_business, updated_by=self.user, legal_name="No crear"
+                business=missing_business,
+                updated_by=missing_owner,
+                legal_name="No crear",
             )
 
         self.assertFalse(
@@ -65,11 +73,35 @@ class UpdateBusinessProfileTests(TestCase):
     def test_other_business_cannot_update_this_profile(self):
         other = Business.objects.create(name="Otra", slug="otra")
 
-        with self.assertRaises(BusinessProfile.DoesNotExist):
+        with self.assertRaises(PermissionDenied):
             update_business_profile(
                 business=other, updated_by=self.user, legal_name="Intento"
             )
 
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.legal_name, "Sala SL")
+
+    def test_rejects_non_owner_and_superuser_without_business(self):
+        for role in (RoleChoices.MANAGER, RoleChoices.CASHIER):
+            actor = CustomUser.objects.create_user(
+                email=f"profile-{role}@example.com",
+                password="test",
+                business=self.business,
+                role=role,
+            )
+            with self.subTest(role=role), self.assertRaises(PermissionDenied):
+                update_business_profile(
+                    business=self.business, updated_by=actor, legal_name="Denegado"
+                )
+        superuser = CustomUser.objects.create_superuser(
+            email="profile-root@example.com",
+            password="test",
+            role=RoleChoices.OWNER,
+        )
+        with self.assertRaises(PermissionDenied):
+            update_business_profile(
+                business=self.business, updated_by=superuser, legal_name="Denegado"
+            )
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.legal_name, "Sala SL")
 
@@ -160,8 +192,8 @@ class UpdatePOSSettingsTests(TestCase):
         self.user = CustomUser.objects.create_user(
             email="pos-admin@example.com",
             password="test",
+            business=self.business,
             role=RoleChoices.OWNER,
-            is_superuser=True,
         )
         _, self.settings = create_business_configuration(
             business=self.business,
@@ -190,10 +222,18 @@ class UpdatePOSSettingsTests(TestCase):
 
     def test_missing_settings_are_not_created(self):
         missing = Business.objects.create(name="Sin ajustes", slug="sin-ajustes")
+        missing_owner = CustomUser.objects.create_user(
+            email="missing-settings-owner@example.com",
+            password="test",
+            business=missing,
+            role=RoleChoices.OWNER,
+        )
 
         with self.assertRaises(POSSettings.DoesNotExist):
             update_pos_settings(
-                business=missing, updated_by=self.user, prices_include_tax=False
+                business=missing,
+                updated_by=missing_owner,
+                prices_include_tax=False,
             )
 
         self.assertFalse(POSSettings.objects.filter(business=missing).exists())
@@ -201,13 +241,41 @@ class UpdatePOSSettingsTests(TestCase):
     def test_other_business_cannot_modify_settings(self):
         other = Business.objects.create(name="Otra POS", slug="otra-pos")
 
-        with self.assertRaises(POSSettings.DoesNotExist):
+        with self.assertRaises(PermissionDenied):
             update_pos_settings(
                 business=other, updated_by=self.user, allow_split_payments=False
             )
 
         self.settings.refresh_from_db()
         self.assertTrue(self.settings.allow_split_payments)
+
+    def test_rejects_manager_cashier_and_superuser_without_business(self):
+        for role in (RoleChoices.MANAGER, RoleChoices.CASHIER):
+            actor = CustomUser.objects.create_user(
+                email=f"settings-{role}@example.com",
+                password="test",
+                business=self.business,
+                role=role,
+            )
+            with self.subTest(role=role), self.assertRaises(PermissionDenied):
+                update_pos_settings(
+                    business=self.business,
+                    updated_by=actor,
+                    prices_include_tax=False,
+                )
+        superuser = CustomUser.objects.create_superuser(
+            email="settings-root@example.com",
+            password="test",
+            role=RoleChoices.OWNER,
+        )
+        with self.assertRaises(PermissionDenied):
+            update_pos_settings(
+                business=self.business,
+                updated_by=superuser,
+                prices_include_tax=False,
+            )
+        self.settings.refresh_from_db()
+        self.assertTrue(self.settings.prices_include_tax)
 
     def test_non_editable_fields_are_ignored(self):
         other = Business.objects.create(name="Destino", slug="destino")
