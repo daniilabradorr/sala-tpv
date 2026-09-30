@@ -1,6 +1,8 @@
+from datetime import date
 from unittest.mock import patch
 
 from django.test import Client, TestCase
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from apps.onboarding.services import OnboardingService
@@ -60,6 +62,77 @@ class ReportsViewTests(TestCase):
         self.client.force_login(self.cashier)
         self.assertEqual(self.client.get(self.url).status_code, 403)
         self.assertEqual(Client().get(self.url).status_code, 302)
+
+    def test_sales_chart_has_equivalent_accessible_data_table(self):
+        html = render_to_string(
+            "reports/partials/_sales.html",
+            {
+                "sales_export_url": "/reports/export/",
+                "report_data": {
+                    "sales": {
+                        "gross_sales": 10,
+                        "returns_amount": 2,
+                        "net_sales": 8,
+                        "ticket_count": 1,
+                        "average_ticket": 10,
+                        "units_sold": 1,
+                        "units_returned": 0,
+                    },
+                    "sales_timeseries": [
+                        {
+                            "day": date(2026, 9, 30),
+                            "gross_sales": 10,
+                            "returns_amount": 2,
+                            "gross_sales_height": 100,
+                            "returns_amount_height": 20,
+                        }
+                    ],
+                    "sales_products": [],
+                    "sales_categories": [],
+                    "sales_stores": [],
+                },
+            },
+        )
+
+        self.assertIn(
+            'class="reports-chart reports-chart--paired" aria-hidden="true"', html
+        )
+        self.assertIn("Datos de ventas brutas y devoluciones por día", html)
+        self.assertIn("30/09/2026", html)
+        self.assertIn("10,00 €", html)
+
+    def test_general_chart_has_equivalent_accessible_data_table(self):
+        html = render_to_string(
+            "reports/partials/_general.html",
+            {
+                "report_data": {
+                    "dashboard": {
+                        "sales": {
+                            "net_sales": 8,
+                            "ticket_count": 1,
+                            "average_ticket": 10,
+                            "returns_amount": 2,
+                        },
+                        "sales_timeseries": [
+                            {
+                                "day": date(2026, 9, 30),
+                                "net_sales": 8,
+                                "net_sales_height": 80,
+                            }
+                        ],
+                        "payments": {"net_amount": 8},
+                        "purchases": {"total_amount": 3},
+                        "inventory": {"low_stock_count": 1},
+                        "tax": {"effective_total_amount": 2},
+                    }
+                }
+            },
+        )
+
+        self.assertIn('class="reports-chart" aria-hidden="true"', html)
+        self.assertIn("Datos de la evolución diaria de ventas netas", html)
+        self.assertIn("30/09/2026", html)
+        self.assertIn("8,00 €", html)
 
     def test_invalid_tab_falls_back_to_general(self):
         response = self.client.get(

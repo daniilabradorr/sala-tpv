@@ -1,4 +1,3 @@
-html { overflow-x: hidden; }
 body.sidebar-open { overflow: hidden; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .erp-shell { min-height: 100vh; }

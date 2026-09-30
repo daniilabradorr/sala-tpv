@@ -375,6 +375,7 @@ jobs:
           e2e.browser_activity
           e2e.browser_users
           e2e.browser_configuration
+          e2e.browser_final_qa
           --verbosity 2
 
       - name: Upload browser failure artifacts

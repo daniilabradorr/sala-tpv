@@ -4,6 +4,7 @@ from decimal import Decimal
 import uuid
 
 from django.db import IntegrityError, transaction
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.utils import timezone
 
@@ -11,6 +12,7 @@ from apps.cash_register.models import CashRegister, CashSession
 from apps.sales.forms import (
     SaleCancelForm,
     SaleFilterForm,
+    SaleHeaderUpdateForm,
     SaleLineCreateForm,
     SaleOpenForm,
     SaleReturnCreateForm,
@@ -76,6 +78,25 @@ class SaleFormsTests(TestCase):
             name=name,
             code=f"CAJA-{uuid.uuid4().hex[:8].upper()}",
         )
+
+    def test_invalid_header_form_renders_accessible_error_reference(self):
+        form = SaleHeaderUpdateForm(
+            {
+                "customer_mode": "invalid",
+                "customer": "",
+                "document_type_requested": RequestedDocumentTypeChoices.TICKET,
+            },
+            business=self.business,
+            store=self.store,
+            sale=self.sale,
+        )
+
+        html = render_to_string("includes/erp_form_fields.html", {"form": form})
+
+        self.assertIn('<label for="id_customer_mode">Tipo de venta', html)
+        self.assertIn('aria-invalid="true"', html)
+        self.assertIn('aria-describedby="id_customer_mode-errors"', html)
+        self.assertIn('id="id_customer_mode-errors"', html)
 
     def create_cash_session(
         self, *, cash_register, status=CashSession.Status.OPEN, opened_by=None

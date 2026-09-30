@@ -636,9 +636,15 @@ class StockMovementListView(BusinessRequiredMixin, View):
             stores=get_inventory_visible_stores(request.user),
         )
 
+        page = Paginator(stock_movements, 25).get_page(request.GET.get("page"))
+        query = request.GET.copy()
+        query.pop("page", None)
+
         context = {
             "form": form,
-            "stock_movements": stock_movements,
+            "page_obj": page,
+            "stock_movements": page,
+            "query_string": query.urlencode(),
         }
 
         return render(request, self.template_name, context)

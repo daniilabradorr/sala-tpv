@@ -35,6 +35,116 @@ class InventoryBrowserTests(StaticLiveServerTestCase):
         page.get_by_label("Contraseña").fill(self.password)
         page.get_by_role("button", name="Iniciar sesión").click()
 
+    def test_movement_history_pagination_filters_and_mobile_cards(self):
+        business = create_business("Movement History Browser", "movement-history")
+        store = create_inventory_store(
+            business=business, name="Centro", code="MOV-HISTORY"
+        )
+        owner = create_inventory_owner(business=business, password=self.password)
+        product = create_inventory_product(business=business, name="Producto histórico")
+        item = create_inventory_item(
+            business=business,
+            store=store,
+            product=product,
+            current_stock=Decimal("26"),
+        )
+        StockMovement.objects.bulk_create(
+            [
+                StockMovement(
+                    business=business,
+                    inventory_item=item,
+                    store=store,
+                    product=product,
+                    movement_type=StockMovement.TYPE_INITIAL,
+                    quantity=Decimal("1"),
+                    stock_before=Decimal(index),
+                    stock_after=Decimal(index + 1),
+                    reference_type=StockMovement.REF_MANUAL,
+                    created_by=owner,
+                )
+                for index in range(26)
+            ]
+        )
+        history_url = reverse("inventory:stock_movement_list")
+        filtered_url = (
+            f"{self.live_server_url}{history_url}"
+            f"?movement_type={StockMovement.TYPE_INITIAL}"
+        )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            self._login(page, owner)
+            page.goto(filtered_url)
+            rows = page.locator(".inventory-table tbody tr")
+            expect(rows).to_have_count(25)
+            dom_issues = page.evaluate(
+                """() => {
+                    const ids = [...document.querySelectorAll('[id]')].map(el => el.id);
+                    const brokenRefs = [];
+                    for (const el of document.querySelectorAll(
+                        '[aria-labelledby], [aria-describedby], [aria-controls]'
+                    )) {
+                        for (const attr of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
+                            for (const token of (el.getAttribute(attr) || '').split(/\\s+/).filter(Boolean)) {
+                                if (!document.getElementById(token)) brokenRefs.push(`${attr}:${token}`);
+                            }
+                        }
+                    }
+                    return {
+                        duplicateIds: ids.filter((id, index) => ids.indexOf(id) !== index),
+                        brokenRefs,
+                    };
+                }"""
+            )
+            self.assertEqual(dom_issues["duplicateIds"], [])
+            self.assertEqual(dom_issues["brokenRefs"], [])
+            next_page = page.get_by_role("link", name="Siguiente")
+            expect(next_page).to_have_attribute(
+                "href", re.compile(r"movement_type=initial(?:&|&amp;)page=2")
+            )
+            next_page.click()
+            expect(page).to_have_url(re.compile(r"movement_type=initial.*page=2"))
+            expect(rows).to_have_count(1)
+            page.go_back()
+            expect(rows).to_have_count(25)
+
+            for width, height, expected_display in (
+                (375, 812, "block"),
+                (767, 900, "block"),
+                (768, 900, "table"),
+                (1280, 900, "table"),
+            ):
+                page.set_viewport_size({"width": width, "height": height})
+                page.goto(filtered_url)
+                self.assertEqual(
+                    page.locator(".inventory-table table").evaluate(
+                        "element => getComputedStyle(element).display"
+                    ),
+                    expected_display,
+                )
+                overflow_diagnostics = page.evaluate(
+                    """() => [...document.querySelectorAll('body *')]
+                        .map(element => {
+                            const rect = element.getBoundingClientRect();
+                            return {
+                                tag: element.tagName,
+                                id: element.id,
+                                className: typeof element.className === 'string'
+                                    ? element.className : '',
+                                left: rect.left,
+                                right: rect.right,
+                            };
+                        })
+                        .filter(item => item.right > window.innerWidth + 1 || item.left < -1)"""
+                )
+                self.assertLessEqual(
+                    page.evaluate("document.documentElement.scrollWidth"),
+                    width,
+                    overflow_diagnostics,
+                )
+            browser.close()
+
     def test_workspace_filters_detail_quick_adjustment_and_responsive(self):
         business = create_business("Inventory Browser", "inventory-browser")
         store = create_inventory_store(business=business, name="Centro", code="CENTRO")
