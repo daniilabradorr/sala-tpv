@@ -1,0 +1,15 @@
+.auth-body { min-width: 0; background: var(--nx-surface-muted); }
+.auth-main { display: grid; min-height: 100vh; place-items: center; padding: 24px; }
+.auth-container { width: min(100%, 460px); }
+.auth-card { padding: clamp(1.5rem, 5vw, 2.5rem); border: 1px solid var(--border); border-radius: 14px; background: var(--nx-surface); box-shadow: var(--nx-shadow-md); }
+.auth-logo { display: block; width: min(176px, 52vw); height: auto; margin: 0 auto 2rem; }
+.auth-card h1 { margin: 0; text-align: center; }
+.auth-intro, .auth-note { color: var(--muted); text-align: center; }
+.auth-intro { margin: .6rem 0 1.75rem; }
+.auth-note { margin: -1rem 0 1.75rem; }
+.password-control { position: relative; }
+.password-control input { width: 100%; padding-right: 6rem; }
+.password-toggle { position: absolute; top: 0; right: 0; min-width: 5.5rem; min-height: 44px; border: 0; background: transparent; color: var(--nx-primary); cursor: pointer; font: inherit; font-weight: 700; }
+.auth-submit { width: 100%; min-height: 44px; margin-top: .5rem; text-transform: uppercase; }
+.form-errors p { margin: 0; }
+@media (max-width: 375px) { .auth-main { padding: 24px; } .auth-card { padding: 1.25rem; } }

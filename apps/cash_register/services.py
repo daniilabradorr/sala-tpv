@@ -2,11 +2,12 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-
-from apps.cash_register.helpers import business_exists
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
+from apps.cash_register.helpers import business_exists
 from apps.cash_register.models import CashCount, CashMovement, CashRegister, CashSession
 from apps.cash_register.repositories import CashRegisterRepository
 from apps.core.models import Business
@@ -23,6 +24,104 @@ from apps.users.models import CustomUser
 
 ZERO = Decimal("0.00")
 MONEY_STEP = Decimal("0.01")
+
+
+def _lock_cash_business(*, business):
+    """Lock Business first so every cash definition operation shares one order."""
+    if business is None or not getattr(business, "pk", None):
+        raise ValidationError("Debes indicar un negocio válido.")
+    try:
+        return Business.objects.select_for_update().get(pk=business.pk)
+    except Business.DoesNotExist as exc:
+        raise ValidationError("El negocio indicado no existe.") from exc
+
+
+def _lock_cash_store(*, business, store):
+    """Lock a tenant Store after its Business has already been locked."""
+    locked_store = (
+        Store.objects.select_for_update()
+        .filter(pk=getattr(store, "pk", None), business=business)
+        .first()
+    )
+    if locked_store is None:
+        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    return locked_store
+
+
+def _locked_admin_register(*, business, store, cash_register):
+    if not business or not store or store.business_id != business.pk:
+        raise ValidationError("La tienda no pertenece al negocio indicado.")
+    try:
+        return CashRegister.objects.select_for_update().get(
+            pk=cash_register.pk, business=business, store=store
+        )
+    except CashRegister.DoesNotExist as exc:
+        raise ValidationError("La caja no pertenece a esta tienda.") from exc
+
+
+@transaction.atomic
+def create_cash_register(*, business, store, name, code):
+    """Create a register from trusted tenant and Store context."""
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
+    register = CashRegister(
+        business=locked_business,
+        store=locked_store,
+        name=name,
+        code=code,
+        is_active=True,
+    )
+    register.full_clean()
+    register.save()
+    return register
+
+
+@transaction.atomic
+def update_cash_register(*, business, store, cash_register, name, code):
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
+    locked = _locked_admin_register(
+        business=locked_business, store=locked_store, cash_register=cash_register
+    )
+    locked.name, locked.code = name, code
+    locked.full_clean()
+    locked.save(update_fields=["name", "code", "updated_at"])
+    return locked
+
+
+@transaction.atomic
+def activate_cash_register(*, business, store, cash_register):
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
+    locked = _locked_admin_register(
+        business=locked_business, store=locked_store, cash_register=cash_register
+    )
+    if not locked.is_active:
+        locked.is_active = True
+        locked.save(update_fields=["is_active", "updated_at"])
+    return locked
+
+
+@transaction.atomic
+def deactivate_cash_register(*, business, store, cash_register):
+    # Global lock order: Business -> Store -> CashRegister -> CashSession.
+    locked_business = _lock_cash_business(business=business)
+    locked_store = _lock_cash_store(business=locked_business, store=store)
+    locked = _locked_admin_register(
+        business=locked_business, store=locked_store, cash_register=cash_register
+    )
+    if not locked.is_active:
+        return locked
+    if CashSession.objects.filter(
+        cash_register=locked, status=CashSession.Status.OPEN
+    ).exists():
+        raise ValidationError(
+            "No puedes desactivar esta caja porque tiene una sesión abierta. "
+            "Cierra la sesión antes de desactivarla."
+        )
+    locked.is_active = False
+    locked.save(update_fields=["is_active", "updated_at"])
+    return locked
 
 
 class CashRegisterService:
@@ -161,13 +260,29 @@ class CashRegisterService:
         # ==========================================================
 
         with transaction.atomic():
+            # Business is always locked before Store. Besides matching Store
+            # lifecycle, this prevents an INSERT's Business FK check from
+            # completing the inverse Store -> Business lock path.
+            try:
+                locked_business = self.repository.get_business_for_update(
+                    business=business
+                )
+            except Business.DoesNotExist as exc:
+                raise ValidationError(
+                    {"business": "El negocio no existe o está inactivo."}
+                ) from exc
+            if not locked_business.is_active:
+                raise ValidationError(
+                    {"business": "El negocio no existe o está inactivo."}
+                )
+
             # ------------------------------------------------------
             # Store
             # ------------------------------------------------------
 
             try:
-                store = self.repository.get_store(
-                    business=business,
+                store = self.repository.get_store_for_update(
+                    business=locked_business,
                     store_id=store_id,
                 )
 
@@ -187,7 +302,7 @@ class CashRegisterService:
 
             try:
                 cash_register = self.repository.get_cash_register_for_update(
-                    business=business,
+                    business=locked_business,
                     store=store,
                     cash_register_id=cash_register_id,
                 )
@@ -242,7 +357,7 @@ class CashRegisterService:
             try:
                 with transaction.atomic():
                     session = self.repository.create_cash_session(
-                        business=business,
+                        business=locked_business,
                         store=store,
                         cash_register=cash_register,
                         opened_by=user,
@@ -254,6 +369,26 @@ class CashRegisterService:
                     {"cash_register": "La caja ya tiene una sesión abierta."}
                 ) from exc
 
+            log_event(
+                business=locked_business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_SESSION_OPENED,
+                module=AuditModule.CASH_REGISTER,
+                entity=session,
+                message=f"Sesión de caja #{session.pk} abierta.",
+                old_payload=None,
+                new_payload={
+                    "status": session.status,
+                    "opening_amount": session.opening_amount,
+                    "expected_cash_amount": session.expected_cash_amount,
+                    "opened_at": session.opened_at,
+                },
+                metadata={
+                    "cash_register_id": session.cash_register_id,
+                    "cash_register_code": cash_register.code,
+                },
+            )
             return session
 
     @staticmethod
@@ -327,6 +462,7 @@ class CashRegisterService:
                 )
             if not session.is_open:
                 raise ValidationError({"cash_session": "La sesión está cerrada."})
+            previous_expected_cash_amount = session.expected_cash_amount
             direction = Decimal("1")
             if movement_type == CashMovement.MovementType.CASH_OUT or (
                 movement_type == CashMovement.MovementType.ADJUSTMENT
@@ -354,6 +490,35 @@ class CashRegisterService:
             )
             session.expected_cash_amount = balance
             session.save(update_fields=["expected_cash_amount", "updated_at"])
+            event_type = {
+                CashMovement.MovementType.CASH_IN: AuditEventType.CASH_IN,
+                CashMovement.MovementType.CASH_OUT: AuditEventType.CASH_OUT,
+                CashMovement.MovementType.ADJUSTMENT: AuditEventType.CASH_ADJUSTED,
+            }[movement_type]
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=event_type,
+                module=AuditModule.CASH_REGISTER,
+                entity=movement,
+                message=f"Movimiento de caja #{movement.pk} registrado.",
+                old_payload={
+                    "expected_cash_amount": previous_expected_cash_amount,
+                },
+                new_payload={
+                    "expected_cash_amount": session.expected_cash_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                    "movement_type": movement.movement_type,
+                    "adjustment_direction": movement.adjustment_direction,
+                    "amount": movement.amount,
+                    "balance_after": movement.balance_after,
+                    "reason": movement.reason,
+                },
+            )
             return movement
 
     def register_cash_in(self, **kwargs):
@@ -418,7 +583,7 @@ class CashRegisterService:
                 raise ValidationError(
                     {"cash_session": "La sesión no está abierta en la caja."}
                 )
-            return self.repository.create_cash_count(
+            count = self.repository.create_cash_count(
                 count_type=CashCount.CountType.REVIEW,
                 business=business,
                 store=store,
@@ -429,6 +594,27 @@ class CashRegisterService:
                 counted_by=user,
                 notes=notes,
             )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_COUNTED,
+                module=AuditModule.CASH_REGISTER,
+                entity=count,
+                message=f"Arqueo de caja #{count.pk} registrado.",
+                old_payload=None,
+                new_payload={
+                    "count_type": count.count_type,
+                    "counted_amount": count.counted_amount,
+                    "expected_amount": count.expected_amount,
+                    "difference_amount": count.difference_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                },
+            )
+            return count
 
     def close_cash_session(
         self,
@@ -482,6 +668,7 @@ class CashRegisterService:
                 raise ValidationError(
                     {"cash_session": "La sesión ya está cerrada o no es válida."}
                 )
+            previous_status = session.status
             difference = counted - session.expected_cash_amount
             count = self.repository.create_cash_count(
                 count_type=CashCount.CountType.CLOSING,
@@ -508,6 +695,47 @@ class CashRegisterService:
                     "closed_at",
                     "updated_at",
                 ]
+            )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_COUNTED,
+                module=AuditModule.CASH_REGISTER,
+                entity=count,
+                message=f"Arqueo de caja #{count.pk} registrado.",
+                old_payload=None,
+                new_payload={
+                    "count_type": count.count_type,
+                    "counted_amount": count.counted_amount,
+                    "expected_amount": count.expected_amount,
+                    "difference_amount": count.difference_amount,
+                },
+                metadata={
+                    "cash_session_id": session.pk,
+                    "cash_register_id": session.cash_register_id,
+                },
+            )
+            log_event(
+                business=business,
+                store=store,
+                user=user,
+                event_type=AuditEventType.CASH_SESSION_CLOSED,
+                module=AuditModule.CASH_REGISTER,
+                entity=session,
+                message=f"Sesión de caja #{session.pk} cerrada.",
+                old_payload={"status": previous_status},
+                new_payload={
+                    "status": session.status,
+                    "counted_cash_amount": session.counted_cash_amount,
+                    "difference_amount": session.difference_amount,
+                    "closed_at": session.closed_at,
+                },
+                metadata={
+                    "cash_register_id": session.cash_register_id,
+                    "closing_count_id": count.pk,
+                    "expected_cash_amount": session.expected_cash_amount,
+                },
             )
             return session, count
 

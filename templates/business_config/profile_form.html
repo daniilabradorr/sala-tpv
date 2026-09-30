@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% load static %}
+{% block title %}Configuración · Negocio | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/configuration.css' %}">{% endblock %}
+
+{% block content %}
+<section class="card business-profile-card">
+    <div class="page-heading">
+        <div>
+            <h1>Configuración</h1>
+            <p>{{ request.user.business.name }}</p>
+        </div>
+    </div>
+
+    <nav class="config-nav" aria-label="Configuración de empresa">
+        <a class="button" href="{% url 'business_config:profile' %}" aria-current="page">Negocio</a>
+        <a class="button button-secondary" href="{% url 'business_config:pos' %}">TPV</a>
+    </nav>
+    {{ persisted_config|json_script:"configuration-persisted" }}
+
+    <form method="post" enctype="multipart/form-data" class="stacked-form business-profile-form" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <fieldset class="form-section">
+            <legend>Datos legales</legend>
+            <p class="fiscal-warning">Los cambios en estos datos se aplicarán a nuevos documentos. Los documentos ya emitidos conservan sus datos históricos.</p>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.legal_name %}
+                {% include "business_config/_field.html" with field=form.tax_identifier %}
+                {% include "business_config/_field.html" with field=form.currency_code %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Identidad comercial</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.trade_name %}
+                {% include "business_config/_field.html" with field=form.brand_name %}
+                <div class="media-editor">
+{% load media_tags static %}
+{% if form.instance.logo %}{% media_variant_url form.instance.logo "thumb" as logo_src %}{% elif form.instance.logo_url %}{% firstof form.instance.logo_url as logo_src %}{% else %}{% static "img/media-placeholder.svg" as logo_src %}{% endif %}
+<img class="media-preview media-preview--logo" data-media-preview src="{{ logo_src }}" data-media-fallback="{% static 'img/media-placeholder.svg' %}" alt="Logo de {{ form.instance.trade_name|default:form.instance.business.name }}">
+{% include "business_config/_field.html" with field=form.logo_upload %}
+{% include "business_config/_field.html" with field=form.remove_logo %}
+</div>
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Contacto</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.phone %}
+                {% include "business_config/_field.html" with field=form.email %}
+                {% include "business_config/_field.html" with field=form.website %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Dirección</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.address_line_1 %}
+                {% include "business_config/_field.html" with field=form.address_line_2 %}
+                {% include "business_config/_field.html" with field=form.postal_code %}
+                {% include "business_config/_field.html" with field=form.city %}
+                {% include "business_config/_field.html" with field=form.province %}
+                {% include "business_config/_field.html" with field=form.country_code %}
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>Ticket</legend>
+            <div class="form-grid">
+                {% include "business_config/_field.html" with field=form.receipt_footer %}
+                <aside class="config-preview"><strong>Vista previa</strong><p data-receipt-preview>{{ form.receipt_footer.value|default:"Tu mensaje aparecerá aquí." }}</p></aside>
+            </div>
+        </fieldset>
+        <fieldset class="form-section"><legend>Política de devoluciones</legend>{% include "business_config/_field.html" with field=form.return_policy %}</fieldset>
+
+        <div class="actions"><button type="submit" class="button">Guardar cambios</button></div>
+    </form>
+    {% include "business_config/_change_dialogs.html" %}
+</section>
+{% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/configuration.js' %}"></script>{% endblock %}

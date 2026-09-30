@@ -6,15 +6,21 @@ Reglas:
 - Ningún formulario calcula o persiste totales definitivos.
 """
 
+import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
+from apps.core.forms import wire_field_accessibility
+from apps.billing.models import BillingSeries
+from apps.payments.models import PaymentMethod
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -27,6 +33,57 @@ from apps.users.models import CustomUser
 
 
 EMPTY_CHOICE = [("", "Todos")]
+
+
+class CheckoutForm(forms.Form):
+    mode = forms.ChoiceField(
+        choices=(("single", "Pago simple"), ("split", "Pago mixto")), required=False
+    )
+    method = forms.ModelChoiceField(PaymentMethod.objects.none(), required=False)
+    cash_received = forms.DecimalField(
+        required=False, min_value=Decimal("0.00"), max_digits=14, decimal_places=2
+    )
+    external_reference = forms.CharField(required=False, max_length=150)
+    payment_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+    billing_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+    series = forms.ModelChoiceField(BillingSeries.objects.none(), required=False)
+
+    def __init__(self, *args, methods, series, **kwargs):
+        kwargs.setdefault("initial", {})
+        kwargs["initial"].setdefault("mode", "single")
+        kwargs["initial"].setdefault("payment_idempotency_key", uuid.uuid4())
+        kwargs["initial"].setdefault("billing_idempotency_key", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["method"].queryset = methods
+        self.fields["series"].queryset = series
+
+
+class CheckoutPaymentPartForm(forms.Form):
+    method = forms.ModelChoiceField(PaymentMethod.objects.none())
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_digits=14, decimal_places=2
+    )
+    cash_received = forms.DecimalField(
+        required=False, min_value=Decimal("0.00"), max_digits=14, decimal_places=2
+    )
+    external_reference = forms.CharField(required=False, max_length=150)
+    idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, methods, **kwargs):
+        kwargs.setdefault("initial", {}).setdefault("idempotency_key", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["method"].queryset = methods
+
+
+CheckoutPaymentFormSet = forms.formset_factory(
+    CheckoutPaymentPartForm,
+    extra=0,
+    min_num=2,
+    validate_min=True,
+    can_delete=True,
+    max_num=50,
+    validate_max=True,
+)
 
 
 def _get_pos_settings(business):
@@ -49,6 +106,17 @@ def _get_pos_settings(business):
 
 class SaleFilterForm(forms.Form):
     """Formulario para filtrar el listado de ventas."""
+
+    period = forms.ChoiceField(
+        label="Periodo",
+        required=False,
+        choices=(
+            ("today", "Hoy"),
+            ("7d", "7 días"),
+            ("30d", "30 días"),
+            ("custom", "Personalizado"),
+        ),
+    )
 
     query = forms.CharField(
         label="Buscar",
@@ -123,7 +191,6 @@ class SaleFilterForm(forms.Form):
             "name",
             "pk",
         )
-
         self.fields["opened_by"].queryset = CustomUser.objects.filter(
             business=business,
             is_active=True,
@@ -138,6 +205,20 @@ class SaleFilterForm(forms.Form):
 
         date_from = cleaned_data.get("date_from")
         date_to = cleaned_data.get("date_to")
+
+        # Las fechas explícitas siempre prevalecen y convierten el periodo en
+        # personalizado. Así nunca se mezclan dos contratos incompatibles.
+        if date_from or date_to:
+            cleaned_data["period"] = "custom"
+        else:
+            period = cleaned_data.get("period") or "today"
+            days = {"today": 0, "7d": 6, "30d": 29}.get(period, 0)
+            today = timezone.localdate()
+            cleaned_data["period"] = (
+                period if period in {"today", "7d", "30d"} else "today"
+            )
+            cleaned_data["date_from"] = today - timedelta(days=days)
+            cleaned_data["date_to"] = today
 
         if date_from and date_to and date_from > date_to:
             raise ValidationError(
@@ -185,6 +266,7 @@ class SaleOpenForm(forms.Form):
         business,
         store,
         user,
+        locked_cash_session=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -192,6 +274,7 @@ class SaleOpenForm(forms.Form):
         self.business = business
         self.store = store
         self.user = user
+        self.locked_cash_session = locked_cash_session
         self.pos_settings = _get_pos_settings(
             business,
         )
@@ -225,10 +308,11 @@ class SaleOpenForm(forms.Form):
             store=store,
             status=CashSession.Status.OPEN,
             closed_at__isnull=True,
+            cash_register__is_active=True,
         )
         if register_id:
             session_queryset = session_queryset.filter(cash_register_id=register_id)
-        else:
+        elif self.is_bound:
             session_queryset = session_queryset.none()
         session_queryset = session_queryset.order_by("pk")
 
@@ -236,7 +320,23 @@ class SaleOpenForm(forms.Form):
 
         self.fields["cash_session"].queryset = session_queryset
 
-        if self.pos_settings and self.pos_settings.require_open_cash_register:
+        if locked_cash_session is not None:
+            self.fields["cash_register"].queryset = register_queryset.filter(
+                pk=locked_cash_session.cash_register_id
+            )
+            self.fields["cash_session"].queryset = session_queryset.filter(
+                pk=locked_cash_session.pk
+            )
+            self.fields["cash_register"].initial = locked_cash_session.cash_register
+            self.fields["cash_session"].initial = locked_cash_session
+            self.fields["cash_register"].widget = forms.HiddenInput()
+            self.fields["cash_session"].widget = forms.HiddenInput()
+
+        if (
+            locked_cash_session is None
+            and self.pos_settings
+            and self.pos_settings.require_open_cash_register
+        ):
             self.fields["cash_register"].required = True
 
             self.fields["cash_session"].required = True
@@ -306,6 +406,12 @@ class SaleOpenForm(forms.Form):
 class SaleHeaderUpdateForm(forms.Form):
     """Formulario para modificar la cabecera editable."""
 
+    customer_mode = forms.ChoiceField(
+        label="Tipo de venta",
+        choices=(("counter", "Mostrador"), ("customer", "Cliente")),
+        required=False,
+    )
+
     customer = forms.ModelChoiceField(
         label="Cliente",
         required=False,
@@ -338,13 +444,22 @@ class SaleHeaderUpdateForm(forms.Form):
             "name",
             "pk",
         )
+        wire_field_accessibility(self)
 
     def clean(self):
         cleaned_data = super().clean()
 
-        customer = cleaned_data.get(
-            "customer",
-        )
+        customer_mode = cleaned_data.get("customer_mode")
+        customer = cleaned_data.get("customer")
+        if customer_mode == "counter":
+            customer = None
+            cleaned_data["customer"] = None
+        elif customer_mode == "customer":
+            pass
+        elif "customer_mode" not in self.data:
+            # Preserve the legacy form/HTTP contract outside the workspace.
+            customer_mode = "customer" if customer is not None else "counter"
+            cleaned_data["customer_mode"] = customer_mode
 
         document_type = cleaned_data.get(
             "document_type_requested",
@@ -559,6 +674,7 @@ class SaleLineCreateForm(BaseSaleLineForm):
                 "pk",
             )
         )
+        wire_field_accessibility(self)
 
     def get_reference_price(
         self,
@@ -598,15 +714,30 @@ class SaleLineUpdateForm(BaseSaleLineForm):
             **kwargs,
         )
 
-        self.fields[
-            "unit_base_price"
-        ].help_text = "Precio histórico aplicado a esta línea."
+        if self.pos_settings and not self.pos_settings.allow_manual_price:
+            self.fields.pop("unit_base_price")
+        else:
+            self.fields[
+                "unit_base_price"
+            ].help_text = "Precio histórico aplicado a esta línea."
+
+        if self.pos_settings and not self.pos_settings.allow_manual_discounts:
+            self.fields.pop("discount_amount")
+        wire_field_accessibility(self)
 
     def get_reference_price(
         self,
         cleaned_data,
     ):
         return self.line.unit_base_price
+
+
+class SaleLineQuantityUpdateForm(forms.Form):
+    """Validate a quantity-only cart update."""
+
+    quantity = forms.DecimalField(
+        label="Cantidad", max_digits=14, decimal_places=3, min_value=Decimal("0.001")
+    )
 
 
 # ==========================================================
@@ -644,6 +775,7 @@ class SaleCancelForm(forms.Form):
 
         if self.pos_settings and self.pos_settings.require_pin_for_sensitive_actions:
             self.fields["pin"].required = True
+        wire_field_accessibility(self)
 
     def clean_pin(self):
         pin = self.cleaned_data.get(
@@ -807,6 +939,36 @@ class SaleReturnCreateForm(forms.Form):
 # ==========================================================
 # Líneas de devolución
 # ==========================================================
+
+
+class SaleReturnWorkspaceLineForm(forms.Form):
+    """Entrada inline; los services conservan la autoridad del dominio."""
+
+    quantity = forms.DecimalField(
+        label="Cantidad a devolver",
+        max_digits=14,
+        decimal_places=3,
+        min_value=Decimal("0.000"),
+    )
+    restock = forms.BooleanField(
+        label="Devolver al stock disponible", required=False, initial=True
+    )
+
+    def __init__(self, *args, original_line, available_quantity, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.original_line = original_line
+        self.available_quantity = available_quantity
+        self.fields["quantity"].widget.attrs["data-available-max"] = format(
+            available_quantity, "f"
+        )
+
+    def clean_quantity(self):
+        quantity = self.cleaned_data["quantity"]
+        if quantity > self.available_quantity:
+            raise ValidationError(
+                f"La cantidad supera lo que todavía puede devolverse ({self.available_quantity})."
+            )
+        return quantity
 
 
 class SaleReturnLineCreateForm(forms.Form):

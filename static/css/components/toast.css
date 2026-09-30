@@ -1,0 +1,5 @@
+.nx-toast-region { display: grid; gap: var(--nx-space-2); inset: auto var(--nx-space-4) var(--nx-space-4) auto; max-width: min(24rem, calc(100vw - 2rem)); position: fixed; z-index: 1100; }
+.nx-toast { background: var(--nx-surface, #fff); border-inline-start: 4px solid currentColor; border-radius: var(--nx-radius-md); box-shadow: var(--nx-shadow-md); padding: var(--nx-space-3) var(--nx-space-4); animation: nx-toast-in .18s ease-out; }
+.nx-toast--success { color: var(--nx-success, #166534); } .nx-toast--info { color: var(--nx-primary, #1d4ed8); } .nx-toast--warning { color: var(--nx-warning, #92400e); } .nx-toast--error { color: var(--nx-danger, #b91c1c); }
+@keyframes nx-toast-in { from { opacity: 0; transform: translateY(.5rem); } }
+@media (prefers-reduced-motion: reduce) { .nx-toast { animation: none; } }

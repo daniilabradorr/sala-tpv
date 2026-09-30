@@ -1,9 +1,36 @@
 from django import forms
 
 from apps.catalog.models import Category, Tax, Product
+from apps.core.media.validation import validate_image_upload
 
 
-class CategoryBaseForm(forms.ModelForm):
+class ManagedImageModelForm(forms.ModelForm):
+    image_upload = forms.FileField(
+        label="Seleccionar nueva imagen",
+        required=False,
+        widget=forms.FileInput(
+            attrs={
+                "accept": "image/jpeg,image/png,image/webp",
+                "data-media-upload": "",
+            }
+        ),
+    )
+    remove_image = forms.BooleanField(label="Eliminar imagen", required=False)
+
+    def clean_image_upload(self):
+        upload = self.cleaned_data.get("image_upload")
+        return validate_image_upload(upload) if upload else upload
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("image_upload") and cleaned.get("remove_image"):
+            raise forms.ValidationError(
+                "No puedes subir y eliminar una imagen al mismo tiempo."
+            )
+        return cleaned
+
+
+class CategoryBaseForm(ManagedImageModelForm):
     """
     Formulario base para categorías.
 
@@ -293,11 +320,10 @@ class TaxUpdateForm(TaxBaseForm):
             "operacion_exenta",
             "has_equivalence_surcharge",
             "equivalence_surcharge_rate",
-            "is_active",
         ]
 
 
-class ProductBaseForm(forms.ModelForm):
+class ProductBaseForm(ManagedImageModelForm):
     """
     Formulario base para productos y servicios.
 
@@ -307,7 +333,7 @@ class ProductBaseForm(forms.ModelForm):
     - tax solo muestra impuestos activos del negocio.
     - sku se puede dejar vacío y se genera automáticamente.
     - barcode se puede dejar vacío y se genera automáticamente solo en productos físicos.
-    - is_active y track_stock en la creacion no se ponen,se dejan como default, en el update si.
+    - El estado y el control de stock se configuran tanto al crear como al editar.
     """
 
     class Meta:
@@ -323,6 +349,8 @@ class ProductBaseForm(forms.ModelForm):
             "unit",
             "sort_order",
             "is_service",
+            "track_stock",
+            "is_active",
         ]
 
         widgets = {
@@ -386,6 +414,8 @@ class ProductBaseForm(forms.ModelForm):
                     "class": "form-check-input",
                 }
             ),
+            "track_stock": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
 
         help_texts = {
@@ -399,6 +429,8 @@ class ProductBaseForm(forms.ModelForm):
             "unit": "Unidad de venta.",
             "sort_order": "Orden visual dentro de la categoría. Los números más bajos aparecen antes.",
             "is_service": "Marca si no es un producto físico.",
+            "track_stock": "Inventory gestionará las existencias por tienda.",
+            "is_active": "Permite usar el artículo en las operaciones actuales.",
         }
 
     def __init__(self, *args, business=None, **kwargs):
@@ -503,6 +535,8 @@ class ProductCreateForm(ProductBaseForm):
             "unit",
             "sort_order",
             "is_service",
+            "track_stock",
+            "is_active",
         ]
 
 

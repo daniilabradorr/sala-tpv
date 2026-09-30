@@ -1,8 +1,11 @@
-{% extends "base.html" %}
-{% block title %}Documentos fiscales{% endblock %}
-{% block content %}
-<main><h1>Documentos fiscales</h1>
-  <form method="get">{{ form.non_field_errors }}{{ form.as_p }}<button type="submit">Filtrar</button></form>
-  {% for document in documents %}<p><a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">{{ document }}</a> — {{ document.get_status_display }} — {{ document.total_amount }} EUR</p>{% empty %}<p>No hay documentos.</p>{% endfor %}
-</main>
-{% endblock %}
+{% extends "base.html" %}{% load static %}
+{% block title %}Facturación | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/billing.css' %}">{% endblock %}
+{% block content %}<section class="erp-page billing-page">
+<header class="erp-header"><div><p class="erp-eyebrow">Facturación</p><h1>Documentos fiscales</h1><p class="erp-subtitle">{{ store.name }} · histórico fiscal de la tienda</p></div></header>
+{% include "billing/_nav.html" with billing_section="documents" %}
+{% include "billing/partials/_document_filters.html" %}
+{% include "billing/partials/document_results.html" %}
+</section>{% endblock %}
+
+{% block extra_js %}<script type="module" src="{% static 'js/pages/billing.js' %}"></script>{% endblock %}

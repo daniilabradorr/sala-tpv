@@ -35,6 +35,20 @@ def is_owner_or_manager(user):
     return is_owner(user) or is_manager(user)
 
 
+def can_manage_stores(user):
+    """Administrative Store scope; deliberately independent of StoreAccess."""
+    if not is_authenticated_user(user):
+        return False
+    if user.is_superuser:
+        return bool(getattr(user, "business_id", None))
+    return bool(user.business_id) and is_owner_or_manager(user)
+
+
+def can_manage_cash_registers(user):
+    """Manage register definitions, not day-to-day cash permissions."""
+    return can_manage_stores(user)
+
+
 def belongs_to_business(user, business):
     """Comprueba si el usuario pertenece al negocio indicado."""
 
@@ -164,6 +178,28 @@ def can_manage_users(user):
     return is_owner(user) or is_manager(user)
 
 
+def can_manage_user(actor, target_user):
+    """Indica si ``actor`` puede mutar al usuario objetivo.
+
+    Los managers pueden administrar managers y cashiers de su negocio, pero
+    nunca owners. El bypass de superusuario se conserva para administración.
+    """
+
+    if not is_authenticated_user(actor) or target_user is None:
+        return False
+
+    if actor.is_superuser:
+        return True
+
+    if actor.business_id != target_user.business_id:
+        return False
+
+    if is_owner(actor):
+        return True
+
+    return is_manager(actor) and target_user.role != RoleChoices.OWNER
+
+
 def can_manage_business_settings(user):
     """Solo owner puede modificar la configuración del negocio."""
 
@@ -185,6 +221,16 @@ def can_view_reports(user):
     if user.is_superuser:
         return True
 
+    return is_owner(user) or is_manager(user)
+
+
+def can_view_activity(user):
+    """Owner y manager pueden consultar la actividad de su ámbito autorizado."""
+
+    if not is_authenticated_user(user):
+        return False
+    if user.is_superuser:
+        return bool(getattr(user, "business_id", None))
     return is_owner(user) or is_manager(user)
 
 

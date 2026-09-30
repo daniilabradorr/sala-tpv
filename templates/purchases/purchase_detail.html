@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Compra {{ purchase.pk }} | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/purchases.css' %}">{% endblock %}
+{% block content %}
+<section class="purchases-page">
+  <a href="{% url 'purchases:purchase_list' %}">← Compras</a>
+  <header class="erp-header">
+    <div><h1>Compra {{ purchase.reference|default:purchase.pk }}</h1><span class="badge">{{ purchase.get_status_display }}</span><p>{{ purchase.supplier.name }} · {{ purchase.store.name }}</p></div>
+    <div class="purchase-actions">
+      {% if purchase.is_draft %}
+        <a class="button button-secondary" href="{% url 'purchases:purchase_update' purchase.pk %}">Editar cabecera</a>
+        <button class="button" type="button" data-nx-modal-trigger="purchase-line-modal" hx-get="{% url 'purchases:purchase_line_create' purchase.pk %}" hx-target="#purchase-line-modal-body">+ Añadir producto</button>
+        <a class="button" href="{% url 'purchases:purchase_order' purchase.pk %}">Realizar pedido</a>
+        <button class="button button-danger" type="button" data-nx-modal-trigger="cancel-purchase-modal">Cancelar compra</button>
+      {% elif purchase.is_ordered or purchase.is_partially_received %}<a class="button" href="{% url 'purchases:purchase_receive' purchase.pk %}">Registrar recepción</a>{% endif %}
+    </div>
+  </header>
+  {% if receipt_registered %}<div class="feedback feedback-success" role="status"><strong>✓ RECEPCIÓN REGISTRADA</strong><br>{{ received_units }} unidades recibidas. Estado: {{ purchase.get_status_display }}.</div>{% endif %}
+  <nav class="tabs" aria-label="Detalle de compra">
+    <a href="?tab=summary" hx-get="?tab=summary" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'summary' %}aria-current="page"{% endif %}>Resumen</a>
+    <a href="?tab=products" hx-get="?tab=products" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'products' %}aria-current="page"{% endif %}>Productos</a>
+    <a href="?tab=receipts" hx-get="?tab=receipts" hx-target="#purchase-workspace" hx-swap="outerHTML" hx-push-url="true" {% if tab == 'receipts' %}aria-current="page"{% endif %}>Recepciones</a>
+  </nav>
+  {% include "purchases/partials/_purchase_workspace.html" %}
+</section>
+<dialog id="purchase-line-modal" class="nx-modal" data-nx-modal aria-labelledby="purchase-line-modal-title"><div class="card"><button type="button" data-nx-modal-close aria-label="Cerrar">×</button><div id="purchase-line-modal-body"></div></div></dialog>
+<dialog id="cancel-purchase-modal" class="nx-modal" data-nx-modal aria-labelledby="cancel-title"><div class="card"><button type="button" data-nx-modal-close aria-label="Cerrar">×</button><h2 id="cancel-title">Cancelar compra</h2><p>Se cancelará esta compra y dejará de estar operativa. El histórico se conservará y no se eliminará ningún registro.</p><form method="post" action="{% url 'purchases:purchase_cancel' purchase.pk %}" hx-post="{% url 'purchases:purchase_cancel' purchase.pk %}" hx-target="#main-content" data-nx-critical-form>{% csrf_token %}<button class="button button-danger" type="submit" data-loading-text="Procesando…">Cancelar compra</button><button class="button button-secondary" type="button" data-nx-modal-close>Volver</button></form></div></dialog>
+{% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/purchases.js' %}"></script>{% endblock %}

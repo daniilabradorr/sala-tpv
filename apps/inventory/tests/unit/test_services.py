@@ -2,11 +2,15 @@
 
 from decimal import Decimal
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.exceptions import AuditValidationError
+from apps.audit.models import AuditEvent
 from apps.inventory.models import StockAdjustment, StockAdjustmentLine, StockMovement
 from apps.inventory.services import (
     add_stock_adjustment_line,
@@ -17,6 +21,7 @@ from apps.inventory.services import (
     create_stock_adjustment,
     decrease_stock,
     get_or_create_inventory_item,
+    get_or_create_inventory_item_for_purchase_receipt,
     increase_stock,
     update_stock_adjustment_line,
 )
@@ -26,6 +31,14 @@ from apps.inventory.tests.factories import (
     create_inventory_owner,
     create_inventory_product,
     create_inventory_store,
+)
+from apps.purchases.models import (
+    Purchase,
+    PurchaseLine,
+    PurchaseReceipt,
+    PurchaseReceiptLine,
+    PurchaseStatusChoices,
+    Supplier,
 )
 
 
@@ -68,6 +81,20 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(updated_item.current_stock, Decimal("10.000"))
         self.assertEqual(movement.movement_type, StockMovement.TYPE_INITIAL)
         self.assertEqual(movement.quantity, Decimal("10.000"))
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_INITIALIZED)
+        self.assertEqual(event.module, AuditModule.INVENTORY)
+        self.assertEqual(event.business, self.business)
+        self.assertEqual(event.store, self.store)
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.entity_type, "inventory.stockmovement")
+        self.assertEqual(event.entity_id, str(movement.pk))
+        self.assertEqual(event.old_payload, {"current_stock": "0.000"})
+        self.assertEqual(event.new_payload, {"current_stock": "10.000"})
+        self.assertEqual(event.metadata["inventory_item_id"], self.item.pk)
+        self.assertEqual(event.metadata["product_id"], self.product.pk)
+        self.assertEqual(event.metadata["movement_type"], movement.movement_type)
+        self.assertEqual(event.metadata["quantity"], "10.000")
+        self.assertNotIn("notes", event.metadata)
 
     def test_confirm_stock_adjustment_applies_counted_stock_and_creates_movement(self):
         """Confirmar ajuste debe aplicar stock contado y crear movimiento."""
@@ -105,6 +132,18 @@ class InventoryServicesTests(TestCase):
                 quantity=Decimal("3.000"),
             ).exists()
         )
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_ADJUSTED)
+        self.assertEqual(event.entity_type, "inventory.stockadjustment")
+        self.assertEqual(event.entity_id, str(adjustment.pk))
+        self.assertEqual(event.user, self.user)
+        self.assertEqual(event.old_payload, {"status": StockAdjustment.STATUS_DRAFT})
+        self.assertEqual(event.new_payload["status"], StockAdjustment.STATUS_CONFIRMED)
+        self.assertIsNotNone(event.new_payload["confirmed_at"])
+        self.assertEqual(event.metadata["line_count"], 1)
+        self.assertEqual(event.metadata["movement_count"], 1)
+        self.assertTrue(event.metadata["operation_id"])
+        self.assertNotIn("lines", event.metadata)
+        self.assertNotIn("notes", event.metadata)
 
     def test_cancel_stock_adjustment_changes_status_to_cancelled(self):
         """Cancelar ajuste en borrador debe pasar a estado cancelado."""
@@ -121,6 +160,15 @@ class InventoryServicesTests(TestCase):
         )
 
         self.assertEqual(cancelled.status, StockAdjustment.STATUS_CANCELLED)
+        event = AuditEvent.objects.get(
+            event_type=AuditEventType.STOCK_ADJUSTMENT_CANCELLED
+        )
+        self.assertEqual(event.old_payload, {"status": StockAdjustment.STATUS_DRAFT})
+        self.assertEqual(
+            event.new_payload, {"status": StockAdjustment.STATUS_CANCELLED}
+        )
+        self.assertEqual(event.metadata["code"], adjustment.code)
+        self.assertNotIn("notes", event.metadata)
 
     def test_cancel_stock_adjustment_rejects_non_draft_adjustment(self):
         """Cancelar un ajuste no borrador debe lanzar ValidationError."""
@@ -612,7 +660,7 @@ class InventoryServicesTests(TestCase):
         updated_item, movement = increase_stock(
             inventory_item=self.item,
             quantity=Decimal("10.000"),
-            movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
+            movement_type=StockMovement.TYPE_ADJUSTMENT_IN,
             user=self.user,
         )
 
@@ -623,6 +671,199 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(movement.stock_before, Decimal("-3.000"))
         self.assertEqual(movement.stock_after, Decimal("7.000"))
         self.assertTrue(movement.is_incoming)
+
+    def test_purchase_receipt_resolver_creates_zero_stock_for_inactive_product(self):
+        """Una compra pedida puede recibirse aunque después se desactive Product."""
+        product = create_inventory_product(
+            business=self.business, name="Producto desactivado", is_active=False
+        )
+
+        item = get_or_create_inventory_item_for_purchase_receipt(
+            business=self.business, store=self.store, product=product
+        )
+
+        self.assertEqual(item.current_stock, Decimal("0.000"))
+        self.assertEqual(item.reserved_stock, Decimal("0.000"))
+        self.assertEqual(item.minimum_stock, Decimal("0.000"))
+        self.assertTrue(item.is_active)
+        self.assertFalse(StockMovement.objects.filter(inventory_item=item).exists())
+
+    def test_purchase_receipt_resolver_returns_existing_active_item(self):
+        resolved = get_or_create_inventory_item_for_purchase_receipt(
+            business=self.business, store=self.store, product=self.product
+        )
+
+        self.assertEqual(resolved.pk, self.item.pk)
+
+    def test_purchase_receipt_resolver_rejects_inactive_item_without_reactivation(self):
+        self.item.is_active = False
+        self.item.save(update_fields=["is_active", "updated_at"])
+
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=self.store, product=self.product
+            )
+
+        self.item.refresh_from_db()
+        self.assertFalse(self.item.is_active)
+
+    def test_purchase_receipt_resolver_validates_domain(self):
+        other_business = create_business(name="Otro", slug="otro-resolver")
+        invalid_products = [
+            create_inventory_product(
+                business=self.business,
+                name="Servicio",
+                is_service=True,
+                track_stock=False,
+            ),
+            create_inventory_product(
+                business=self.business, name="Sin stock", track_stock=False
+            ),
+            create_inventory_product(business=other_business, name="Otro producto"),
+        ]
+        inactive_store = create_inventory_store(
+            business=self.business, name="Inactiva", is_active=False
+        )
+
+        for product in invalid_products:
+            with self.subTest(product=product), self.assertRaises(ValidationError):
+                get_or_create_inventory_item_for_purchase_receipt(
+                    business=self.business, store=self.store, product=product
+                )
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=inactive_store, product=self.product
+            )
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=other_business, store=self.store, product=self.product
+            )
+
+    def test_purchase_receipt_resolver_rejects_stale_active_store(self):
+        stale_store = create_inventory_store(
+            business=self.business, name="Tienda stale"
+        )
+        product = create_inventory_product(
+            business=self.business, name="Producto tienda stale"
+        )
+        type(stale_store).objects.filter(pk=stale_store.pk).update(is_active=False)
+        self.assertTrue(stale_store.is_active)
+
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=stale_store, product=product
+            )
+
+        stale_store.refresh_from_db()
+        self.assertFalse(stale_store.is_active)
+        self.assertFalse(
+            self.item.__class__.objects.filter(
+                business=self.business, store=stale_store, product=product
+            ).exists()
+        )
+
+    def test_purchase_receipt_resolver_rejects_stale_tracked_product(self):
+        stale_product = create_inventory_product(
+            business=self.business, name="Producto stale"
+        )
+        type(stale_product).objects.filter(pk=stale_product.pk).update(
+            track_stock=False
+        )
+        self.assertTrue(stale_product.track_stock)
+
+        with self.assertRaises(ValidationError):
+            get_or_create_inventory_item_for_purchase_receipt(
+                business=self.business, store=self.store, product=stale_product
+            )
+
+        stale_product.refresh_from_db()
+        self.assertFalse(stale_product.track_stock)
+        self.assertFalse(
+            self.item.__class__.objects.filter(
+                business=self.business, store=self.store, product=stale_product
+            ).exists()
+        )
+
+    def _purchase_receipt_relations(self):
+        supplier = Supplier.objects.create(business=self.business, name="Proveedor")
+        purchase = Purchase.objects.create(
+            business=self.business,
+            store=self.store,
+            supplier=supplier,
+            created_by=self.user,
+            status=PurchaseStatusChoices.ORDERED,
+            ordered_at=timezone.now(),
+        )
+        line = PurchaseLine.objects.create(
+            business=self.business,
+            purchase=purchase,
+            product=self.product,
+            product_name=self.product.name,
+            unit="ud",
+            quantity_ordered=Decimal("3.000"),
+            unit_cost=Decimal("4.00"),
+        )
+        receipt = PurchaseReceipt.objects.create(
+            business=self.business,
+            store=self.store,
+            purchase=purchase,
+            received_by=self.user,
+            received_at=timezone.now(),
+            idempotency_key=uuid4(),
+            idempotency_fingerprint="b" * 64,
+        )
+        receipt_line = PurchaseReceiptLine.objects.create(
+            business=self.business,
+            receipt=receipt,
+            purchase_line=line,
+            quantity_received=Decimal("3.000"),
+        )
+        return purchase, line, receipt, receipt_line
+
+    def test_increase_stock_supports_purchase_receipt_contract(self):
+        purchase, line, receipt, receipt_line = self._purchase_receipt_relations()
+        self.item.current_stock = Decimal("2.000")
+        self.item.save(update_fields=["current_stock", "updated_at"])
+
+        updated, movement = increase_stock(
+            inventory_item=self.item,
+            quantity=Decimal("3.000"),
+            movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
+            user=self.user,
+            unit_cost=line.unit_cost,
+            occurred_at=receipt.received_at,
+            purchase=purchase,
+            purchase_line=line,
+            purchase_receipt=receipt,
+            purchase_receipt_line=receipt_line,
+        )
+
+        self.assertEqual(updated.current_stock, Decimal("5.000"))
+        self.assertEqual(movement.stock_before, Decimal("2.000"))
+        self.assertEqual(movement.stock_after, Decimal("5.000"))
+        self.assertEqual(movement.purchase, purchase)
+        self.assertEqual(movement.purchase_line, line)
+        self.assertEqual(movement.purchase_receipt, receipt)
+        self.assertEqual(movement.purchase_receipt_line, receipt_line)
+        self.assertEqual(movement.unit_cost, line.unit_cost)
+        self.assertEqual(movement.occurred_at, receipt.received_at)
+
+    def test_increase_stock_rolls_back_incomplete_purchase_receipt(self):
+        self.item.current_stock = Decimal("2.000")
+        self.item.save(update_fields=["current_stock", "updated_at"])
+
+        with self.assertRaises(ValidationError):
+            increase_stock(
+                inventory_item=self.item,
+                quantity=Decimal("3.000"),
+                movement_type=StockMovement.TYPE_PURCHASE_RECEIPT,
+            )
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.current_stock, Decimal("2.000"))
+        self.assertFalse(
+            StockMovement.objects.filter(inventory_item=self.item).exists()
+        )
 
     def test_decrease_stock_rolls_back_when_movement_creation_fails(self):
         """Rollback real: current_stock se revierte si falla crear movimiento."""
@@ -678,3 +919,104 @@ class InventoryServicesTests(TestCase):
         self.assertEqual(movement.stock_after, Decimal("2.000"))
         self.assertEqual(line.system_stock, Decimal("-3.000"))
         self.assertEqual(line.difference, Decimal("5.000"))
+
+    def test_zero_difference_adjustment_audits_without_movement(self):
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            notes="no auditar",
+            user=self.user,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("0.000"),
+        )
+
+        confirm_stock_adjustment(adjustment=adjustment, user=self.user)
+
+        event = AuditEvent.objects.get(event_type=AuditEventType.STOCK_ADJUSTED)
+        self.assertEqual(event.metadata["movement_count"], 0)
+        self.assertFalse(
+            StockMovement.objects.filter(
+                stock_adjustment_line__adjustment=adjustment
+            ).exists()
+        )
+
+    def test_stock_audit_failures_roll_back_each_operation(self):
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            create_initial_stock(
+                inventory_item=self.item, quantity=Decimal("2.000"), user=self.user
+            )
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.current_stock, Decimal("0.000"))
+        self.assertFalse(StockMovement.objects.exists())
+
+        adjustment = create_stock_adjustment(
+            business=self.business,
+            store=self.store,
+            reason=StockAdjustment.REASON_STOCKTAKE,
+            user=self.user,
+        )
+        add_stock_adjustment_line(
+            adjustment=adjustment,
+            inventory_item=self.item,
+            counted_stock=Decimal("3.000"),
+        )
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            confirm_stock_adjustment(adjustment=adjustment, user=self.user)
+        adjustment.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertIsNone(adjustment.confirmed_at)
+        self.assertIsNone(adjustment.confirmed_by)
+        self.assertEqual(self.item.current_stock, Decimal("0.000"))
+        self.assertFalse(StockMovement.objects.exists())
+
+        with (
+            patch(
+                "apps.inventory.services.log_event",
+                side_effect=AuditValidationError("audit failed"),
+            ),
+            self.assertRaises(AuditValidationError),
+        ):
+            cancel_stock_adjustment(adjustment=adjustment, user=self.user)
+        adjustment.refresh_from_db()
+        self.assertEqual(adjustment.status, StockAdjustment.STATUS_DRAFT)
+        self.assertFalse(AuditEvent.objects.exists())
+
+    def test_generic_stock_mutations_do_not_create_inventory_audit(self):
+        increase_stock(
+            inventory_item=self.item,
+            quantity=Decimal("2.000"),
+            movement_type=StockMovement.TYPE_ADJUSTMENT_IN,
+            user=self.user,
+        )
+        decrease_stock(
+            inventory_item=self.item,
+            quantity=Decimal("1.000"),
+            movement_type=StockMovement.TYPE_ADJUSTMENT_OUT,
+            user=self.user,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                event_type__in=(
+                    AuditEventType.STOCK_INITIALIZED,
+                    AuditEventType.STOCK_ADJUSTED,
+                    AuditEventType.STOCK_ADJUSTMENT_CANCELLED,
+                )
+            ).exists()
+        )

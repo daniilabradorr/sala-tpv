@@ -1,0 +1,36 @@
+<div class="sales-results" aria-live="polite" aria-busy="false">
+    {% if sales %}
+        <div class="sales-table-wrap">
+            <table class="sales-table">
+                <thead><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Usuario</th><th>Estado</th><th>Pago</th><th>Documento</th><th class="numeric">Total</th></tr></thead>
+                <tbody>
+                {% for sale in sales %}
+                    <tr class="sales-row" data-href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">
+                        <td><a href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">#{{ sale.pk }}</a></td>
+                        <td><time datetime="{{ sale.created_at|date:'c' }}">{{ sale.created_at|date:"d/m/Y H:i" }}</time></td>
+                        <td>{{ sale.customer|default:"Mostrador" }}</td><td>{{ sale.opened_by }}</td>
+                        <td><span class="badge status-{{ sale.status }}">{{ sale.get_status_display }}</span></td>
+                        <td><span class="badge payment-{{ sale.payment_status }}">{{ sale.get_payment_status_display }}</span></td>
+                        <td>{{ sale.get_document_type_requested_display }}</td><td class="numeric"><strong>{{ sale.total_amount }} €</strong></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="sales-mobile-list">
+        {% for sale in sales %}<a class="sale-mobile-card" href="{% url 'sales:sale_detail' store_id=store.pk sale_pk=sale.pk %}">
+            <span><strong>Venta #{{ sale.pk }}</strong><small>{{ sale.customer|default:"Mostrador" }} · {{ sale.created_at|date:"H:i" }}</small></span>
+            <span class="sale-mobile-total"><strong>{{ sale.total_amount }} €</strong><span class="badge status-{{ sale.status }}">{{ sale.get_status_display }}</span></span>
+            <small>{{ sale.opened_by }} · Pago: {{ sale.get_payment_status_display }}</small>
+        </a>{% endfor %}
+        </div>
+        {% if page_obj.has_other_pages %}<nav class="sales-pagination" aria-label="Paginación de ventas">
+            {% if page_obj.has_previous %}<a class="button button-secondary" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" hx-get="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" hx-target="#sales-history-content" hx-swap="outerHTML" hx-push-url="true">Anterior</a>{% endif %}
+            <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}<a class="button button-secondary" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-get="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}" hx-target="#sales-history-content" hx-swap="outerHTML" hx-push-url="true">Siguiente</a>{% endif %}
+        </nav>{% endif %}
+    {% else %}
+        <div class="sales-empty"><h2>{% if has_active_filters %}No encontramos ventas con estos filtros.{% else %}Todavía no hay ventas en esta tienda.{% endif %}</h2>
+        {% if has_active_filters %}<a class="button button-secondary" href="{% url 'sales:sale_list' store_id=store.pk %}">Limpiar filtros</a>{% elif can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=store.pk %}">Nueva venta</a>{% endif %}</div>
+    {% endif %}
+</div>

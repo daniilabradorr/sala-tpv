@@ -1,7 +1,47 @@
 from django import forms
-from django.forms import modelformset_factory
+from django.contrib.auth.forms import AuthenticationForm
 
-from apps.users.models import CustomUser, UserStoreAccess
+from apps.users.helpers import is_manager
+from apps.users.models import CustomUser, RoleChoices
+
+
+def set_accessible_field_attrs(form):
+    """Link bound controls to their help and error text without JavaScript."""
+    if not form.is_bound:
+        return form
+    has_non_field_errors = bool(form.non_field_errors())
+    for name, field in form.fields.items():
+        described_by = []
+        if field.help_text:
+            described_by.append(f"id_{name}_helptext")
+        if form.errors.get(name):
+            described_by.append(f"id_{name}_error")
+        if has_non_field_errors:
+            described_by.append("form-non-field-errors")
+        if form.errors.get(name) or has_non_field_errors:
+            field.widget.attrs["aria-invalid"] = "true"
+        if described_by:
+            field.widget.attrs["aria-describedby"] = " ".join(described_by)
+    return form
+
+
+class UserLoginForm(AuthenticationForm):
+    """Django authentication with a non-enumerating, accessible presentation."""
+
+    error_messages = {
+        "invalid_login": "No hemos podido iniciar sesión con esos datos.",
+        "inactive": "No hemos podido iniciar sesión con esos datos.",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["username"].label = "Correo electrónico"
+        self.fields["username"].widget.attrs.update(
+            {"autocomplete": "username", "placeholder": "usuario@empresa.es"}
+        )
+        self.fields["password"].label = "Contraseña"
+        self.fields["password"].widget.attrs["autocomplete"] = "current-password"
+        set_accessible_field_attrs(self)
 
 
 class UserProfileUpdateForm(forms.ModelForm):
@@ -26,6 +66,20 @@ class UserProfileUpdateForm(forms.ModelForm):
             "last_name",
             "phone",
         ]
+        labels = {
+            "first_name": "Nombre",
+            "last_name": "Apellidos",
+            "phone": "Teléfono",
+        }
+        widgets = {
+            "first_name": forms.TextInput(attrs={"autocomplete": "given-name"}),
+            "last_name": forms.TextInput(attrs={"autocomplete": "family-name"}),
+            "phone": forms.TextInput(attrs={"autocomplete": "tel"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        set_accessible_field_attrs(self)
 
 
 class UserCreateForm(forms.ModelForm):
@@ -53,12 +107,27 @@ class UserCreateForm(forms.ModelForm):
             "role",
         ]
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.business = business
+        self.actor = actor
 
         if self.business:
             self.instance.business = self.business
+
+        if is_manager(self.actor):
+            self.fields["role"].choices = [
+                choice
+                for choice in RoleChoices.choices
+                if choice[0] != RoleChoices.OWNER
+            ]
+        set_accessible_field_attrs(self)
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        if is_manager(self.actor) and role == RoleChoices.OWNER:
+            raise forms.ValidationError("Un manager no puede asignar el rol owner.")
+        return role
 
     def clean(self):
         cleaned_data = super().clean()
@@ -73,12 +142,7 @@ class UserCreateForm(forms.ModelForm):
 
 
 class UserUpdateForm(forms.ModelForm):
-    """
-    Formulario para editar usuarios del negocio.
-
-    Aquí sí permitimos cambiar el rol y activar/desactivar,
-    porque esta vista será usada por owner/manager.
-    """
+    """Edita datos administrativos; el estado usa el lifecycle explícito."""
 
     class Meta:
         model = CustomUser
@@ -87,8 +151,124 @@ class UserUpdateForm(forms.ModelForm):
             "last_name",
             "phone",
             "role",
-            "is_active",
         ]
+
+    def __init__(self, *args, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.actor = actor
+
+        if is_manager(self.actor):
+            self.fields["role"].choices = [
+                choice
+                for choice in RoleChoices.choices
+                if choice[0] != RoleChoices.OWNER
+            ]
+        set_accessible_field_attrs(self)
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        if is_manager(self.actor) and role == RoleChoices.OWNER:
+            raise forms.ValidationError("Un manager no puede asignar el rol owner.")
+        return role
+
+
+class UserFilterForm(forms.Form):
+    q = forms.CharField(required=False, label="Buscar", max_length=150)
+    role = forms.ChoiceField(
+        required=False, choices=(("", "Todos"), *RoleChoices.choices), label="Rol"
+    )
+    status = forms.ChoiceField(
+        choices=(("active", "Activos"), ("inactive", "Inactivos"), ("all", "Todos")),
+        label="Estado",
+    )
+    store = forms.ChoiceField(required=False, label="Tienda")
+
+    def __init__(self, *args, stores, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stores = list(stores)
+        self.fields["store"].choices = [("", "Todas")] + [
+            (str(s.pk), s.name) for s in self.stores
+        ]
+
+    def clean_store(self):
+        value = self.cleaned_data["store"]
+        if not value:
+            return None
+        store = next((s for s in self.stores if str(s.pk) == value), None)
+        if store is None:
+            raise forms.ValidationError("Selecciona una tienda del negocio.")
+        return store
+
+
+class StoreAccessMatrixForm(forms.Form):
+    """One server-defined row per store; business and user are never client fields."""
+
+    def __init__(self, *args, stores, accesses=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stores = list(stores)
+        self.current = {a.store_id: a for a in accesses}
+        for store in self.stores:
+            access = self.current.get(store.pk)
+            for suffix, label, default in (
+                ("active", "Acceso", False),
+                ("sell", "Vender", False),
+                ("open", "Abrir caja", False),
+                ("close", "Cerrar caja", False),
+            ):
+                attr = (
+                    "is_active"
+                    if suffix == "active"
+                    else f"can_{suffix}"
+                    if suffix == "sell"
+                    else f"can_{suffix}_cash"
+                )
+                self.fields[f"store_{store.pk}_{suffix}"] = forms.BooleanField(
+                    required=False, label=label, initial=getattr(access, attr, default)
+                )
+
+    @property
+    def matrix_rows(self):
+        return [
+            {
+                "store": s,
+                "active": self[f"store_{s.pk}_active"],
+                "sell": self[f"store_{s.pk}_sell"],
+                "open": self[f"store_{s.pk}_open"],
+                "close": self[f"store_{s.pk}_close"],
+            }
+            for s in self.stores
+        ]
+
+    def normalized_accesses(self):
+        normalized = {}
+        for store in self.stores:
+            active = self.cleaned_data[f"store_{store.pk}_active"]
+            existing = self.current.get(store.pk)
+            normalized[store.pk] = {
+                "is_active": active,
+                "can_sell": self.cleaned_data[f"store_{store.pk}_sell"]
+                if active
+                else getattr(existing, "can_sell", False),
+                "can_open_cash": self.cleaned_data[f"store_{store.pk}_open"]
+                if active
+                else getattr(existing, "can_open_cash", False),
+                "can_close_cash": self.cleaned_data[f"store_{store.pk}_close"]
+                if active
+                else getattr(existing, "can_close_cash", False),
+            }
+        return normalized
+
+    def clean(self):
+        cleaned = super().clean()
+        allowed = {
+            f"store_{store.pk}_{suffix}"
+            for store in self.stores
+            for suffix in ("active", "sell", "open", "close")
+        }
+        submitted = {key for key in self.data if key.startswith("store_")}
+        if submitted - allowed:
+            raise forms.ValidationError("La matriz contiene una tienda no autorizada.")
+        return cleaned
 
 
 class UserPinChangeForm(forms.Form):
@@ -113,6 +293,10 @@ class UserPinChangeForm(forms.Form):
         widget=forms.PasswordInput,
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        set_accessible_field_attrs(self)
+
     def clean_new_pin(self):
         pin = self.cleaned_data["new_pin"]
 
@@ -131,29 +315,3 @@ class UserPinChangeForm(forms.Form):
             raise forms.ValidationError("Los PIN no coinciden.")
 
         return cleaned_data
-
-
-class UserStoreAccessForm(forms.ModelForm):
-    """
-    Formulario para un acceso concreto de usuario a tienda.
-
-    Cada formulario representa un registro UserStoreAccess.
-    """
-
-    class Meta:
-        model = UserStoreAccess
-        fields = [
-            "store",
-            "can_sell",
-            "can_open_cash",
-            "can_close_cash",
-            "is_active",
-        ]
-
-
-UserStoreAccessFormSet = modelformset_factory(
-    UserStoreAccess,
-    form=UserStoreAccessForm,
-    extra=1,
-    can_delete=True,
-)

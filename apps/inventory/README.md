@@ -97,7 +97,11 @@ Si cambia stock, tiene que pasar por `services.py`.
 
 ### `purchases`
 
-- Sus relaciones y la recepción de mercancía siguen pendientes hasta implementar Purchases.
+- Crear u ordenar una `Purchase` no modifica stock.
+- Una `PurchaseReceipt` crea una entrada cuando el control global está activo y el producto tiene `track_stock=True`.
+- El `StockMovement` conserva FKs fuertes a `Purchase`, `PurchaseLine`, `PurchaseReceipt` y `PurchaseReceiptLine`; esta última identifica el evento histórico exacto. `reference_type`/`reference_id` continúan como compatibilidad genérica.
+- Se soportan recepciones parciales, concurrentes e idempotentes. Un producto desactivado después del pedido puede recibirse, mientras que un `InventoryItem` inactivo bloquea el movimiento.
+- Inventory continúa siendo la fuente de verdad y el único propietario de la mutación del stock.
 
 ### `reports`
 

@@ -1,0 +1,23 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Error | Netxodo{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'css/pages/errors.css' %}">
+</head>
+<body>
+  <a class="error-skip" href="#main-content">Saltar al contenido principal</a>
+  <main id="main-content" class="error-page" tabindex="-1">
+    <section class="error-card" aria-labelledby="error-title">
+      <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="error-logo">
+      {% block error_icon %}{% endblock %}
+      <p class="error-code">Error {% block code %}{% endblock %}</p>
+      {% block content %}{% endblock %}
+      <div class="error-actions">{% block actions %}<a class="error-button" href="/">Volver al inicio</a>{% endblock %}</div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{% load static %}
+<aside id="app-sidebar" class="app-sidebar" aria-label="Navegación de la aplicación" data-sidebar>
+    <div class="sidebar-brand">
+        <a href="{% url 'core:home' %}" aria-label="Netxodo, inicio"><img class="brand-logo" src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo"></a>
+        <button class="sidebar-close" type="button" aria-label="Cerrar menú" data-sidebar-close>{% include "components/icon.html" with name="close" %}</button>
+    </div>
+    <nav class="sidebar-nav" aria-label="Navegación principal">
+        {% for group in shell_navigation %}
+            <section class="sidebar-group" aria-labelledby="nav-group-{{ group.id }}">
+                <h2 id="nav-group-{{ group.id }}" class="sidebar-group-label">{{ group.label }}</h2>
+                <div class="sidebar-group-links">
+                    {% for item in group.items %}
+                        <a href="{{ item.url }}"{% if item.active %} class="is-active" aria-current="page"{% endif %}>
+                            {% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endfor %}
+    </nav>
+    <div class="sidebar-footer">
+        <div class="sidebar-context">
+            <span>{{ active_store.name|default:"Sin tienda activa" }}</span>
+            {% if shell_business %}<small>{{ shell_business.name }}</small>{% endif %}
+        </div>
+        <a href="{% url 'users:profile' %}">{% include "components/icon.html" with name="user" %}<span>{{ shell_user_name }}</span></a>
+    </div>
+</aside>

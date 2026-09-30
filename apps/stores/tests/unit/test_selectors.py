@@ -1,5 +1,7 @@
 from django.test import TestCase
 
+from apps.business_config.models import BusinessProfile
+
 from apps.stores.selectors import (
     get_default_store_for_business,
     get_default_store_for_user,
@@ -264,4 +266,85 @@ class StoreSelectorsTests(TestCase):
         self.assertEqual(
             stores,
             [self.default_store, self.secondary_store, self.inactive_store],
+        )
+
+
+class StoreAdminSelectorTests(TestCase):
+    def setUp(self):
+        self.business = create_business(name="Selector admin", slug="selector-admin")
+        self.name_match = create_store(
+            business=self.business, name="Centro", code="CTR"
+        )
+        self.code_match = create_store(
+            business=self.business, name="Norte", code="SPECIAL"
+        )
+        self.city_match = create_store(
+            business=self.business,
+            name="Sur",
+            code="SUR",
+            is_active=False,
+        )
+        for store, city in (
+            (self.name_match, "Madrid"),
+            (self.code_match, "Bilbao"),
+            (self.city_match, "Salamanca"),
+        ):
+            store.city = city
+            store.save(update_fields=["city", "updated_at"])
+
+    def test_search_name_code_and_city_and_status(self):
+        from apps.stores.selectors import get_store_admin_list
+
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="centro")),
+            [self.name_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="special")),
+            [self.code_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, query="salamanca")),
+            [self.city_match],
+        )
+        self.assertEqual(
+            list(get_store_admin_list(business=self.business, status="inactive")),
+            [self.city_match],
+        )
+
+    def test_cashier_contact_fallback_does_not_add_queries_per_store(self):
+        BusinessProfile.objects.create(
+            business=self.business,
+            legal_name="Selector Admin SL",
+            tax_identifier="B12345001",
+            trade_name="Selector admin",
+            phone="923000001",
+            email="selector@example.com",
+            address_line_1="Calle Selector 1",
+            postal_code="37001",
+            city="Salamanca",
+            province="Salamanca",
+            country_code="ES",
+        )
+        cashier = create_user(
+            business=self.business,
+            email="selector-cashier@example.com",
+            role=RoleChoices.CASHIER,
+        )
+        for store in (self.name_match, self.code_match, self.city_match):
+            create_store_access(
+                business=self.business,
+                user=cashier,
+                store=store,
+            )
+
+        with self.assertNumQueries(1):
+            stores = list(
+                get_stores_available_for_user(user=cashier, only_active=False)
+            )
+            contacts = [(store.contact_phone, store.contact_email) for store in stores]
+
+        self.assertEqual(
+            contacts,
+            [("923000001", "selector@example.com")] * 3,
         )

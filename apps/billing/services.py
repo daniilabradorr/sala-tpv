@@ -11,6 +11,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentLine,
@@ -84,6 +86,155 @@ class BillingAlreadyIssued(BillingServiceError):
 
 class BillingUnsupportedFiscalCase(BillingServiceError):
     """A sale contains a fiscal treatment not implemented by this MVP."""
+
+
+SERIES_IDENTITY_FIELDS = (
+    "store_id",
+    "cash_register_id",
+    "document_type",
+    "prefix",
+    "year",
+    "padding",
+)
+
+
+def _series_collision_error():
+    return BillingServiceError(
+        {"prefix": "Ya existe una serie con este prefijo y año."}
+    )
+
+
+def _raise_series_validation(error, *, business, prefix, year, exclude_series_id=None):
+    collision = BillingSeries.objects.filter(
+        business=business, prefix=(prefix or "").strip().upper(), year=year
+    )
+    if exclude_series_id is not None:
+        collision = collision.exclude(pk=exclude_series_id)
+    if collision.exists():
+        raise _series_collision_error() from error
+    raise error
+
+
+def create_billing_series(
+    *, business, store, cash_register, document_type, name, prefix, year, padding
+):
+    """Create a store series; its fiscal counter is never accepted as input."""
+    series = BillingSeries(
+        business=business,
+        store=store,
+        cash_register=cash_register,
+        document_type=document_type,
+        name=name,
+        prefix=prefix,
+        year=year,
+        padding=padding,
+        current_number=0,
+        is_active=True,
+    )
+    try:
+        with transaction.atomic():
+            series.save()
+    except IntegrityError as error:
+        raise _series_collision_error() from error
+    except ValidationError as error:
+        _raise_series_validation(
+            error,
+            business=business,
+            prefix=prefix,
+            year=year,
+        )
+    return series
+
+
+@transaction.atomic
+def update_billing_series(
+    *,
+    series_id,
+    business,
+    store,
+    cash_register,
+    document_type,
+    name,
+    prefix,
+    year,
+    padding,
+):
+    """Update only administrative fields on a freshly locked database row."""
+    try:
+        series = BillingSeries.objects.select_for_update().get(
+            pk=series_id, business=business, store=store
+        )
+    except BillingSeries.DoesNotExist as error:
+        raise BillingServiceError(
+            {"series": "La serie no existe en esta tienda."}
+        ) from error
+    proposed = {
+        "store_id": store.pk,
+        "cash_register_id": getattr(cash_register, "pk", None),
+        "document_type": document_type,
+        "prefix": (prefix or "").strip().upper(),
+        "year": year,
+        "padding": padding,
+    }
+    used = BillingDocument.objects.filter(
+        series=series, status=BillingDocumentStatusChoices.ISSUED
+    ).exists()
+    if used and any(
+        getattr(series, field) != value for field, value in proposed.items()
+    ):
+        raise BillingServiceError(
+            "No se puede modificar la identidad de una serie que ya tiene documentos emitidos."
+        )
+    for field, value in proposed.items():
+        setattr(series, field, value)
+    series.name = name
+    try:
+        series.save(
+            update_fields=[
+                "name",
+                "store",
+                "cash_register",
+                "document_type",
+                "prefix",
+                "year",
+                "padding",
+                "updated_at",
+            ]
+        )
+    except IntegrityError as error:
+        raise _series_collision_error() from error
+    except ValidationError as error:
+        _raise_series_validation(
+            error,
+            business=business,
+            prefix=prefix,
+            year=year,
+            exclude_series_id=series_id,
+        )
+    return series
+
+
+def _set_billing_series_active(*, series_id, business, store, is_active):
+    with transaction.atomic():
+        try:
+            series = BillingSeries.objects.select_for_update().get(
+                pk=series_id, business=business, store=store
+            )
+        except BillingSeries.DoesNotExist as error:
+            raise BillingServiceError(
+                {"series": "La serie no existe en esta tienda."}
+            ) from error
+        series.is_active = is_active
+        series.save(update_fields=["is_active", "updated_at"])
+        return series
+
+
+def activate_billing_series(**kwargs):
+    return _set_billing_series_active(is_active=True, **kwargs)
+
+
+def deactivate_billing_series(**kwargs):
+    return _set_billing_series_active(is_active=False, **kwargs)
 
 
 def _money(value):
@@ -646,7 +797,7 @@ def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_
     if raced is not None:
         return raced
     _create_lines_and_breakdowns(document=document, snapshots=snapshots)
-    return _issue_draft(
+    issued_document = _issue_draft(
         document=document,
         business=business,
         sale=sale,
@@ -654,6 +805,31 @@ def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_
         issued_by=issued_by,
         issue_moment=issue_moment,
     )
+    log_event(
+        business=business,
+        store=issued_document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_ISSUED,
+        module=AuditModule.BILLING,
+        entity=issued_document,
+        message=f"Documento fiscal #{issued_document.pk} emitido.",
+        new_payload={
+            "document_type": issued_document.document_type,
+            "status": issued_document.status,
+            "series_text": issued_document.series_text,
+            "number": issued_document.number,
+            "total_amount": issued_document.total_amount,
+            "issued_at": issued_document.issued_at,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "customer_id": issued_document.customer_id,
+            "series_id": issued_document.series_id,
+            "cash_register_id": issued_document.cash_register_id,
+            "cash_session_id": issued_document.cash_session_id,
+        },
+    )
+    return issued_document
 
 
 @transaction.atomic
@@ -750,7 +926,7 @@ def substitute_simplified_document(
         target_document=original,
         relation_type=BillingDocumentRelationTypeChoices.SUBSTITUTES,
     ).save()
-    return _issue_draft(
+    issued_document = _issue_draft(
         document=document,
         business=business,
         sale=sale,
@@ -758,6 +934,32 @@ def substitute_simplified_document(
         issued_by=issued_by,
         issue_moment=issue_moment,
     )
+    log_event(
+        business=business,
+        store=issued_document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+        module=AuditModule.BILLING,
+        entity=issued_document,
+        message=f"Documento fiscal #{issued_document.pk} emitido como sustitución.",
+        new_payload={
+            "document_type": issued_document.document_type,
+            "status": issued_document.status,
+            "series_text": issued_document.series_text,
+            "number": issued_document.number,
+            "total_amount": issued_document.total_amount,
+            "issued_at": issued_document.issued_at,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "customer_id": issued_document.customer_id,
+            "series_id": issued_document.series_id,
+            "target_document_id": original.pk,
+            "target_document_type": original.document_type,
+            "relation_type": BillingDocumentRelationTypeChoices.SUBSTITUTES,
+        },
+    )
+    return issued_document
 
 
 def _rectification_payload(
@@ -1380,4 +1582,32 @@ def issue_sale_return_rectification(
             issue_moment=issue_moment,
             operation_date=operation_date,
         )
+    log_event(
+        business=business,
+        store=document.store,
+        user=issued_by,
+        event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED,
+        module=AuditModule.BILLING,
+        entity=document,
+        message=f"Documento fiscal #{document.pk} emitido como rectificativa.",
+        new_payload={
+            "document_type": document.document_type,
+            "status": document.status,
+            "series_text": document.series_text,
+            "number": document.number,
+            "total_amount": document.total_amount,
+            "issued_at": document.issued_at,
+            "rectification_method": document.rectification_method,
+        },
+        metadata={
+            "sale_id": sale.pk,
+            "sale_return_id": sale_return.pk,
+            "series_id": document.series_id,
+            "target_document_id": original.pk,
+            "target_document_type": original.document_type,
+            "relation_type": BillingDocumentRelationTypeChoices.RECTIFIES,
+            "companion_f3_document_id": companion.pk if companion else None,
+            "companion_f3_series_id": companion.series_id if companion else None,
+        },
+    )
     return document

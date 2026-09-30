@@ -7,9 +7,12 @@ from django.core.exceptions import ValidationError
 from django.db import connections
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashCount, CashMovement, CashSession
-from apps.cash_register.services import CashRegisterService
+from apps.cash_register.services import CashRegisterService, deactivate_cash_register
+from apps.stores.services import deactivate_store
 from apps.cash_register.test_factories import (
     create_cash_business,
     create_cash_register,
@@ -35,7 +38,7 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
             email="cash-concurrency-owner@test.com",
             role=RoleChoices.OWNER,
         )
-        settings = POSSettings.objects.get(business=self.business)
+        settings = POSSettings.objects.create(business=self.business)
         settings.require_pin_for_sensitive_actions = False
         settings.save()
 
@@ -75,6 +78,44 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
             ).count(),
             1,
         )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.CASH_SESSION_OPENED
+            ).count(),
+            1,
+        )
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_open_session_racing_store_deactivation_never_leaves_invalid_state(self):
+        results = self.run_threads(
+            self.open_session,
+            lambda: deactivate_store(business=self.business, store=self.store),
+        )
+        self.store.refresh_from_db()
+        has_open = CashSession.objects.filter(
+            store=self.store, status=CashSession.Status.OPEN
+        ).exists()
+        self.assertEqual(results.count(True), 1)
+        self.assertFalse(has_open and not self.store.is_active)
+        self.assertEqual((has_open, self.store.is_active), (results[0], results[0]))
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_open_session_racing_register_deactivation_never_leaves_invalid_state(self):
+        results = self.run_threads(
+            self.open_session,
+            lambda: deactivate_cash_register(
+                business=self.business,
+                store=self.store,
+                cash_register=self.register,
+            ),
+        )
+        self.register.refresh_from_db()
+        has_open = CashSession.objects.filter(
+            cash_register=self.register, status=CashSession.Status.OPEN
+        ).exists()
+        self.assertEqual(results.count(True), 1)
+        self.assertFalse(has_open and not self.register.is_active)
+        self.assertEqual((has_open, self.register.is_active), (results[0], results[0]))
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_two_concurrent_movements_do_not_lose_updates(self):
@@ -99,6 +140,12 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         self.assertEqual(session.expected_cash_amount, Decimal("110.00"))
         movements = CashMovement.objects.filter(cash_session=session)
         self.assertEqual(movements.count(), 2)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type__in=(AuditEventType.CASH_IN, AuditEventType.CASH_OUT)
+            ).count(),
+            2,
+        )
         self.assertIn(
             set(movements.values_list("balance_after", flat=True)),
             [
@@ -128,6 +175,19 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             CashCount.objects.filter(
                 cash_session=session, count_type=CashCount.CountType.CLOSING
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.CASH_COUNTED,
+                new_payload__count_type=CashCount.CountType.CLOSING,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.CASH_SESSION_CLOSED
             ).count(),
             1,
         )
@@ -181,6 +241,15 @@ class CashRegisterConcurrencyTests(TransactionTestCase):
             self.assertEqual(movement.cash_session, session)
             self.assertEqual(session.expected_cash_amount, Decimal("120.00"))
             self.assertEqual(closing.expected_amount, Decimal("120.00"))
+            self.assertFalse(
+                AuditEvent.objects.filter(
+                    event_type__in=(
+                        AuditEventType.CASH_IN,
+                        AuditEventType.CASH_OUT,
+                        AuditEventType.CASH_ADJUSTED,
+                    )
+                ).exists()
+            )
         else:
             self.assertIsNone(payment)
             self.assertIsNone(movement)

@@ -4,6 +4,7 @@ from decimal import Decimal
 from django import forms
 
 from apps.cash_register.models import CashSession
+from apps.core.forms import wire_field_accessibility
 from apps.payments.models import PaymentMethod
 
 
@@ -62,9 +63,26 @@ class PaymentCancelForm(forms.Form):
         super().__init__(*args, **kwargs)
         if pos_settings and pos_settings.require_pin_for_sensitive_actions:
             self.fields["pin"].required = True
+        wire_field_accessibility(self)
+
+
+class PaymentMethodAdminForm(forms.ModelForm):
+    """HTTP boundary for the only three configurable MVP attributes."""
+
+    class Meta:
+        model = PaymentMethod
+        fields = ("name", "is_active", "allows_refund")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        wire_field_accessibility(self)
 
 
 class SaleOnAccountForm(forms.Form):
     """Confirmación explícita; el importe se calcula bajo lock en el Service."""
 
     confirm = forms.BooleanField(label="Confirmar venta a cuenta")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        wire_field_accessibility(self)

@@ -1,0 +1,4 @@
+.card { padding: clamp(var(--nx-space-5), 3vw, var(--nx-space-8)); border: 1px solid var(--nx-border); border-radius: var(--nx-radius-lg); background: var(--nx-surface); box-shadow: var(--nx-shadow-sm); }
+.card h1 { margin: 0 0 var(--nx-space-3); }
+.card p { color: var(--nx-text-muted); line-height: 1.65; }
+.card-narrow, .card-form { max-width: 680px; margin-inline: auto; }

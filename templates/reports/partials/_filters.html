@@ -1,0 +1,9 @@
+<form id="reports-filters" class="erp-toolbar reports-filters" method="get" action="{% url 'reports:overview' %}" hx-get="{% url 'reports:overview' %}" hx-target="#reports-workspace" hx-swap="outerHTML" hx-push-url="true">
+  <input id="reports-active-tab" type="hidden" name="tab" value="{{ tab }}">
+  {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="form-field"><label for="{{ form.period.id_for_label }}">Periodo</label>{{ form.period }}{% if form.period.errors %}<small role="alert">{{ form.period.errors|striptags }}</small>{% endif %}</div>
+  <div class="form-field reports-custom-date"><label for="{{ form.date_from.id_for_label }}">Desde</label>{{ form.date_from }}{% if form.date_from.errors %}<small role="alert">{{ form.date_from.errors|striptags }}</small>{% endif %}</div>
+  <div class="form-field reports-custom-date"><label for="{{ form.date_to.id_for_label }}">Hasta</label>{{ form.date_to }}{% if form.date_to.errors %}<small role="alert">{{ form.date_to.errors|striptags }}</small>{% endif %}</div>
+  <div class="form-field"><label for="{{ form.store.id_for_label }}">Tienda</label>{{ form.store }}{% if form.store.errors %}<small role="alert">{{ form.store.errors|striptags }}</small>{% endif %}</div>
+  <button class="button" type="submit">Aplicar</button>
+</form>

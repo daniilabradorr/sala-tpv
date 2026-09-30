@@ -5,8 +5,34 @@ from apps.cash_register import views
 app_name = "cash_register"
 
 urlpatterns = [
+    path("stores/<int:store_id>/admin/", views.register_admin, name="register_admin"),
+    path(
+        "stores/<int:store_id>/admin/create/",
+        views.register_create,
+        name="register_create",
+    ),
+    path(
+        "stores/<int:store_id>/admin/registers/<int:cash_register_id>/edit/",
+        views.register_update,
+        name="register_update",
+    ),
+    path(
+        "stores/<int:store_id>/admin/registers/<int:cash_register_id>/activate/",
+        views.register_activate,
+        name="register_activate",
+    ),
+    path(
+        "stores/<int:store_id>/admin/registers/<int:cash_register_id>/deactivate/",
+        views.register_deactivate,
+        name="register_deactivate",
+    ),
     path("stores/<int:store_id>/", views.register_list, name="register_list"),
     path("stores/<int:store_id>/open/", views.open_session, name="open"),
+    path(
+        "stores/<int:store_id>/registers/<int:cash_register_id>/open/",
+        views.open_session,
+        name="register_open",
+    ),
     path("stores/<int:store_id>/history/", views.history, name="history"),
     path(
         "stores/<int:store_id>/sessions/<int:session_id>/",

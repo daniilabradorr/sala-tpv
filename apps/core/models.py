@@ -34,9 +34,23 @@ class Business(TimeStampedModel):
         base_slug = self.slug or self.name
         self.slug = slugify(base_slug)
 
+    def _generate_unique_slug(self):
+        max_length = self._meta.get_field("slug").max_length
+        base_slug = slugify(self.name)[:max_length] or "business"
+        candidate = base_slug
+        suffix_number = 2
+        existing_businesses = type(self).objects.exclude(pk=self.pk)
+
+        while existing_businesses.filter(slug=candidate).exists():
+            suffix = f"-{suffix_number}"
+            candidate = f"{base_slug[: max_length - len(suffix)]}{suffix}"
+            suffix_number += 1
+
+        return candidate
+
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
+            self.slug = self._generate_unique_slug()
         self.full_clean()
         return super().save(*args, **kwargs)
 

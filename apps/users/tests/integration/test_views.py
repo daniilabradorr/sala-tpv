@@ -1,4 +1,8 @@
-from django.test import TestCase, override_settings
+from django import forms
+from django.db import connection
+from django.template.loader import render_to_string
+from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.users.models import CustomUser, RoleChoices, UserStoreAccess
@@ -10,42 +14,6 @@ from apps.users.tests.factories import (
 )
 
 
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-            "loaders": [
-                (
-                    "django.template.loaders.locmem.Loader",
-                    {
-                        "users/login.html": "{{ form.errors }}",
-                        "users/profile.html": "{{ object.email }}",
-                        "users/profile_update.html": "{{ form.errors }}",
-                        "users/password_change.html": "{{ form.errors }}",
-                        "users/pin_change.html": "{{ form.errors }}",
-                        "users/user_list.html": "{% for user in users %}{{ user.email }} {% endfor %}",
-                        "users/user_detail.html": "{{ target_user.email }}",
-                        "users/user_create.html": "{{ form.errors }}",
-                        "users/user_update.html": "{{ form.errors }}",
-                        "users/user_store_access_manage.html": "{{ formset.errors }} {{ formset.non_form_errors }}",
-                    },
-                )
-            ],
-        },
-    }
-]
-
-
-@override_settings(
-    TEMPLATES=TEST_TEMPLATES,
-    LOGIN_URL="/users/login/",
-)
 class UserViewsIntegrationTests(TestCase):
     password = "testpass123"
 
@@ -124,9 +92,108 @@ class UserViewsIntegrationTests(TestCase):
         )
         self.assertTrue(logged_in)
 
+    def test_user_list_uses_management_header_and_prefetched_store_access(self):
+        inactive_store = create_store(
+            business=self.business,
+            name="Tienda Inactiva",
+            code="INACTIVA",
+        )
+        second_active_store = create_store(
+            business=self.business,
+            name="Tienda Norte",
+            code="NORTE",
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=self.store,
+            is_active=True,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=second_active_store,
+            is_active=True,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.target_user,
+            store=inactive_store,
+            is_active=False,
+        )
+        create_store_access(
+            business=self.business,
+            user=self.cashier,
+            store=self.store,
+            is_active=False,
+        )
+        self.login_as(self.owner)
+        self.client.get(reverse("users:user_list"))
+
+        with CaptureQueriesContext(connection) as initial_queries:
+            response = self.client.get(reverse("users:user_list"))
+
+        self.assertContains(response, "El rol, el acceso a tiendas")
+        self.assertContains(response, "Acceso global")
+        self.assertContains(response, self.store.name)
+        self.assertContains(response, f"{self.store.name}, {second_active_store.name}")
+        self.assertContains(response, "Sin tiendas")
+        self.assertNotContains(response, f"{second_active_store.name},")
+        listed_target = next(
+            user for user in response.context["users"] if user.pk == self.target_user.pk
+        )
+        active_store_names = [
+            access.store.name for access in listed_target.active_store_accesses
+        ]
+        self.assertNotIn(inactive_store.name, active_store_names)
+        self.assertNotContains(response, self.other_store.name)
+
+        for index in range(5):
+            user = create_user(
+                business=self.business,
+                email=f"additional-{index}@test.com",
+                password=self.password,
+                role=RoleChoices.CASHIER,
+            )
+            create_store_access(
+                business=self.business,
+                user=user,
+                store=self.store,
+                is_active=True,
+            )
+
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded_response = self.client.get(reverse("users:user_list"))
+
+        self.assertEqual(len(expanded_queries), len(initial_queries))
+        self.assertContains(expanded_response, "additional-4@test.com")
+
+    def test_shared_form_include_exposes_hidden_field_errors(self):
+        class HiddenFieldForm(forms.Form):
+            token = forms.IntegerField(widget=forms.HiddenInput(), label="Token")
+
+        form = HiddenFieldForm({"token": "invalid"})
+        self.assertFalse(form.is_valid())
+
+        rendered = render_to_string("includes/erp_form_fields.html", {"form": form})
+
+        self.assertEqual(rendered.count('name="token"'), 1)
+        self.assertIn('type="hidden"', rendered)
+        self.assertIn('role="alert"', rendered)
+        self.assertIn("Token:", rendered)
+
     # ============================================================
     # AUTENTICACIÓN
     # ============================================================
+
+    def test_login_uses_netxodo_branding(self):
+        response = self.client.get(reverse("users:login"))
+
+        self.assertContains(response, "Acceso | Netxodo")
+        self.assertContains(response, "Bienvenido de nuevo")
+        self.assertContains(response, 'alt="Netxodo"')
+        self.assertNotContains(response, "Sala TPV")
+        self.assertNotContains(response, "data-app-shell")
 
     def test_login_view_rejects_wrong_password_and_accepts_correct_password(self):
         """Verifica que el login rechace contraseñas incorrectas y acepte las correctas."""
@@ -142,6 +209,17 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertEqual(bad_response.status_code, 200)
         self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertContains(
+            bad_response, "No hemos podido iniciar sesión con esos datos."
+        )
+        for leaked_copy in (
+            "usuario inexistente",
+            "cuenta no encontrada",
+            "contraseña incorrecta",
+            "inactive",
+            "email registrado",
+        ):
+            self.assertNotIn(leaked_copy, bad_response.content.decode().lower())
 
         good_response = self.client.post(
             url,
@@ -241,10 +319,11 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertRedirects(
             response,
-            reverse("users:profile"),
+            f"{reverse('users:profile')}?tab=security",
             fetch_redirect_response=False,
         )
         self.assertTrue(self.owner.check_password("newpass12345"))
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.owner.pk)
 
         self.client.logout()
         self.assertTrue(
@@ -253,6 +332,34 @@ class UserViewsIntegrationTests(TestCase):
                 password="newpass12345",
             )
         )
+
+    def test_password_change_rejects_wrong_current_password(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:password_change"),
+            data={
+                "old_password": "wrong-current-password",
+                "new_password1": "newpass12345",
+                "new_password2": "newpass12345",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password(self.password))
+
+    def test_password_change_rejects_mismatched_confirmation(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:password_change"),
+            data={
+                "old_password": self.password,
+                "new_password1": "newpass12345",
+                "new_password2": "different12345",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password(self.password))
 
     def test_pin_change_requires_login(self):
         """Verifica que el cambio de PIN requiera estar autenticado."""
@@ -283,11 +390,30 @@ class UserViewsIntegrationTests(TestCase):
 
         self.assertRedirects(
             response,
-            reverse("users:profile"),
+            f"{reverse('users:profile')}?tab=security",
             fetch_redirect_response=False,
         )
         self.assertNotEqual(self.owner.pin_hash, "1234")
         self.assertTrue(self.owner.check_pin("1234"))
+
+        profile_response = self.client.get(reverse("users:profile"))
+        self.assertNotContains(profile_response, "1234")
+        self.assertNotContains(profile_response, self.owner.pin_hash)
+
+    def test_pin_change_accepts_six_digits(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:pin_change"),
+            data={"new_pin": "123456", "new_pin_confirm": "123456"},
+        )
+        self.assertRedirects(
+            response,
+            f"{reverse('users:profile')}?tab=security",
+            fetch_redirect_response=False,
+        )
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_pin("123456"))
+        self.assertNotEqual(self.owner.pin_hash, "123456")
 
     # ============================================================
     # LISTADO Y DETALLE DE USUARIOS
@@ -565,18 +691,15 @@ class UserViewsIntegrationTests(TestCase):
     # ============================================================
 
     def test_owner_can_deactivate_user(self):
-        """Verifica que un propietario pueda desactivar un usuario."""
         self.login_as(self.owner)
-
-        response = self.client.post(
-            reverse("users:user_deactivate", kwargs={"pk": self.target_user.pk})
-        )
-
+        url = reverse("users:user_deactivate", kwargs={"pk": self.target_user.pk})
+        confirmation = self.client.get(url)
+        self.assertContains(confirmation, "dejará de poder acceder")
+        response = self.client.post(url)
         self.target_user.refresh_from_db()
-
         self.assertRedirects(
             response,
-            reverse("users:user_list"),
+            reverse("users:user_detail", kwargs={"pk": self.target_user.pk}),
             fetch_redirect_response=False,
         )
         self.assertFalse(self.target_user.is_active)
@@ -704,45 +827,35 @@ class UserViewsIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_store_access_post_creates_access_for_target_user(self):
-        """Verifica que se cree un nuevo acceso a tienda para el usuario con los permisos especificados."""
         self.login_as(self.owner)
-
         response = self.client.post(
             reverse(
-                "users:user_store_access_manage",
-                kwargs={"pk": self.target_user.pk},
+                "users:user_store_access_manage", kwargs={"pk": self.target_user.pk}
             ),
             data={
-                "store_accesses-TOTAL_FORMS": "1",
-                "store_accesses-INITIAL_FORMS": "0",
-                "store_accesses-MIN_NUM_FORMS": "0",
-                "store_accesses-MAX_NUM_FORMS": "1000",
-                "store_accesses-0-store": str(self.store.pk),
-                "store_accesses-0-can_sell": "on",
-                "store_accesses-0-can_open_cash": "on",
-                "store_accesses-0-can_close_cash": "on",
-                "store_accesses-0-is_active": "on",
+                f"store_{self.store.pk}_active": "on",
+                f"store_{self.store.pk}_sell": "on",
+                f"store_{self.store.pk}_open": "on",
+                f"store_{self.store.pk}_close": "on",
             },
         )
-
         access = UserStoreAccess.objects.get(
-            business=self.business,
-            user=self.target_user,
-            store=self.store,
+            business=self.business, user=self.target_user, store=self.store
         )
-
         self.assertRedirects(
             response,
-            reverse("users:user_detail", kwargs={"pk": self.target_user.pk}),
+            reverse("users:user_detail", kwargs={"pk": self.target_user.pk})
+            + "?tab=stores",
             fetch_redirect_response=False,
         )
-        self.assertTrue(access.can_sell)
-        self.assertTrue(access.can_open_cash)
-        self.assertTrue(access.can_close_cash)
-        self.assertTrue(access.is_active)
+        self.assertTrue(
+            access.is_active
+            and access.can_sell
+            and access.can_open_cash
+            and access.can_close_cash
+        )
 
     def test_store_access_post_updates_existing_access(self):
-        """Verifica que se actualice un acceso a tienda existente con los nuevos permisos."""
         access = create_store_access(
             business=self.business,
             user=self.target_user,
@@ -752,100 +865,56 @@ class UserViewsIntegrationTests(TestCase):
             can_close_cash=False,
             is_active=True,
         )
-
         self.login_as(self.owner)
-
         response = self.client.post(
             reverse(
-                "users:user_store_access_manage",
-                kwargs={"pk": self.target_user.pk},
+                "users:user_store_access_manage", kwargs={"pk": self.target_user.pk}
             ),
             data={
-                "store_accesses-TOTAL_FORMS": "1",
-                "store_accesses-INITIAL_FORMS": "1",
-                "store_accesses-MIN_NUM_FORMS": "0",
-                "store_accesses-MAX_NUM_FORMS": "1000",
-                "store_accesses-0-id": str(access.pk),
-                "store_accesses-0-store": str(self.store.pk),
-                # No enviamos can_sell ni can_open_cash.
-                # En formularios HTML, checkbox ausente = False.
-                "store_accesses-0-can_close_cash": "on",
-                "store_accesses-0-is_active": "on",
+                f"store_{self.store.pk}_active": "on",
+                f"store_{self.store.pk}_close": "on",
             },
         )
-
         access.refresh_from_db()
-
-        self.assertRedirects(
-            response,
-            reverse("users:user_detail", kwargs={"pk": self.target_user.pk}),
-            fetch_redirect_response=False,
-        )
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(access.can_sell)
         self.assertFalse(access.can_open_cash)
         self.assertTrue(access.can_close_cash)
         self.assertTrue(access.is_active)
 
-    def test_store_access_post_deletes_existing_access(self):
-        """Verifica que se pueda eliminar un acceso a tienda existente marcándolo como DELETE."""
+    def test_store_access_post_deactivates_existing_access_without_delete(self):
         access = create_store_access(
             business=self.business,
             user=self.target_user,
             store=self.store,
+            can_sell=True,
+            is_active=True,
         )
-
         self.login_as(self.owner)
-
-        response = self.client.post(
+        self.client.post(
             reverse(
-                "users:user_store_access_manage",
-                kwargs={"pk": self.target_user.pk},
+                "users:user_store_access_manage", kwargs={"pk": self.target_user.pk}
             ),
-            data={
-                "store_accesses-TOTAL_FORMS": "1",
-                "store_accesses-INITIAL_FORMS": "1",
-                "store_accesses-MIN_NUM_FORMS": "0",
-                "store_accesses-MAX_NUM_FORMS": "1000",
-                "store_accesses-0-id": str(access.pk),
-                "store_accesses-0-store": str(self.store.pk),
-                "store_accesses-0-can_sell": "on",
-                "store_accesses-0-is_active": "on",
-                "store_accesses-0-DELETE": "on",
-            },
+            data={f"store_{self.store.pk}_sell": "on"},
         )
-
-        self.assertRedirects(
-            response,
-            reverse("users:user_detail", kwargs={"pk": self.target_user.pk}),
-            fetch_redirect_response=False,
-        )
-        self.assertFalse(UserStoreAccess.objects.filter(pk=access.pk).exists())
+        access.refresh_from_db()
+        self.assertFalse(access.is_active)
+        self.assertTrue(access.can_sell)
+        self.assertTrue(UserStoreAccess.objects.filter(pk=access.pk).exists())
 
     def test_store_access_rejects_store_from_other_business(self):
-        """Verifica que se rechace intentar crear acceso a tiendas de otro negocio."""
         self.login_as(self.owner)
-
         response = self.client.post(
             reverse(
-                "users:user_store_access_manage",
-                kwargs={"pk": self.target_user.pk},
+                "users:user_store_access_manage", kwargs={"pk": self.target_user.pk}
             ),
-            data={
-                "store_accesses-TOTAL_FORMS": "1",
-                "store_accesses-INITIAL_FORMS": "0",
-                "store_accesses-MIN_NUM_FORMS": "0",
-                "store_accesses-MAX_NUM_FORMS": "1000",
-                "store_accesses-0-store": str(self.other_store.pk),
-                "store_accesses-0-can_sell": "on",
-                "store_accesses-0-is_active": "on",
-            },
+            data={f"store_{self.other_store.pk}_active": "on"},
         )
-
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "tienda no autorizada")
         self.assertFalse(
             UserStoreAccess.objects.filter(
-                user=self.target_user,
-                store=self.other_store,
+                user=self.target_user, store=self.other_store
             ).exists()
         )
 
@@ -861,3 +930,183 @@ class UserViewsIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_login_get_renders_real_template(self):
+        response = self.client.get(reverse("users:login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "users/login.html")
+        self.assertContains(response, "Iniciar sesión")
+
+    def test_login_without_next_redirects_to_home(self):
+        response = self.client.post(
+            reverse("users:login"),
+            {"username": self.owner.email, "password": self.password},
+        )
+
+        self.assertRedirects(
+            response, reverse("core:home"), fetch_redirect_response=False
+        )
+        self.assertIn("_auth_user_id", self.client.session)
+
+    # ============================================================
+    # JERARQUÍA DE ROLES EN MUTACIONES
+    # ============================================================
+
+    def test_manager_cannot_create_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_create"),
+            data={
+                "email": "forbidden-owner@test.com",
+                "first_name": "Forbidden",
+                "last_name": "Owner",
+                "phone": "600123123",
+                "role": RoleChoices.OWNER,
+                "password": self.password,
+                "password_confirm": self.password,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            CustomUser.objects.filter(email="forbidden-owner@test.com").exists()
+        )
+        self.assertIn("role", response.context["form"].errors)
+
+    def test_manager_role_choices_do_not_include_owner(self):
+        self.login_as(self.manager)
+
+        create_response = self.client.get(reverse("users:user_create"))
+        update_response = self.client.get(
+            reverse("users:user_update", kwargs={"pk": self.target_user.pk})
+        )
+
+        self.assertNotIn(
+            RoleChoices.OWNER,
+            dict(create_response.context["form"].fields["role"].choices),
+        )
+        self.assertNotIn(
+            RoleChoices.OWNER,
+            dict(update_response.context["form"].fields["role"].choices),
+        )
+
+    def test_manager_cannot_promote_cashier_to_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.target_user.pk}),
+            data={
+                "first_name": self.target_user.first_name,
+                "last_name": self.target_user.last_name,
+                "phone": self.target_user.phone,
+                "role": RoleChoices.OWNER,
+                "is_active": "on",
+            },
+        )
+
+        self.target_user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.target_user.role, RoleChoices.CASHIER)
+        self.assertIn("role", response.context["form"].errors)
+
+    def test_manager_cannot_promote_self_to_owner(self):
+        self.login_as(self.manager)
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.manager.pk}),
+            data={
+                "first_name": self.manager.first_name,
+                "last_name": self.manager.last_name,
+                "phone": self.manager.phone,
+                "role": RoleChoices.OWNER,
+                "is_active": "on",
+            },
+        )
+
+        self.manager.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.manager.role, RoleChoices.MANAGER)
+
+    def test_owner_cannot_deactivate_self_through_update(self):
+        self.login_as(self.owner)
+        response = self.client.post(
+            reverse("users:user_deactivate", kwargs={"pk": self.owner.pk})
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.owner.is_active)
+
+    def test_manager_cannot_deactivate_self_through_update(self):
+        self.login_as(self.manager)
+        response = self.client.post(
+            reverse("users:user_deactivate", kwargs={"pk": self.manager.pk})
+        )
+        self.manager.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.manager.is_active)
+
+    def test_manager_cannot_update_owner(self):
+        self.login_as(self.manager)
+        original_name = self.owner.first_name
+
+        response = self.client.post(
+            reverse("users:user_update", kwargs={"pk": self.owner.pk}),
+            data={
+                "first_name": "Changed",
+                "last_name": self.owner.last_name,
+                "phone": self.owner.phone,
+                "role": RoleChoices.CASHIER,
+                "is_active": "on",
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.owner.first_name, original_name)
+        self.assertEqual(self.owner.role, RoleChoices.OWNER)
+
+    def test_manager_cannot_deactivate_or_activate_owner(self):
+        self.login_as(self.manager)
+
+        deactivate_response = self.client.post(
+            reverse("users:user_deactivate", kwargs={"pk": self.owner.pk})
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(deactivate_response.status_code, 403)
+        self.assertTrue(self.owner.is_active)
+
+        self.owner.is_active = False
+        self.owner.save(update_fields=["is_active", "updated_at"])
+        activate_response = self.client.post(
+            reverse("users:user_activate", kwargs={"pk": self.owner.pk})
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(activate_response.status_code, 403)
+        self.assertFalse(self.owner.is_active)
+
+    def test_manager_cannot_manage_owner_store_access(self):
+        self.login_as(self.manager)
+
+        response = self.client.get(
+            reverse(
+                "users:user_store_access_manage",
+                kwargs={"pk": self.owner.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_admin_mutations_redirect_to_login(self):
+        for name in (
+            "user_update",
+            "user_deactivate",
+            "user_activate",
+            "user_store_access_manage",
+        ):
+            response = self.client.get(
+                reverse(f"users:{name}", kwargs={"pk": self.target_user.pk})
+            )
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(reverse("users:login"), response.url)

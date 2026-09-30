@@ -1,20 +1,23 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 
 from apps.stores.models import Store
-from apps.users.models import CustomUser
+from apps.users.models import CustomUser, UserStoreAccess
 from apps.users.helpers import (
     is_owner,
     is_owner_or_manager,
     can_manage_users,
     can_manage_business_settings,
     can_view_reports,
+    can_view_activity,
     can_perform_sensitive_action,
     can_access_store,
     can_sell_in_store,
     can_open_cash_register,
     can_close_cash_register,
+    can_manage_user,
 )
 
 
@@ -37,13 +40,20 @@ class BusinessUserQuerysetMixin:
         """
         qs = (
             CustomUser.objects.select_related("business")
-            .prefetch_related("store_accesses__store")
+            .prefetch_related(
+                Prefetch(
+                    "store_accesses",
+                    queryset=UserStoreAccess.objects.filter(
+                        is_active=True
+                    ).select_related("store"),
+                    to_attr="active_store_accesses",
+                )
+            )
             .order_by("email")
         )
 
-        if self.request.user.is_superuser:
-            return qs
-
+        if not self.request.user.business_id:
+            return qs.none()
         return qs.filter(business=self.request.user.business)
 
 
@@ -79,6 +89,9 @@ class BasePermissionMixin(LoginRequiredMixin):
     permission_denied_message = "No tienes permiso para acceder a esta página."
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+
         if request.user.is_superuser:
             return super().dispatch(request, *args, **kwargs)
 
@@ -117,6 +130,17 @@ class ManagerOrOwnerRequiredMixin(BasePermissionMixin):
     permission_denied_message = "Solo owner o manager pueden acceder a esta página."
 
 
+class TargetUserManagementRequiredMixin:
+    """Impide que un manager mute owners, incluso con una petición manipulada."""
+
+    def dispatch(self, request, *args, **kwargs):
+        target_user = get_object_or_404(self.get_queryset(), pk=kwargs["pk"])
+        if not can_manage_user(request.user, target_user):
+            raise PermissionDenied("No tienes permiso para gestionar este usuario.")
+
+        return super().dispatch(request, *args, **kwargs)
+
+
 class CanManageUsersMixin(BasePermissionMixin):
     """
     Mixin para validar que el usuario pueda gestionar otros usuarios.
@@ -153,6 +177,13 @@ class CanViewReportsMixin(BasePermissionMixin):
 
     permission_checker = staticmethod(can_view_reports)
     permission_denied_message = "No tienes permiso para ver reportes."
+
+
+class CanViewActivityMixin(BasePermissionMixin):
+    """Autoriza la superficie global de actividad; el scope se aplica en queryset."""
+
+    permission_checker = staticmethod(can_view_activity)
+    permission_denied_message = "No tienes permiso para ver la actividad."
 
 
 class CanPerformSensitiveActionMixin(BasePermissionMixin):

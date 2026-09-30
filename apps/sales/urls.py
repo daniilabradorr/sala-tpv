@@ -15,6 +15,11 @@ urlpatterns = [
         name="sale_open",
     ),
     path(
+        "stores/<int:store_id>/cash-sessions/<int:session_id>/sales/open/",
+        views.SaleOpenView.as_view(),
+        name="sale_open_for_session",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/",
         views.SaleDetailView.as_view(),
         name="sale_detail",
@@ -23,6 +28,11 @@ urlpatterns = [
         "stores/<int:store_id>/sales/<int:sale_pk>/header/",
         views.SaleHeaderUpdateView.as_view(),
         name="sale_header_update",
+    ),
+    path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/customers/quick-create/",
+        views.SaleQuickCustomerCreateView.as_view(),
+        name="quick_customer_create",
     ),
     path(
         "stores/<int:store_id>/sales/<int:sale_pk>/lines/add/",
@@ -35,6 +45,11 @@ urlpatterns = [
         name="sale_line_update",
     ),
     path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/quantity/",
+        views.SaleLineQuantityUpdateView.as_view(),
+        name="sale_line_quantity_update",
+    ),
+    path(
         "stores/<int:store_id>/sales/<int:sale_pk>/lines/<int:line_pk>/delete/",
         views.SaleLineDeleteView.as_view(),
         name="sale_line_delete",
@@ -43,6 +58,11 @@ urlpatterns = [
         "stores/<int:store_id>/sales/<int:sale_pk>/complete/",
         views.SaleCompleteView.as_view(),
         name="sale_complete",
+    ),
+    path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/checkout/",
+        views.SaleCheckoutView.as_view(),
+        name="sale_checkout",
     ),
     path(
         "stores/<int:store_id>/sales/<int:sale_pk>/cancel/",
@@ -63,6 +83,11 @@ urlpatterns = [
         "stores/<int:store_id>/returns/<int:return_pk>/",
         views.SaleReturnDetailView.as_view(),
         name="return_detail",
+    ),
+    path(
+        "stores/<int:store_id>/returns/<int:return_pk>/lines/<int:original_line_pk>/inline/",
+        views.SaleReturnWorkspaceLineView.as_view(),
+        name="return_line_inline",
     ),
     path(
         "stores/<int:store_id>/returns/<int:return_pk>/lines/add/",

@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views import View
 
 from apps.business_config.models import POSSettings
@@ -19,7 +20,7 @@ from apps.payments.services import (
     register_sale_payment,
 )
 from apps.sales.selectors import get_sale_detail, get_sale_return_detail
-from apps.users.helpers import can_access_store
+from apps.users.helpers import can_access_store, can_sell_in_store
 from apps.users.mixins import BusinessRequiredMixin
 
 
@@ -49,10 +50,19 @@ class _BasePaymentView(BusinessRequiredMixin, View):
 class PaymentCreateView(_BasePaymentView):
     template_name = "payments/payment_form.html"
 
+    @staticmethod
+    def customer_return_for(sale, value):
+        return str(sale.customer_id) if value and str(sale.customer_id) == value else ""
+
     def get(self, request, *args, **kwargs):
         business, _ = self.context()
         sale = get_sale_detail(business=business, pk=kwargs["sale_id"])
         self.validate_store(sale)
+        customer_return = self.customer_return_for(
+            sale, request.GET.get("customer_return", "")
+        )
+        if customer_return and not can_sell_in_store(request.user, sale.store):
+            raise Http404
         return render(
             request,
             self.template_name,
@@ -63,6 +73,8 @@ class PaymentCreateView(_BasePaymentView):
                     initial={"cash_session": sale.cash_session_id},
                 ),
                 "sale": sale,
+                "customer_return": customer_return,
+                "is_debt_collection": bool(customer_return),
             },
         )
 
@@ -71,6 +83,11 @@ class PaymentCreateView(_BasePaymentView):
         sale = get_sale_detail(business=business, pk=kwargs["sale_id"])
         self.validate_store(sale)
         form = PaymentCreateForm(request.POST, business=business, store=sale.store)
+        customer_return = self.customer_return_for(
+            sale, request.POST.get("customer_return", "")
+        )
+        if customer_return and not can_sell_in_store(request.user, sale.store):
+            raise Http404
         if form.is_valid():
             try:
                 register_sale_payment(
@@ -90,10 +107,24 @@ class PaymentCreateView(_BasePaymentView):
                 self.add_error(form, error)
             else:
                 messages.success(request, "Cobro registrado correctamente.")
+                if customer_return:
+                    return redirect(
+                        f"{reverse('customers:customer_detail', args=[sale.customer_id])}"
+                        "?tab=account"
+                    )
                 return redirect(
                     "sales:sale_detail", store_id=sale.store_id, sale_pk=sale.pk
                 )
-        return render(request, self.template_name, {"form": form, "sale": sale})
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "sale": sale,
+                "customer_return": customer_return,
+                "is_debt_collection": bool(customer_return),
+            },
+        )
 
 
 class PaymentRefundView(_BasePaymentView):

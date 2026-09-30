@@ -7,6 +7,7 @@ from apps.inventory.views import (
     InventoryItemDetailView,
     InventoryItemListView,
     InventoryItemUpdateView,
+    InventoryQuickAdjustmentView,
     StockAdjustmentCancelView,
     StockAdjustmentConfirmView,
     StockAdjustmentCreateView,
@@ -15,6 +16,7 @@ from apps.inventory.views import (
     StockAdjustmentLineDeleteView,
     StockAdjustmentLineUpdateView,
     StockAdjustmentListView,
+    StockAdjustmentReviewView,
     StockMovementDetailView,
     StockMovementListView,
 )
@@ -30,6 +32,11 @@ urlpatterns = [
     path("items/create/", InventoryItemCreateView.as_view(), name="item_create"),
     path("items/<int:pk>/", InventoryItemDetailView.as_view(), name="item_detail"),
     path("items/<int:pk>/edit/", InventoryItemUpdateView.as_view(), name="item_update"),
+    path(
+        "items/<int:pk>/adjust/",
+        InventoryQuickAdjustmentView.as_view(),
+        name="item_adjust",
+    ),
     path(
         "items/<int:pk>/initial-stock/",
         InventoryInitialStockView.as_view(),
@@ -61,6 +68,11 @@ urlpatterns = [
         "adjustments/<int:pk>/",
         StockAdjustmentDetailView.as_view(),
         name="stock_adjustment_detail",
+    ),
+    path(
+        "adjustments/<int:pk>/review/",
+        StockAdjustmentReviewView.as_view(),
+        name="stock_adjustment_review",
     ),
     # Líneas de ajuste
     path(

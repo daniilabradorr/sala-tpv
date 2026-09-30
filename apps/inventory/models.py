@@ -670,6 +670,38 @@ class StockMovement(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="stock_movements",
     )
+    purchase = models.ForeignKey(
+        "purchases.Purchase",
+        verbose_name="Compra",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    purchase_line = models.ForeignKey(
+        "purchases.PurchaseLine",
+        verbose_name="Línea de compra",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    purchase_receipt = models.ForeignKey(
+        "purchases.PurchaseReceipt",
+        verbose_name="Recepción de compra",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    purchase_receipt_line = models.ForeignKey(
+        "purchases.PurchaseReceiptLine",
+        verbose_name="Línea de recepción de compra",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
 
     inventory_item = models.ForeignKey(
         InventoryItem,
@@ -801,6 +833,11 @@ class StockMovement(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(unit_cost__isnull=True) | Q(unit_cost__gte=0),
                 name="chk_stmov_cost_gte_0",
+            ),
+            models.UniqueConstraint(
+                fields=["purchase_receipt_line"],
+                condition=Q(purchase_receipt_line__isnull=False),
+                name="uniq_stmov_purch_receipt_line",
             ),
         ]
         indexes = [
@@ -942,6 +979,95 @@ class StockMovement(TimeStampedModel):
                 errors["product"] = (
                     "El producto debe coincidir con la línea original devuelta."
                 )
+
+        purchase_objects = {
+            "purchase": self.purchase if self.purchase_id else None,
+            "purchase_line": self.purchase_line if self.purchase_line_id else None,
+            "purchase_receipt": (
+                self.purchase_receipt if self.purchase_receipt_id else None
+            ),
+            "purchase_receipt_line": (
+                self.purchase_receipt_line if self.purchase_receipt_line_id else None
+            ),
+        }
+        for field, obj in purchase_objects.items():
+            if obj is not None and obj.business_id != self.business_id:
+                errors[field] = "La referencia debe pertenecer al mismo negocio."
+
+        if self.purchase_id and self.purchase.store_id != self.store_id:
+            errors["purchase"] = "La compra debe pertenecer a la misma tienda."
+
+        if self.purchase_line_id:
+            if not self.purchase_id:
+                errors["purchase_line"] = "La línea requiere indicar la compra."
+            elif self.purchase_line.purchase_id != self.purchase_id:
+                errors["purchase_line"] = (
+                    "La línea debe pertenecer a la compra indicada."
+                )
+            if self.purchase_line.product_id != self.product_id:
+                errors["product"] = "El producto debe coincidir con la línea de compra."
+
+        if self.purchase_receipt_id:
+            if not self.purchase_id:
+                errors["purchase_receipt"] = "La recepción requiere indicar la compra."
+            elif self.purchase_receipt.purchase_id != self.purchase_id:
+                errors["purchase_receipt"] = (
+                    "La recepción debe pertenecer a la compra indicada."
+                )
+            if self.purchase_receipt.store_id != self.store_id:
+                errors["purchase_receipt"] = (
+                    "La recepción debe pertenecer a la misma tienda."
+                )
+
+        if self.purchase_receipt_line_id:
+            if not self.purchase_id or not self.purchase_line_id:
+                errors["purchase_receipt_line"] = (
+                    "La línea de recepción requiere indicar compra y línea de compra."
+                )
+            if not self.purchase_receipt_id:
+                errors["purchase_receipt_line"] = (
+                    "La línea de recepción requiere indicar la recepción."
+                )
+            elif self.purchase_receipt_line.receipt_id != self.purchase_receipt_id:
+                errors["purchase_receipt_line"] = (
+                    "La línea debe pertenecer a la recepción indicada."
+                )
+            if (
+                self.purchase_line_id
+                and self.purchase_receipt_line.purchase_line_id != self.purchase_line_id
+            ):
+                errors["purchase_receipt_line"] = (
+                    "La línea recibida debe coincidir con la línea de compra."
+                )
+            receipt_purchase_line = self.purchase_receipt_line.purchase_line
+            if (
+                self.purchase_id
+                and receipt_purchase_line.purchase_id != self.purchase_id
+            ):
+                errors["purchase_receipt_line"] = (
+                    "La línea recibida debe pertenecer a la compra indicada."
+                )
+            if self.quantity != self.purchase_receipt_line.quantity_received:
+                errors["quantity"] = (
+                    "La cantidad debe coincidir con la cantidad de la línea recibida."
+                )
+
+        if self.movement_type == self.TYPE_PURCHASE_RECEIPT:
+            required_relations = {
+                "purchase": self.purchase_id,
+                "purchase_line": self.purchase_line_id,
+                "purchase_receipt": self.purchase_receipt_id,
+                "purchase_receipt_line": self.purchase_receipt_line_id,
+            }
+            for field, value in required_relations.items():
+                if not value:
+                    errors[field] = (
+                        "Este campo es obligatorio para una recepción de compra."
+                    )
+        elif self.purchase_receipt_id or self.purchase_receipt_line_id:
+            errors["movement_type"] = (
+                "Las recepciones de compra requieren el tipo purchase_receipt."
+            )
 
         if self.quantity is None or self.quantity <= Decimal("0.000"):
             errors["quantity"] = "La cantidad del movimiento debe ser mayor que cero."

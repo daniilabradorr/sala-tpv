@@ -1,0 +1,4 @@
+.nx-feedback { align-items: start; background: var(--nx-surface, #fff); border: 2px solid var(--nx-danger, #b91c1c); border-radius: var(--nx-radius-md); bottom: var(--nx-space-4); box-shadow: var(--nx-shadow-md); display: flex; gap: var(--nx-space-4); left: 50%; max-width: min(40rem, calc(100vw - 2rem)); padding: var(--nx-space-4); position: fixed; transform: translateX(-50%); width: 100%; z-index: 1090; }
+.nx-feedback[hidden] { display: none; } .nx-feedback p { margin: var(--nx-space-1) 0 0; } .nx-feedback button { margin-inline-start: auto; min-height: 44px; min-width: 44px; }
+.nx-feedback--in-surface { bottom: auto; left: auto; margin: var(--nx-space-4); max-width: none; position: sticky; top: var(--nx-space-4); transform: none; width: calc(100% - (2 * var(--nx-space-4))); z-index: 1; }
+.is-loading { cursor: progress; opacity: .75; }

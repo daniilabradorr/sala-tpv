@@ -82,6 +82,16 @@ def create_inventory_owner(*, business, password="testpass123"):
     )
 
 
+def create_inventory_manager(*, business, password="testpass123"):
+    email = f"manager-{uuid4().hex[:8]}@inventory.test"
+    return create_user(
+        business=business,
+        email=email,
+        password=password,
+        role=RoleChoices.MANAGER,
+    )
+
+
 def create_inventory_cashier(*, business, password="testpass123"):
     email = f"cashier-{uuid4().hex[:8]}@inventory.test"
     return create_user(

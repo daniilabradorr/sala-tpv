@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<section class="card card-form"><h1>Crear ajuste de stock</h1><p>El ajuste se guardará como borrador y no cambiará el stock hasta confirmarlo.</p><form method="post" class="stacked-form">{% csrf_token %}{% include "inventory/_form_fields.html" %}<button class="button" type="submit">Crear borrador</button></form></section>{% endblock %}

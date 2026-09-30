@@ -1,0 +1,14 @@
+<section aria-labelledby="general-title"><h2 id="general-title">General</h2>
+<div class="reports-kpis">
+  <article><span>Ventas netas</span><strong>{{ report_data.dashboard.sales.net_sales|floatformat:2 }} €</strong></article>
+  <article><span>Tickets</span><strong>{{ report_data.dashboard.sales.ticket_count }}</strong></article>
+  <article><span>Ticket medio</span><strong title="Promedio del importe bruto de las ventas originales del periodo.">{{ report_data.dashboard.sales.average_ticket|floatformat:2 }} €</strong></article>
+  <article><span>Devoluciones</span><strong>{{ report_data.dashboard.sales.returns_amount|floatformat:2 }} €</strong></article>
+</div>
+<section class="report-card"><h3>Ventas netas · evolución</h3><div class="reports-chart" aria-hidden="true">{% for row in report_data.dashboard.sales_timeseries %}<div class="chart-column"><span style="--bar-height:{{ row.net_sales_height }}%"></span><small>{{ row.day|date:"d/m" }}</small></div>{% empty %}<p>No hay ventas en este periodo.</p>{% endfor %}</div><table class="visually-hidden"><caption>Datos de la evolución diaria de ventas netas</caption><thead><tr><th scope="col">Fecha</th><th scope="col">Ventas netas</th></tr></thead><tbody>{% for row in report_data.dashboard.sales_timeseries %}<tr><th scope="row">{{ row.day|date:"d/m/Y" }}</th><td>{{ row.net_sales|floatformat:2 }} €</td></tr>{% endfor %}</tbody></table></section>
+<div class="reports-secondary">
+  <article><h3>Cobros</h3><strong>{{ report_data.dashboard.payments.net_amount|floatformat:2 }} €</strong></article>
+  <article><h3>Compras</h3><strong>{{ report_data.dashboard.purchases.total_amount|floatformat:2 }} €</strong></article>
+  <article><h3>Inventario ahora</h3><span class="badge">Estado actual</span><strong>{{ report_data.dashboard.inventory.low_stock_count }} con stock bajo</strong></article>
+  <article><h3>Fiscal</h3><strong>{{ report_data.dashboard.tax.effective_total_amount|floatformat:2 }} €</strong></article>
+</div></section>

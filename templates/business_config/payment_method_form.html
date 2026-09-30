@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Configurar {{ method.name }} | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/configuration.css' %}">{% endblock %}
+{% block content %}
+<section class="card business-profile-card">
+ <p class="config-breadcrumb">Configuración → TPV → Pagos</p>
+ <h1>Configurar {{ method.name }}</h1>
+ <nav class="config-nav" aria-label="Configuración de empresa"><a class="button button-secondary" href="{% url 'business_config:profile' %}">Negocio</a><a class="button" href="{% url 'business_config:pos' %}" aria-current="page">TPV</a></nav>
+ <form method="post" class="stacked-form" novalidate>{% csrf_token %}
+  {% if form.non_field_errors %}<div role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  <fieldset class="form-section"><legend>Datos del método</legend>
+   {% include "business_config/_field.html" with field=form.name %}
+   <dl class="readonly-details"><div><dt>Código</dt><dd><code>{{ method.code }}</code><small>No editable</small></dd></div><div><dt>Afecta a caja física</dt><dd>{{ method.affects_cash_register|yesno:"Sí,No" }}<small>Determinado automáticamente por Netxodo.</small></dd></div></dl>
+   {% include "business_config/_field.html" with field=form.is_active %}
+   {% include "business_config/_field.html" with field=form.allows_refund %}
+  </fieldset>
+  <div class="actions"><a class="button button-secondary" href="{% url 'business_config:pos' %}">Cancelar</a><button class="button" type="submit">Guardar</button></div>
+ </form>
+</section>
+{% endblock %}

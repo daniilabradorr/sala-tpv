@@ -12,7 +12,7 @@ from apps.billing.forms import (
 )
 from apps.billing.models import BillingDocumentTypeChoices, BillingSeries
 from apps.billing.services import issue_sale_document, substitute_simplified_document
-from apps.business_config.models import BusinessProfile
+from apps.business_config.services import create_business_configuration
 from apps.cash_register.test_factories import create_cash_register
 from apps.sales.models import (
     RequestedDocumentTypeChoices,
@@ -44,18 +44,17 @@ class BillingFormsFixture(TestCase):
             business=self.business, legal_name="Cliente SL", tax_identifier="B87654321"
         )
         self.other_customer = create_sales_customer(business=self.other_business)
-        profile = BusinessProfile.objects.get(business=self.business)
-        for field, value in {
-            "legal_name": "Emisor SL",
-            "tax_identifier": "B12345678",
-            "address_line_1": "Calle 1",
-            "postal_code": "28001",
-            "city": "Madrid",
-            "province": "Madrid",
-            "country_code": "ES",
-        }.items():
-            setattr(profile, field, value)
-        profile.save()
+        create_business_configuration(
+            business=self.business,
+            legal_name="Emisor SL",
+            tax_identifier="B12345678",
+            phone="600000000",
+            email="billing@example.test",
+            address_line_1="Calle 1",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
         tax = create_sales_tax(business=self.business)
         self.product = create_sales_product(business=self.business, tax=tax)
 
@@ -159,6 +158,10 @@ class BillingDocumentFilterFormTests(BillingFormsFixture):
 
 
 class IssueSaleDocumentFormTests(BillingFormsFixture):
+    def test_series_label_is_spanish(self):
+        form = IssueSaleDocumentForm(business=self.business, sale=self.sale())
+        self.assertEqual(form.fields["series"].label, "Serie")
+
     def test_invoice_and_ticket_expose_only_expected_series(self):
         f1, f2 = self.series("F1"), self.series("F2")
         invoice = self.sale(RequestedDocumentTypeChoices.INVOICE, self.customer)
@@ -223,6 +226,13 @@ class IssueSaleDocumentFormTests(BillingFormsFixture):
 
 
 class SubstituteSimplifiedDocumentFormTests(BillingFormsFixture):
+    def test_customer_and_series_labels_are_spanish(self):
+        form = SubstituteSimplifiedDocumentForm(
+            business=self.business, sale=self.sale()
+        )
+        self.assertEqual(form.fields["customer"].label, "Cliente")
+        self.assertEqual(form.fields["series"].label, "Serie")
+
     def test_customer_and_f3_series_are_scoped(self):
         sale = self.sale(customer=self.customer)
         valid = self.series("F3")
@@ -253,6 +263,16 @@ class SubstituteSimplifiedDocumentFormTests(BillingFormsFixture):
 
 
 class SaleReturnRectificationFormTests(BillingFormsFixture):
+    def test_series_labels_are_spanish(self):
+        form = SaleReturnRectificationForm(
+            business=self.business, sale_return=self.completed_return(self.sale())
+        )
+        self.assertEqual(form.fields["series"].label, "Serie")
+        self.assertEqual(
+            form.fields["companion_f3_series"].label,
+            "Serie F3 complementaria",
+        )
+
     def test_f1_exposes_r1_and_f2_exposes_r5(self):
         r1, r5 = self.series("R1"), self.series("R5")
         sale_f1 = self.sale(RequestedDocumentTypeChoices.INVOICE, self.customer)

@@ -17,11 +17,13 @@ class StoreUrlsTests(SimpleTestCase):
     def test_store_list_url_resolves(self):
         url = reverse("stores:store_list")
 
+        self.assertEqual(url, "/stores/")
         self.assertEqual(resolve(url).func.view_class, ListStoresView)
 
     def test_store_create_url_resolves(self):
         url = reverse("stores:store_create")
 
+        self.assertEqual(url, "/stores/create/")
         self.assertEqual(resolve(url).func.view_class, StoreCreateView)
 
     def test_store_detail_url_resolves(self):

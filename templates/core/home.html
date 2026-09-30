@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if administrative_mode %}Administración{% else %}Inicio{% endif %} | Netxodo{% endblock %}
+
+{% block extra_head %}
+    {% if not administrative_mode %}<link rel="stylesheet" href="{% static 'css/pages/dashboard.css' %}">{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if administrative_mode %}
+    <section class="card home-summary">
+        <span class="eyebrow">Netxodo</span>
+        <h1>Administración</h1>
+        <p>Acceso administrativo sin una empresa asignada.</p>
+        <div class="actions">
+            <a class="button" href="{% url 'admin:index' %}">Administración</a>
+            <a class="button button-secondary" href="{% url 'users:profile' %}">Mi perfil</a>
+        </div>
+    </section>
+{% else %}
+    {% include "core/partials/_dashboard_content.html" %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {% if not administrative_mode %}<script type="module" src="{% static 'js/pages/dashboard.js' %}"></script>{% endif %}
+{% endblock %}

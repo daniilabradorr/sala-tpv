@@ -1,0 +1,10 @@
+<details class="user-menu">
+    <summary aria-label="Abrir menú de usuario"><span class="user-avatar" aria-hidden="true">{{ shell_user_initials }}</span><span class="user-menu-name">{{ shell_user_name }}</span>{% include "components/icon.html" with name="chevron-down" %}</summary>
+    <div class="user-menu-panel">
+        <div class="user-menu-identity"><strong>{{ shell_user_name }}</strong><small>{{ request.user.email }}</small></div>
+        <a href="{% url 'users:profile' %}">Mi perfil</a>
+        <a href="{% url 'users:password_change' %}">Cambiar contraseña</a>
+        <a href="{% url 'users:pin_change' %}">Cambiar PIN</a>
+        <form method="post" action="{% url 'users:logout' %}">{% csrf_token %}<button type="submit">Cerrar sesión</button></form>
+    </div>
+</details>

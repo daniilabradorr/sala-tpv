@@ -1,0 +1,5 @@
+<nav class="tabs catalog-tabs" aria-label="Secciones del catálogo">
+  <a class="tab{% if catalog_tab == 'products' %} is-active{% endif %}" {% if catalog_tab == 'products' %}aria-current="page"{% endif %} href="{% url 'catalog:product_list' %}">Productos</a>
+  <a class="tab{% if catalog_tab == 'categories' %} is-active{% endif %}" {% if catalog_tab == 'categories' %}aria-current="page"{% endif %} href="{% url 'catalog:category_list' %}">Categorías</a>
+  <a class="tab{% if catalog_tab == 'taxes' %} is-active{% endif %}" {% if catalog_tab == 'taxes' %}aria-current="page"{% endif %} href="{% url 'catalog:tax_list' %}">Impuestos</a>
+</nav>

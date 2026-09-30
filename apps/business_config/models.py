@@ -54,6 +54,7 @@ class BusinessProfile(TimeStampedModel):
     )  # la moneda que se usara
     brand_name = models.CharField("marca", max_length=150, blank=True)
     logo_url = models.URLField("logo", blank=True)
+    logo = models.ImageField("logo gestionado", blank=True, editable=False)
 
     receipt_footer = models.TextField("pie de ticket", blank=True)
     return_policy = models.TextField("política de devoluciones", blank=True)
@@ -80,6 +81,12 @@ class BusinessProfile(TimeStampedModel):
     class Meta:
         verbose_name = "perfil de negocio"
         verbose_name_plural = "perfiles de negocio"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country_code", "tax_identifier"],
+                name="uniq_businessprofile_country_tax_id",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         self.full_clean()

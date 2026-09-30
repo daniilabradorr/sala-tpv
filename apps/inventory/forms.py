@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from django import forms
 
-from apps.catalog.models import Product
+from apps.catalog.models import Category, Product
 from apps.inventory.models import (
     InventoryItem,
     StockAdjustment,
@@ -44,6 +44,36 @@ def _decimal_attrs(step="0.001", min_value="0"):
 
 class InventoryItemFilterForm(forms.Form):
     """Formulario de filtros para el listado de inventario."""
+
+    search = forms.CharField(
+        label="Buscar producto o SKU",
+        required=False,
+        widget=forms.SearchInput(
+            attrs={"class": "form-control", "placeholder": "Buscar producto o SKU…"}
+        ),
+    )
+    stock_status = forms.ChoiceField(
+        label="Estado de stock",
+        required=False,
+        choices=[
+            ("", "Todos"),
+            ("normal", "Normal"),
+            ("low", "Stock bajo"),
+            ("out", "Sin stock"),
+        ],
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    category = forms.ModelChoiceField(
+        label="Categoría",
+        queryset=Category.objects.none(),
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    location = forms.CharField(
+        label="Ubicación",
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
 
     store = forms.ModelChoiceField(
         label="Tienda",
@@ -82,7 +112,7 @@ class InventoryItemFilterForm(forms.Form):
         widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -91,9 +121,11 @@ class InventoryItemFilterForm(forms.Form):
             return
 
         # En filtros permitimos ver tiendas históricas aunque estén inactivas.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
         # En filtros permitimos ver productos físicos con control de stock,
         # aunque estén inactivos, porque pueden tener histórico.
@@ -101,6 +133,9 @@ class InventoryItemFilterForm(forms.Form):
             business=self.business,
             is_service=False,
             track_stock=True,
+        ).order_by("name")
+        self.fields["category"].queryset = Category.objects.filter(
+            business=self.business
         ).order_by("name")
 
 
@@ -169,7 +204,7 @@ class InventoryItemCreateForm(forms.ModelForm):
             "location": "Ubicación interna del producto. Opcional.",
         }
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -573,7 +608,7 @@ class StockMovementFilterForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -592,9 +627,11 @@ class StockMovementFilterForm(forms.Form):
             return
 
         # En filtros dejamos ver histórico aunque la tienda esté inactiva.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
         # En filtros dejamos ver histórico aunque el producto esté inactivo.
         self.fields["product"].queryset = Product.objects.filter(
@@ -669,7 +706,7 @@ class StockAdjustmentFilterForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, business=None, **kwargs):
+    def __init__(self, *args, business=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -688,9 +725,11 @@ class StockAdjustmentFilterForm(forms.Form):
             return
 
         # En filtros dejamos ver histórico aunque la tienda esté inactiva.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores
+            if stores is not None
+            else Store.objects.filter(business=self.business).order_by("name")
+        )
 
     def clean(self):
         cleaned_data = super().clean()
@@ -749,7 +788,7 @@ class StockAdjustmentCreateForm(forms.ModelForm):
             "notes": "Notas internas opcionales.",
         }
 
-    def __init__(self, *args, business=None, user=None, **kwargs):
+    def __init__(self, *args, business=None, user=None, stores=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.business = business
@@ -767,10 +806,13 @@ class StockAdjustmentCreateForm(forms.ModelForm):
             self.instance.created_by = self.user
 
         # En creación sí exigimos tienda activa.
-        self.fields["store"].queryset = Store.objects.filter(
-            business=self.business,
-            is_active=True,
-        ).order_by("name")
+        self.fields["store"].queryset = (
+            stores.filter(is_active=True)
+            if stores is not None
+            else Store.objects.filter(business=self.business, is_active=True).order_by(
+                "name"
+            )
+        )
 
     def clean_store(self):
         store = self.cleaned_data.get("store")
@@ -1033,6 +1075,23 @@ class StockAdjustmentLineForm(forms.ModelForm):
             line.save()
 
         return line
+
+
+class QuickStockAdjustmentForm(forms.Form):
+    """Physical count input; the system snapshot is always read server-side."""
+
+    counted_stock = forms.DecimalField(
+        label="Stock contado físicamente",
+        min_value=Decimal("0.000"),
+        max_digits=14,
+        decimal_places=3,
+        widget=forms.NumberInput(attrs={**_decimal_attrs(), "inputmode": "decimal"}),
+    )
+    notes = forms.CharField(
+        label="Notas",
+        required=False,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
 
 
 class StockAdjustmentConfirmForm(forms.Form):

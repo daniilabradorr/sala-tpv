@@ -44,6 +44,14 @@ jobs:
           ALLOWED_HOSTS: 127.0.0.1,localhost
         run: uv run python manage.py makemigrations --check --dry-run
 
+      - name: Collect static files
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py collectstatic --noinput
+
       - name: Run tests
         env:
           DJANGO_SETTINGS_MODULE: config.settings.test
@@ -54,6 +62,7 @@ jobs:
 
   billing-postgres-concurrency:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
@@ -95,3 +104,284 @@ jobs:
           ALLOWED_HOSTS: 127.0.0.1,localhost
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
         run: uv run python manage.py test apps.billing.tests_concurrency --verbosity 2
+
+  sales-postgres-locking:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run Sales locking tests on PostgreSQL
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
+        run: >-
+          uv run python manage.py test
+          apps.sales.tests_postgres_locking
+          --verbosity 2
+
+  payments-postgres-locking:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run Payments locking tests on PostgreSQL
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
+        run: >-
+          uv run python manage.py test
+          apps.payments.tests_postgres_locking
+          --verbosity 2
+
+  purchases-postgres-locking:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run Purchases locking tests on PostgreSQL
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
+        run: >-
+          uv run python manage.py test
+          apps.purchases.tests_postgres_locking
+          --verbosity 2
+
+  cash-postgres-concurrency:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run Cash concurrency tests on PostgreSQL
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
+        run: >-
+          uv run python manage.py test
+          apps.cash_register.tests.integration.test_concurrency
+          --verbosity 2
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netxodo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d netxodo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.6"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Collect static files
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+        run: uv run python manage.py collectstatic --noinput
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run browser workflows
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          SECRET_KEY: test-secret-key
+          DEBUG: "0"
+          ALLOWED_HOSTS: 127.0.0.1,localhost
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/netxodo_test
+        run: >-
+          uv run python manage.py test
+          e2e.browser_catalog
+          e2e.browser_customers
+          e2e.browser_purchases
+          e2e.browser_inventory
+          e2e.browser_cash_register
+          e2e.browser_stores
+          e2e.browser_full_flow
+          e2e.browser_responsive_shell
+          e2e.browser_htmx_global_ux
+          e2e.browser_media
+          e2e.browser_auth_profile
+          e2e.browser_onboarding
+          e2e.browser_dashboard
+          e2e.browser_sales_history
+          e2e.browser_tpv
+          e2e.browser_checkout
+          e2e.browser_returns
+          e2e.browser_billing
+          e2e.browser_reports
+          e2e.browser_activity
+          e2e.browser_users
+          e2e.browser_configuration
+          e2e.browser_final_qa
+          --verbosity 2
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-failure
+          path: artifacts/e2e/
+          if-no-files-found: ignore

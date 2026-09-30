@@ -9,7 +9,7 @@ Regla:
 - Siempre filtramos por business.
 """
 
-from django.db.models import F
+from django.db.models import Count, F, Q
 from django.shortcuts import get_object_or_404
 
 from apps.inventory.models import (
@@ -17,6 +17,38 @@ from apps.inventory.models import (
     StockAdjustment,
     StockMovement,
 )
+from apps.stores.selectors import (
+    get_stores_available_for_user,
+    get_stores_for_business,
+)
+from apps.stores.models import Store
+
+
+def get_inventory_visible_stores(user, *, only_active=None):
+    """Stores visible in Inventory under its owner/manager/cashier contract."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return Store.objects.none()
+    if user.is_superuser:
+        stores = Store.objects.select_related("business")
+        if only_active is True:
+            stores = stores.filter(is_active=True)
+        elif only_active is False:
+            stores = stores.filter(is_active=False)
+        return stores.order_by("name", "pk")
+    if not getattr(user, "business_id", None):
+        return get_stores_for_business(business=None)
+    if user.role in {"owner", "manager"}:
+        return get_stores_for_business(business=user.business, only_active=only_active)
+    stores = get_stores_available_for_user(user=user, only_active=False)
+    if only_active is True:
+        stores = stores.filter(is_active=True)
+    elif only_active is False:
+        stores = stores.filter(is_active=False)
+    return stores
+
+
+def _scope_to_stores(queryset, stores):
+    return queryset if stores is None else queryset.filter(store__in=stores)
 
 
 # ==========================================================
@@ -27,6 +59,7 @@ from apps.inventory.models import (
 def get_inventory_dashboard_data(
     business,
     *,
+    stores=None,
     latest_movements_limit=10,
     latest_adjustments_limit=10,
 ):
@@ -34,9 +67,11 @@ def get_inventory_dashboard_data(
 
     if business is None:
         return {
+            "controlled_products": 0,
             "total_products_with_stock": 0,
             "low_stock_products": 0,
             "out_of_stock_products": 0,
+            "healthy_stock_products": 0,
             "latest_movements": [],
             "latest_adjustments": [],
         }
@@ -47,6 +82,7 @@ def get_inventory_dashboard_data(
     ).annotate(
         available=F("current_stock") - F("reserved_stock"),
     )
+    inventory_items = _scope_to_stores(inventory_items, stores)
 
     latest_movements = (
         StockMovement.objects.filter(
@@ -57,8 +93,11 @@ def get_inventory_dashboard_data(
             "store",
             "created_by",
         )
-        .order_by("-occurred_at", "-created_at")[:latest_movements_limit]
+        .order_by("-occurred_at", "-created_at")
     )
+    latest_movements = _scope_to_stores(latest_movements, stores)[
+        :latest_movements_limit
+    ]
 
     latest_adjustments = (
         StockAdjustment.objects.filter(
@@ -69,19 +108,25 @@ def get_inventory_dashboard_data(
             "created_by",
             "confirmed_by",
         )
-        .order_by("-created_at")[:latest_adjustments_limit]
+        .order_by("-created_at")
     )
+    latest_adjustments = _scope_to_stores(latest_adjustments, stores)[
+        :latest_adjustments_limit
+    ]
 
     return {
-        "total_products_with_stock": inventory_items.filter(
-            available__gt=0,
-        ).count(),
+        "controlled_products": inventory_items.count(),
+        # Backwards-compatible key for callers predating the workspace.
+        "total_products_with_stock": inventory_items.count(),
         "low_stock_products": inventory_items.filter(
             available__gt=0,
             available__lte=F("minimum_stock"),
         ).count(),
         "out_of_stock_products": inventory_items.filter(
             available__lte=0,
+        ).count(),
+        "healthy_stock_products": inventory_items.filter(
+            available__gt=F("minimum_stock"),
         ).count(),
         "latest_movements": latest_movements,
         "latest_adjustments": latest_adjustments,
@@ -93,7 +138,7 @@ def get_inventory_dashboard_data(
 # ==========================================================
 
 
-def get_inventory_items_for_business(business, filters=None):
+def get_inventory_items_for_business(business, filters=None, stores=None):
     """Devuelve fichas de inventario de un negocio."""
 
     if business is None:
@@ -109,6 +154,7 @@ def get_inventory_items_for_business(business, filters=None):
             "business",
             "store",
             "product",
+            "product__category",
         )
         .annotate(
             available=F("current_stock") - F("reserved_stock"),
@@ -118,12 +164,32 @@ def get_inventory_items_for_business(business, filters=None):
             "product__name",
         )
     )
+    queryset = _scope_to_stores(queryset, stores)
 
     store = filters.get("store")
     product = filters.get("product")
     is_active = filters.get("is_active")
     low_stock = filters.get("low_stock")
     out_of_stock = filters.get("out_of_stock")
+    search = filters.get("search")
+    stock_status = filters.get("stock_status")
+    category = filters.get("category")
+    location = filters.get("location")
+
+    if search:
+        queryset = queryset.filter(
+            Q(product__name__icontains=search) | Q(product__sku__icontains=search)
+        )
+    if category:
+        queryset = queryset.filter(product__category=category)
+    if location:
+        queryset = queryset.filter(location__icontains=location)
+    if stock_status == "normal":
+        queryset = queryset.filter(available__gt=F("minimum_stock"))
+    elif stock_status == "low":
+        queryset = queryset.filter(available__gt=0, available__lte=F("minimum_stock"))
+    elif stock_status == "out":
+        queryset = queryset.filter(available__lte=0)
 
     if store:
         queryset = queryset.filter(store=store)
@@ -151,15 +217,17 @@ def get_inventory_items_for_business(business, filters=None):
     return queryset
 
 
-def get_inventory_item_detail(business, pk):
+def get_inventory_item_detail(business, pk, stores=None):
     """Devuelve una ficha de inventario concreta."""
 
+    queryset = InventoryItem.objects.select_related(
+        "business",
+        "store",
+        "product",
+    )
+    queryset = _scope_to_stores(queryset, stores)
     return get_object_or_404(
-        InventoryItem.objects.select_related(
-            "business",
-            "store",
-            "product",
-        ),
+        queryset,
         pk=pk,
         business=business,
     )
@@ -216,6 +284,38 @@ def get_inventory_item_latest_movements(
     )
 
 
+def get_inventory_item_movements(*, business, inventory_item):
+    """Return the complete, optimized movement history for pagination."""
+
+    return (
+        StockMovement.objects.filter(
+            business=business,
+            inventory_item=inventory_item,
+        )
+        .select_related(
+            "product",
+            "store",
+            "created_by",
+            "sale",
+            "sale_return",
+            "purchase",
+            "purchase_receipt",
+            "stock_adjustment_line__adjustment",
+        )
+        .order_by("-occurred_at", "-created_at")
+    )
+
+
+def get_inventory_item_adjustments(*, business, inventory_item):
+    """Return adjustment lines for one item without loading unrelated history."""
+
+    return (
+        inventory_item.adjustment_lines.filter(adjustment__business=business)
+        .select_related("adjustment", "adjustment__created_by", "product")
+        .order_by("-created_at")
+    )
+
+
 def get_inventory_item_adjustment_lines(
     *,
     business,
@@ -241,7 +341,7 @@ def get_inventory_item_adjustment_lines(
 # ==========================================================
 
 
-def get_stock_movements_for_business(business, filters=None):
+def get_stock_movements_for_business(business, filters=None, stores=None):
     """Devuelve movimientos de stock de un negocio."""
 
     if business is None:
@@ -260,9 +360,15 @@ def get_stock_movements_for_business(business, filters=None):
             "store",
             "created_by",
             "stock_adjustment_line",
+            "stock_adjustment_line__adjustment",
+            "sale",
+            "sale_return",
+            "purchase",
+            "purchase_receipt",
         )
         .order_by("-occurred_at", "-created_at")
     )
+    queryset = _scope_to_stores(queryset, stores)
 
     store = filters.get("store")
     product = filters.get("product")
@@ -292,18 +398,25 @@ def get_stock_movements_for_business(business, filters=None):
     return queryset
 
 
-def get_stock_movement_detail(business, pk):
+def get_stock_movement_detail(business, pk, stores=None):
     """Devuelve un movimiento de stock concreto."""
 
+    queryset = StockMovement.objects.select_related(
+        "business",
+        "inventory_item",
+        "product",
+        "store",
+        "created_by",
+        "stock_adjustment_line",
+        "stock_adjustment_line__adjustment",
+        "sale",
+        "sale_return",
+        "purchase",
+        "purchase_receipt",
+    )
+    queryset = _scope_to_stores(queryset, stores)
     return get_object_or_404(
-        StockMovement.objects.select_related(
-            "business",
-            "inventory_item",
-            "product",
-            "store",
-            "created_by",
-            "stock_adjustment_line",
-        ),
+        queryset,
         pk=pk,
         business=business,
     )
@@ -314,7 +427,7 @@ def get_stock_movement_detail(business, pk):
 # ==========================================================
 
 
-def get_stock_adjustments_for_business(business, filters=None):
+def get_stock_adjustments_for_business(business, filters=None, stores=None):
     """Devuelve ajustes de stock de un negocio."""
 
     if business is None:
@@ -332,8 +445,10 @@ def get_stock_adjustments_for_business(business, filters=None):
             "created_by",
             "confirmed_by",
         )
+        .annotate(line_count=Count("lines"))
         .order_by("-created_at")
     )
+    queryset = _scope_to_stores(queryset, stores)
 
     store = filters.get("store")
     status = filters.get("status")
@@ -359,18 +474,20 @@ def get_stock_adjustments_for_business(business, filters=None):
     return queryset
 
 
-def get_stock_adjustment_detail(business, pk):
+def get_stock_adjustment_detail(business, pk, stores=None):
     """Devuelve un ajuste de stock concreto."""
 
+    queryset = StockAdjustment.objects.select_related(
+        "business",
+        "store",
+        "created_by",
+        "confirmed_by",
+    ).prefetch_related(
+        "lines",
+    )
+    queryset = _scope_to_stores(queryset, stores)
     return get_object_or_404(
-        StockAdjustment.objects.select_related(
-            "business",
-            "store",
-            "created_by",
-            "confirmed_by",
-        ).prefetch_related(
-            "lines",
-        ),
+        queryset,
         pk=pk,
         business=business,
     )

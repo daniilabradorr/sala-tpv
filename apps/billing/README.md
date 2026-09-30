@@ -84,7 +84,15 @@ not invent those fields.
 
 ## Onboarding and series
 
-Billing requires explicit usable `BillingSeries`, but current onboarding does not
-define their creation contract. No series are auto-created here. Product decisions
-are required for global-versus-Store scope, name, prefix, initial document types,
-year lifecycle, and optional cash-register scope.
+Billing requires explicit usable `BillingSeries`. As part of creating a Business,
+current onboarding provisions initial F1, F2, F3, R1, and R5 series for the Store
+created during that process. Each series belongs to the new Business and Store,
+uses `cash_register=None`, the current local year, `current_number=0`, `padding=6`,
+and `is_active=True`. Its name is `<document type label> - <Store name>` and its
+prefix is `<document type value>-<Store code>`.
+
+R2, R3, and R4 remain recognized by the Billing domain but are not part of initial
+onboarding provisioning because no manual workflow is currently defined for them.
+After provisioning, Billing owns transactional number consumption under its
+existing locking contract. This onboarding behavior does not implement or imply
+VeriFactu integration; that remains a future external boundary.

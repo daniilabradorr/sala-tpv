@@ -1,0 +1,18 @@
+<section id="workspace-header" class="tpv-header" aria-label="Datos de la venta">
+  <form method="post" action="{% url 'sales:sale_header_update' store.pk sale.pk %}"
+        hx-post="{% url 'sales:sale_header_update' store.pk sale.pk %}" hx-target="#workspace-header"
+        hx-swap="outerHTML" hx-disabled-elt="button">
+    {% csrf_token %}
+    {% if header_form.errors %}<div class="tpv-errors" role="alert">{{ header_form.non_field_errors }}{{ header_form.customer.errors }}</div>{% endif %}
+    <fieldset><legend>Tipo</legend><div class="segments">
+      <label><input type="radio" name="customer_mode" value="counter" {% if not sale.customer %}checked{% endif %}> <span>Mostrador</span></label>
+      <label><input type="radio" name="customer_mode" value="customer" {% if sale.customer %}checked{% endif %}> <span>Cliente</span></label>
+    </div></fieldset>
+    <div class="customer-field"><label for="id_customer">Cliente</label>{{ header_form.customer }}<small>Necesario para factura.</small><button type="button" class="button button-secondary" data-nx-modal-trigger="quick-customer-dialog" hx-get="{% url 'sales:quick_customer_create' store.pk sale.pk %}" hx-target="#quick-customer-panel" hx-swap="innerHTML">Nuevo cliente</button></div>
+    <fieldset><legend>Documento</legend><div class="segments">
+      <label><input type="radio" name="document_type_requested" value="ticket" {% if sale.document_type_requested == 'ticket' %}checked{% endif %}> <span>Ticket</span></label>
+      <label><input type="radio" name="document_type_requested" value="invoice" {% if sale.document_type_requested == 'invoice' %}checked{% endif %}> <span>Factura</span></label>
+    </div></fieldset>
+    <button type="submit" class="button button-secondary" aria-label="Actualizar cabecera">Guardar</button>
+  </form>
+</section>

@@ -52,6 +52,7 @@ class Category(TimeStampedModel):
         blank=True,
         default=True,
     )
+    image = models.ImageField(blank=True, editable=False)
 
     class Meta:
         verbose_name = "Categoría"
@@ -725,6 +726,7 @@ class Product(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="products",
     )
+    image = models.ImageField(blank=True, editable=False)
 
     category = models.ForeignKey(
         Category,

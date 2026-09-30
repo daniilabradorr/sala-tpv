@@ -1,10 +1,12 @@
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.decorators import method_decorator
+from django.views.decorators.vary import vary_on_headers
 from django.views import View
 from django.views.generic import (
-    TemplateView,
     ListView,
     DetailView,
     CreateView,
@@ -20,11 +22,19 @@ from apps.catalog.forms import (
     ProductCreateForm,
     ProductUpdateForm,
 )
+from apps.catalog.services import delete_category, delete_product, delete_tax
+from apps.catalog.selectors import get_category_rows, get_products_for_catalog
+from apps.inventory.selectors import (
+    get_inventory_items_for_business,
+    get_inventory_visible_stores,
+)
+from apps.core.media.services import remove_media, replace_media
 from apps.users.mixins import (
     ManagerOrOwnerRequiredMixin,
     BusinessRequiredMixin,
     BusinessScopedQuerysetMixin,
 )
+from apps.users.helpers import is_owner_or_manager
 
 
 class PageTitleMixin:
@@ -40,14 +50,25 @@ class PageTitleMixin:
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["page_title"] = self.page_title
+        context["can_manage_catalog"] = is_owner_or_manager(self.request.user)
         return context
 
 
-class CatalogDashboardView(
-    PageTitleMixin,
-    BusinessRequiredMixin,
-    TemplateView,
-):
+def _apply_media_form(*, business, entity, form, entity_kind):
+    upload = form.cleaned_data.get("image_upload")
+    if upload:
+        replace_media(
+            business=business,
+            entity=entity,
+            field_name="image",
+            entity_kind=entity_kind,
+            upload=upload,
+        )
+    elif form.cleaned_data.get("remove_image"):
+        remove_media(business=business, entity=entity, field_name="image")
+
+
+class CatalogDashboardView(BusinessRequiredMixin, View):
     """
     Dashboard principal del módulo catálogo.
 
@@ -62,8 +83,8 @@ class CatalogDashboardView(
     - productos sin impuesto específico
     """
 
-    template_name = "catalog/dashboard.html"
-    page_title = "Dashboard del catálogo"
+    def get(self, request, *args, **kwargs):
+        return redirect("catalog:product_list")
 
 
 # ==========================
@@ -71,6 +92,7 @@ class CatalogDashboardView(
 # ==========================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class CategoryListView(
     PageTitleMixin,
     BusinessScopedQuerysetMixin,
@@ -88,12 +110,20 @@ class CategoryListView(
     page_title = "Listado de categorías"
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .select_related("business", "parent")
-            .order_by("sort_order", "name")
+        return Category.objects.none()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["q"] = self.request.GET.get("q", "").strip()
+        context["category_rows"] = get_category_rows(
+            self.request.user.business, context["q"]
         )
+        return context
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return ["catalog/categories/partials/_category_results.html"]
+        return [self.template_name]
 
 
 class CategoryDetailView(
@@ -149,7 +179,14 @@ class CategoryCreateView(
     def form_valid(self, form):
         form.instance.business = self.request.user.business
 
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="categories",
+            )
 
         messages.success(
             self.request,
@@ -192,7 +229,14 @@ class CategoryUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="categories",
+            )
 
         messages.success(
             self.request,
@@ -270,6 +314,28 @@ class CategoryDeactivateView(
             "catalog:category_detail",
             pk=category.pk,
         )
+
+
+class CategoryDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/categories/category_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Category, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"category": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        category = self.get_object()
+        try:
+            delete_category(business=request.user.business, category=category)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:category_detail", pk=category.pk)
+        messages.success(request, "Categoría eliminada correctamente.")
+        return redirect("catalog:category_list")
 
 
 # ==========================
@@ -534,11 +600,34 @@ class TaxSetDefaultView(
         )
 
 
+class TaxDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/taxes/tax_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Tax, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"tax": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        tax = self.get_object()
+        try:
+            delete_tax(business=request.user.business, tax=tax)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:tax_detail", pk=tax.pk)
+        messages.success(request, "Impuesto eliminado correctamente.")
+        return redirect("catalog:tax_list")
+
+
 # ==========================
 # Productos
 # ==========================
 
 
+@method_decorator(vary_on_headers("HX-Request"), name="dispatch")
 class ProductListView(
     PageTitleMixin,
     BusinessScopedQuerysetMixin,
@@ -554,19 +643,29 @@ class ProductListView(
     template_name = "catalog/products/product_list.html"
     context_object_name = "products"
     page_title = "Listado de productos"
+    paginate_by = 25
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .select_related("business", "category", "tax")
-            .order_by(
-                "category__sort_order",
-                "category__name",
-                "sort_order",
-                "name",
-            )
-        )
+        return get_products_for_catalog(self.request.user.business, self.request.GET)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["categories"] = Category.objects.filter(
+            business=self.request.user.business
+        ).order_by("sort_order", "name")
+        context["filters"] = {
+            key: self.request.GET.get(key, "")
+            for key in ("q", "category", "type", "status", "stock")
+        }
+        query = self.request.GET.copy()
+        query.pop("page", None)
+        context["filter_query"] = query.urlencode()
+        return context
+
+    def get_template_names(self):
+        if self.request.htmx:
+            return ["catalog/products/partials/_product_results.html"]
+        return [self.template_name]
 
 
 class ProductDetailView(
@@ -587,6 +686,19 @@ class ProductDetailView(
 
     def get_queryset(self):
         return super().get_queryset().select_related("business", "category", "tax")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        product = context["product"]
+        context["inventory_items"] = []
+        if not product.is_service and product.track_stock:
+            stores = get_inventory_visible_stores(self.request.user)
+            context["inventory_items"] = get_inventory_items_for_business(
+                self.request.user.business,
+                filters={"product": product},
+                stores=stores,
+            )
+        return context
 
 
 class ProductCreateView(
@@ -617,7 +729,14 @@ class ProductCreateView(
     def form_valid(self, form):
         form.instance.business = self.request.user.business
 
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="products",
+            )
 
         messages.success(
             self.request,
@@ -660,7 +779,14 @@ class ProductUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            _apply_media_form(
+                business=self.request.user.business,
+                entity=self.object,
+                form=form,
+                entity_kind="products",
+            )
 
         messages.success(
             self.request,
@@ -739,3 +865,25 @@ class ProductDeactivateView(
             "catalog:product_detail",
             pk=product.pk,
         )
+
+
+class ProductDeleteView(ManagerOrOwnerRequiredMixin, BusinessRequiredMixin, View):
+    template_name = "catalog/products/product_confirm_delete.html"
+
+    def get_object(self):
+        return get_object_or_404(
+            Product, pk=self.kwargs["pk"], business=self.request.user.business
+        )
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, {"product": self.get_object()})
+
+    def post(self, request, *args, **kwargs):
+        product = self.get_object()
+        try:
+            delete_product(business=request.user.business, product=product)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect("catalog:product_detail", pk=product.pk)
+        messages.success(request, "Producto eliminado correctamente.")
+        return redirect("catalog:product_list")

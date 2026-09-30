@@ -1,0 +1,79 @@
+{% extends "layouts/public.html" %}
+{% load static %}
+{% block title %}Crea tu Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/onboarding.css' %}">{% endblock %}
+{% block content %}
+<section class="onboarding-card" aria-labelledby="onboarding-title" data-onboarding data-initial-step="{{ initial_step }}">
+  <img src="{% static 'img/netxodo-logo.png' %}" alt="Netxodo" class="onboarding-logo">
+  <div class="step-progress" aria-label="Progreso del alta">
+    <p data-step-status aria-live="polite">Paso {{ initial_step }} de 4</p>
+    <progress data-progress value="{{ initial_step }}" max="4">{{ initial_step }} de 4</progress>
+  </div>
+  <form method="post" class="onboarding-form" data-onboarding-form novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+
+    <fieldset class="wizard-step" data-step="1">
+      <legend id="onboarding-title" tabindex="-1">Tu negocio</legend>
+      <p class="step-kicker">Paso 1 de 4</p>
+      <div class="form-grid">
+        {% include "onboarding/_field.html" with field=form.legal_name %}
+        {% include "onboarding/_field.html" with field=form.tax_identifier %}
+        {% include "onboarding/_field.html" with field=form.trade_name %}
+        {% include "onboarding/_field.html" with field=form.phone %}
+        {% include "onboarding/_field.html" with field=form.email %}
+        {% include "onboarding/_field.html" with field=form.address_line_1 %}
+        {% include "onboarding/_field.html" with field=form.address_line_2 %}
+        {% include "onboarding/_field.html" with field=form.postal_code %}
+        {% include "onboarding/_field.html" with field=form.city %}
+        {% include "onboarding/_field.html" with field=form.province %}
+      </div>
+      <div class="fixed-values" aria-label="Configuración regional"><span><strong>País</strong> España</span><span><strong>Moneda</strong> EUR · Euro</span></div>
+      <div class="wizard-actions"><button class="button" type="button" data-next>Continuar</button></div>
+    </fieldset>
+
+    <fieldset class="wizard-step" data-step="2">
+      <legend tabindex="-1">Tu primera tienda</legend><p class="step-kicker">Paso 2 de 4</p>
+      {% include "onboarding/_field.html" with field=form.store_name %}
+      <div class="address-choice"><label for="{{ form.same_business_address.id_for_label }}">{{ form.same_business_address }} <span>Usar la misma dirección del negocio</span></label><p data-business-address>La dirección indicada para el negocio.</p></div>
+      <div class="store-address form-grid" data-store-address>
+        {% include "onboarding/_field.html" with field=form.store_address_line_1 %}
+        {% include "onboarding/_field.html" with field=form.store_address_line_2 %}
+        {% include "onboarding/_field.html" with field=form.store_postal_code %}
+        {% include "onboarding/_field.html" with field=form.store_city %}
+        {% include "onboarding/_field.html" with field=form.store_province %}
+        {% include "onboarding/_field.html" with field=form.store_phone %}
+        {% include "onboarding/_field.html" with field=form.store_email %}
+      </div>
+      <div class="wizard-actions"><button type="button" class="button button-secondary" data-back>Volver</button><button type="button" class="button" data-next>Continuar</button></div>
+    </fieldset>
+
+    <fieldset class="wizard-step" data-step="3">
+      <legend tabindex="-1">Crea tu cuenta</legend><p class="step-kicker">Paso 3 de 4</p>
+      <div class="form-grid">
+        {% include "onboarding/_field.html" with field=form.owner_first_name %}
+        {% include "onboarding/_field.html" with field=form.owner_last_name %}
+        {% include "onboarding/_field.html" with field=form.owner_email %}
+        {% include "onboarding/_field.html" with field=form.owner_phone %}
+        <div class="form-field{% if form.owner_password.errors %} form-field-error{% endif %}"><label for="{{ form.owner_password.id_for_label }}">Contraseña *</label><div class="password-control">{{ form.owner_password }}<button class="password-toggle" type="button" data-password-toggle aria-controls="{{ form.owner_password.id_for_label }}" aria-pressed="false">Mostrar</button></div>{% if form.owner_password.errors %}<div id="id_owner_password_error" class="field-errors" role="alert">{{ form.owner_password.errors }}</div>{% endif %}</div>
+        {% include "onboarding/_field.html" with field=form.owner_password_confirmation %}
+        {% include "onboarding/_field.html" with field=form.owner_pin %}
+      </div>
+      <div class="wizard-actions"><button type="button" class="button button-secondary" data-back>Volver</button><button type="button" class="button" data-next>Continuar</button></div>
+    </fieldset>
+
+    <fieldset class="wizard-step" data-step="4">
+      <legend tabindex="-1">Todo preparado</legend><p class="step-kicker">Paso 4 de 4</p>
+      <div class="review-grid">
+        <section><h2>Negocio</h2><dl><dt>Razón social</dt><dd data-review="legal_name">—</dd><dt>NIF/CIF</dt><dd data-review="tax_identifier">—</dd><dt data-optional-label="trade_name">Nombre comercial</dt><dd data-review="trade_name">—</dd></dl></section>
+        <section><h2>Primera tienda</h2><dl><dt>Nombre</dt><dd data-review="store_name">—</dd><dt>Dirección efectiva</dt><dd data-review-address>—</dd></dl></section>
+        <section><h2>Propietario</h2><dl><dt>Nombre</dt><dd data-review-owner>—</dd><dt>Email</dt><dd data-review="owner_email">—</dd></dl></section>
+      </div>
+      <section class="provision-list" aria-labelledby="provision-title"><h2 id="provision-title">Netxodo preparará automáticamente</h2><ul><li>✓ Configuración inicial del TPV</li><li>✓ IVA 21 % predeterminado</li><li>✓ Caja principal</li><li>✓ Métodos de pago iniciales</li><li>✓ Series F1/F2/F3/R1/R5</li></ul></section>
+      <div class="wizard-actions"><button type="button" class="button button-secondary" data-back>Volver</button><button type="submit" class="button create-button" data-submit>Crear mi Netxodo</button></div>
+      <div class="processing" data-processing hidden role="status"><h2>Estamos preparando Netxodo</h2><p>Creando tu espacio, tienda y configuración inicial de forma segura…</p></div>
+    </fieldset>
+  </form>
+</section>
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/core/password-visibility.js' %}" defer></script><script src="{% static 'js/pages/onboarding.js' %}" defer></script>{% endblock %}

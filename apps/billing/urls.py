@@ -11,6 +11,31 @@ urlpatterns = [
         name="document_list",
     ),
     path(
+        "stores/<int:store_id>/series/",
+        views.BillingSeriesListView.as_view(),
+        name="series_list",
+    ),
+    path(
+        "stores/<int:store_id>/series/new/",
+        views.BillingSeriesFormView.as_view(),
+        name="series_create",
+    ),
+    path(
+        "stores/<int:store_id>/series/<int:series_pk>/",
+        views.BillingSeriesDetailView.as_view(),
+        name="series_detail",
+    ),
+    path(
+        "stores/<int:store_id>/series/<int:series_pk>/edit/",
+        views.BillingSeriesFormView.as_view(),
+        name="series_edit",
+    ),
+    path(
+        "stores/<int:store_id>/series/<int:series_pk>/<str:action>/",
+        views.BillingSeriesToggleView.as_view(),
+        name="series_toggle",
+    ),
+    path(
         "stores/<int:store_id>/documents/<int:document_pk>/",
         views.BillingDocumentDetailView.as_view(),
         name="document_detail",

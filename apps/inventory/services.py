@@ -15,12 +15,17 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
+from apps.catalog.models import Product
+from apps.core.models import Business
 from apps.inventory.models import (
     InventoryItem,
     StockAdjustment,
     StockAdjustmentLine,
     StockMovement,
 )
+from apps.stores.models import Store
 
 # Compatibilidad temporal:
 # Si alguna view antigua importa get_inventory_dashboard_data desde services.py,
@@ -107,6 +112,11 @@ def _create_stock_movement(
     sale_line=None,
     sale_return=None,
     sale_return_line=None,
+    purchase=None,
+    purchase_line=None,
+    purchase_receipt=None,
+    purchase_receipt_line=None,
+    occurred_at=None,
 ):
     """Crea un movimiento de stock.
 
@@ -132,12 +142,16 @@ def _create_stock_movement(
         reference_id=str(reference_id) if reference_id else "",
         reason=reason or "",
         notes=notes or "",
-        occurred_at=timezone.now(),
+        occurred_at=occurred_at or timezone.now(),
         created_by=user,
         sale=sale,
         sale_line=sale_line,
         sale_return=sale_return,
         sale_return_line=sale_return_line,
+        purchase=purchase,
+        purchase_line=purchase_line,
+        purchase_receipt=purchase_receipt,
+        purchase_receipt_line=purchase_receipt_line,
     )
 
     if operation_id:
@@ -226,6 +240,61 @@ def get_or_create_inventory_item(
             "is_active": True,
         },
     )
+
+    return inventory_item
+
+
+def get_or_create_inventory_item_for_purchase_receipt(*, business, store, product):
+    """Resuelve stock para una recepción, incluso si el producto fue desactivado.
+
+    No modifica stock ni crea movimientos. La fila devuelta se bloquea; si el
+    llamador necesita conservar ese bloqueo mientras cambia stock, debe envolver
+    esta llamada y la mutación en una misma transacción exterior.
+    """
+
+    if business is None or business.pk is None:
+        raise ValidationError("No se ha indicado un negocio existente.")
+    current_business = Business.objects.filter(pk=business.pk).first()
+    if current_business is None:
+        raise ValidationError("No se ha indicado un negocio existente.")
+
+    current_store = Store.objects.filter(
+        pk=getattr(store, "pk", None), business=current_business
+    ).first()
+    if current_store is None:
+        raise ValidationError("La tienda debe pertenecer al mismo negocio.")
+    if not current_store.is_active:
+        raise ValidationError("No puedes crear inventario en una tienda inactiva.")
+
+    current_product = Product.objects.filter(
+        pk=getattr(product, "pk", None), business=current_business
+    ).first()
+    if current_product is None:
+        raise ValidationError("El producto debe pertenecer al mismo negocio.")
+    if current_product.is_service:
+        raise ValidationError("No se puede controlar stock de un servicio.")
+    if not current_product.track_stock:
+        raise ValidationError(
+            "No se puede crear inventario para un producto que no controla stock."
+        )
+
+    with transaction.atomic():
+        inventory_item, _created = InventoryItem.objects.get_or_create(
+            business=current_business,
+            store=current_store,
+            product=current_product,
+            defaults={
+                "current_stock": Decimal("0.000"),
+                "reserved_stock": Decimal("0.000"),
+                "minimum_stock": Decimal("0.000"),
+                "is_active": True,
+            },
+        )
+        inventory_item = InventoryItem.objects.select_for_update().get(
+            pk=inventory_item.pk
+        )
+        if not inventory_item.is_active:
+            raise ValidationError("La ficha de inventario está inactiva.")
 
     return inventory_item
 
@@ -338,6 +407,26 @@ def create_initial_stock(
             notes=notes,
         )
 
+        log_event(
+            business=locked_item.business,
+            store=locked_item.store,
+            user=user,
+            event_type=AuditEventType.STOCK_INITIALIZED,
+            module=AuditModule.INVENTORY,
+            entity=movement,
+            message=f"Stock inicial registrado para inventario #{locked_item.pk}.",
+            old_payload={"current_stock": stock_before},
+            new_payload={"current_stock": stock_after},
+            metadata={
+                "inventory_item_id": locked_item.pk,
+                "product_id": locked_item.product_id,
+                "movement_type": movement.movement_type,
+                "quantity": movement.quantity,
+                "unit_cost": movement.unit_cost,
+                "reason": movement.reason,
+            },
+        )
+
     return locked_item, movement
 
 
@@ -358,6 +447,11 @@ def increase_stock(
     sale_line=None,
     sale_return=None,
     sale_return_line=None,
+    purchase=None,
+    purchase_line=None,
+    purchase_receipt=None,
+    purchase_receipt_line=None,
+    occurred_at=None,
 ):
     """Incrementa stock y crea movimiento de entrada."""
 
@@ -407,6 +501,11 @@ def increase_stock(
             sale_line=sale_line,
             sale_return=sale_return,
             sale_return_line=sale_return_line,
+            purchase=purchase,
+            purchase_line=purchase_line,
+            purchase_receipt=purchase_receipt,
+            purchase_receipt_line=purchase_receipt_line,
+            occurred_at=occurred_at,
         )
 
     return locked_item, movement
@@ -580,6 +679,28 @@ def add_stock_adjustment_line(
     return line
 
 
+@transaction.atomic
+def prepare_quick_stock_adjustment(
+    *, inventory_item, counted_stock, notes="", user=None
+):
+    """Atomically prepare a DRAFT and one line without mutating physical stock."""
+
+    adjustment = create_stock_adjustment(
+        business=inventory_item.business,
+        store=inventory_item.store,
+        reason=StockAdjustment.REASON_STOCKTAKE,
+        notes=notes,
+        user=user,
+    )
+    add_stock_adjustment_line(
+        adjustment=adjustment,
+        inventory_item=inventory_item,
+        counted_stock=counted_stock,
+        notes=notes,
+    )
+    return adjustment
+
+
 def update_stock_adjustment_line(
     *,
     line,
@@ -678,6 +799,8 @@ def confirm_stock_adjustment(
         if not locked_adjustment.is_draft:
             raise ValidationError("Solo se pueden confirmar ajustes en borrador.")
 
+        previous_status = locked_adjustment.status
+
         lines = list(
             locked_adjustment.lines.select_related(
                 "inventory_item",
@@ -689,6 +812,7 @@ def confirm_stock_adjustment(
             raise ValidationError("No puedes confirmar un ajuste sin líneas.")
 
         operation_id = uuid.uuid4()
+        movement_count = 0
 
         for line in lines:
             inventory_item = (
@@ -763,6 +887,7 @@ def confirm_stock_adjustment(
                 notes=locked_adjustment.notes,
                 operation_id=operation_id,
             )
+            movement_count += 1
 
         locked_adjustment.status = StockAdjustment.STATUS_CONFIRMED
         locked_adjustment.confirmed_at = timezone.now()
@@ -774,6 +899,28 @@ def confirm_stock_adjustment(
                 "confirmed_by",
                 "updated_at",
             ]
+        )
+
+        log_event(
+            business=locked_adjustment.business,
+            store=locked_adjustment.store,
+            user=user,
+            event_type=AuditEventType.STOCK_ADJUSTED,
+            module=AuditModule.INVENTORY,
+            entity=locked_adjustment,
+            message=f"Ajuste de stock {locked_adjustment.code} confirmado.",
+            old_payload={"status": previous_status},
+            new_payload={
+                "status": locked_adjustment.status,
+                "confirmed_at": locked_adjustment.confirmed_at,
+            },
+            metadata={
+                "code": locked_adjustment.code,
+                "reason": locked_adjustment.reason,
+                "line_count": len(lines),
+                "movement_count": movement_count,
+                "operation_id": operation_id,
+            },
         )
 
     return locked_adjustment
@@ -789,22 +936,39 @@ def cancel_stock_adjustment(
     Cancelar ajuste NO toca stock.
     """
 
-    _ = user
-
     with transaction.atomic():
-        locked_adjustment = StockAdjustment.objects.select_for_update().get(
-            pk=adjustment.pk
+        locked_adjustment = (
+            StockAdjustment.objects.select_for_update()
+            .select_related("business", "store")
+            .get(pk=adjustment.pk)
         )
 
         if not locked_adjustment.is_draft:
             raise ValidationError("Solo se pueden cancelar ajustes en borrador.")
 
+        previous_status = locked_adjustment.status
         locked_adjustment.status = StockAdjustment.STATUS_CANCELLED
         locked_adjustment.save(
             update_fields=[
                 "status",
                 "updated_at",
             ]
+        )
+
+        log_event(
+            business=locked_adjustment.business,
+            store=locked_adjustment.store,
+            user=user,
+            event_type=AuditEventType.STOCK_ADJUSTMENT_CANCELLED,
+            module=AuditModule.INVENTORY,
+            entity=locked_adjustment,
+            message=f"Ajuste de stock {locked_adjustment.code} cancelado.",
+            old_payload={"status": previous_status},
+            new_payload={"status": locked_adjustment.status},
+            metadata={
+                "code": locked_adjustment.code,
+                "reason": locked_adjustment.reason,
+            },
         )
 
     return locked_adjustment

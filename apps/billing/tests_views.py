@@ -111,6 +111,38 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertTrue(response.context["form"].errors)
         self.assertContains(response, str(own))
 
+    def test_full_fiscal_number_search_finds_document(self):
+        document = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
+        response = self.client.get(self.list_url(), {"q": document.full_number})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["documents"]), [document])
+
+    def test_invalid_hx_list_filter_retargets_only_filter_form(self):
+        self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
+        response = self.client.get(
+            self.list_url(),
+            {"date_from": "2026-09-30", "date_to": "2026-09-01"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response["HX-Retarget"], "#billing-document-filters")
+        self.assertEqual(response["HX-Reswap"], "outerHTML")
+        self.assertContains(
+            response,
+            'id="billing-document-filters"',
+            count=1,
+            status_code=422,
+        )
+        self.assertContains(
+            response,
+            "La fecha inicial no puede ser posterior",
+            status_code=422,
+        )
+        self.assertNotContains(response, "<html", status_code=422)
+        self.assertNotContains(
+            response, 'id="billing-document-results"', status_code=422
+        )
+
     def test_business_and_store_access_are_enforced(self):
         foreign_store = create_sales_store(business=self.other_business)
         self.assertEqual(self.client.get(self.list_url(foreign_store)).status_code, 403)
@@ -120,11 +152,23 @@ class BillingHTTPTests(BillingFormsFixture):
         count = BillingDocument.objects.count()
         response = self.client.get(self.detail_url(document))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, document.issuer_legal_name)
+        self.assertContains(response, 'id="billing-document-workspace"', count=1)
+        self.assertContains(response, "Resumen")
         self.assertEqual(
             response.context["document"].total_amount, document.total_amount
         )
         self.assertEqual(BillingDocument.objects.count(), count)
+        fiscal = self.client.get(
+            self.detail_url(document),
+            {"tab": "fiscal"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(fiscal.status_code, 200)
+        self.assertContains(fiscal, document.issuer_legal_name)
+        self.assertContains(fiscal, document.issuer_tax_identifier)
+        self.assertContains(fiscal, document.tax_breakdowns.get().tax_type)
+        self.assertContains(fiscal, 'id="billing-document-workspace"', count=1)
+        self.assertNotContains(fiscal, "<html")
         self.assertEqual(
             self.client.get(self.detail_url(document, self.other_store)).status_code,
             404,
@@ -172,6 +216,17 @@ class BillingHTTPTests(BillingFormsFixture):
                 self.client.get(response.url)
                 self.assertEqual(BillingDocument.objects.count(), count)
 
+    def test_issue_hx_success_uses_204_redirect(self):
+        sale, series = self.sale(), self.series("F2")
+        response = self.client.post(
+            self.issue_url(sale),
+            {"series": series.pk, "idempotency_key": uuid.uuid4()},
+            HTTP_HX_REQUEST="true",
+        )
+        document = BillingDocument.objects.get(sale=sale)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response["HX-Redirect"], self.detail_url(document))
+
     def test_invalid_post_preserves_key(self):
         sale = self.sale()
         key = (
@@ -183,6 +238,29 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["form"]["idempotency_key"].value(), str(key))
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
+
+    def test_invalid_hx_post_returns_one_partial_and_preserves_key(self):
+        sale = self.sale()
+        key = (
+            self.client.get(self.issue_url(sale))
+            .context["form"]
+            .initial["idempotency_key"]
+        )
+        for _ in range(2):
+            response = self.client.post(
+                self.issue_url(sale),
+                {"idempotency_key": key},
+                HTTP_HX_REQUEST="true",
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertContains(
+                response,
+                'id="billing-command-form"',
+                count=1,
+                status_code=422,
+            )
+            self.assertContains(response, f'value="{key}"', status_code=422)
+            self.assertNotContains(response, "<html", status_code=422)
 
     def test_same_http_intention_is_idempotent_and_ignores_extra_fields(self):
         sale, series, key = self.sale(), self.series("F2"), uuid.uuid4()
@@ -256,6 +334,50 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertEqual(first.url, self.detail_url(document))
         self.assertEqual(second.url, first.url)
 
+    def test_substitute_hx_success_uses_204_redirect(self):
+        sale = self.sale(customer=self.customer)
+        self.issued_original(sale, BillingDocumentTypeChoices.F2)
+        response = self.client.post(
+            self.substitute_url(sale),
+            {
+                "customer": self.customer.pk,
+                "series": self.series("F3").pk,
+                "idempotency_key": uuid.uuid4(),
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        document = BillingDocument.objects.get(sale=sale, document_type="F3")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response["HX-Redirect"], self.detail_url(document))
+
+    def test_related_document_number_keeps_series_padding(self):
+        sale = self.sale(customer=self.customer)
+        original_series = self.series("F2")
+        original_series.padding = 7
+        original_series.save()
+        original = issue_sale_document(
+            business=self.business,
+            sale_id=sale.pk,
+            series_id=original_series.pk,
+            issued_by=self.user,
+            idempotency_key=uuid.uuid4(),
+        )
+        self.client.post(
+            self.substitute_url(sale),
+            {
+                "customer": self.customer.pk,
+                "series": self.series("F3").pk,
+                "idempotency_key": uuid.uuid4(),
+            },
+        )
+        substitute = BillingDocument.objects.get(sale=sale, document_type="F3")
+        response = self.client.get(
+            self.detail_url(substitute),
+            {"tab": "relations"},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(response, original.full_number)
+
     def test_rectification_get_post_and_retry(self):
         sale = self.sale()
         self.issued_original(sale, BillingDocumentTypeChoices.F2)
@@ -271,6 +393,39 @@ class BillingHTTPTests(BillingFormsFixture):
         self.assertEqual(rectification.document_type, BillingDocumentTypeChoices.R5)
         self.assertEqual(first.url, self.detail_url(rectification))
         self.assertEqual(second.url, first.url)
+
+    def test_rectification_hx_success_uses_204_redirect(self):
+        sale = self.sale()
+        self.issued_original(sale, BillingDocumentTypeChoices.F2)
+        return_doc = self.completed_return(sale)
+        response = self.client.post(
+            self.rectify_url(return_doc),
+            {
+                "series": self.series("R5").pk,
+                "idempotency_key": uuid.uuid4(),
+            },
+            HTTP_HX_REQUEST="true",
+        )
+        document = BillingDocument.objects.get(sale_return=return_doc)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response["HX-Redirect"], self.detail_url(document))
+
+    def test_each_detail_tab_is_one_partial_and_invalid_tab_is_summary(self):
+        document = self.issued_original(self.sale(), BillingDocumentTypeChoices.F2)
+        for tab in ("summary", "lines", "fiscal", "relations", "invalid"):
+            with self.subTest(tab=tab):
+                response = self.client.get(
+                    self.detail_url(document),
+                    {"tab": tab},
+                    HTTP_HX_REQUEST="true",
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(
+                    response, 'id="billing-document-workspace"', count=1
+                )
+                self.assertNotContains(response, "<html")
+                if tab == "invalid":
+                    self.assertContains(response, "Resumen")
 
     def test_r1_rectification_uses_prg(self):
         sale = self.sale(RequestedDocumentTypeChoices.INVOICE, self.customer)

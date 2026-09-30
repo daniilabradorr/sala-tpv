@@ -59,6 +59,17 @@ class StoreCreateForm(StoreBaseForm):
             "phone_store",
             "email_store",
         ]
+        labels = {
+            "name": "Nombre",
+            "address_line_1": "Dirección",
+            "address_line_2": "Dirección adicional",
+            "postal_code": "Código postal",
+            "city": "Ciudad",
+            "province": "Provincia",
+            "country_code": "País",
+            "phone_store": "Teléfono",
+            "email_store": "Correo electrónico",
+        }
 
 
 class StoreUpdateForm(StoreBaseForm):
@@ -83,3 +94,21 @@ class StoreUpdateForm(StoreBaseForm):
             "phone_store",
             "email_store",
         ]
+        labels = {
+            "name": "Nombre",
+            "code": "Código interno",
+            "address_line_1": "Dirección",
+            "address_line_2": "Dirección adicional",
+            "postal_code": "Código postal",
+            "city": "Ciudad",
+            "province": "Provincia",
+            "country_code": "País",
+            "phone_store": "Teléfono",
+            "email_store": "Correo electrónico",
+        }
+        help_texts = {
+            "code": (
+                "Identificador estable utilizado por Netxodo. "
+                "Cámbialo únicamente si sabes que es necesario."
+            )
+        }

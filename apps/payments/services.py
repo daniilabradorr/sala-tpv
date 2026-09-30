@@ -1,9 +1,11 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
+from apps.audit.constants import AuditEventType, AuditModule
+from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.services import register_payment_cash_movement
@@ -19,6 +21,10 @@ from apps.payments.models import (
     PaymentStatusChoices,
     PaymentTypeChoices,
 )
+from apps.payments.selectors import (
+    MVP_PAYMENT_METHOD_ORDER,
+    get_sale_return_refund_summary,
+)
 from apps.sales.models import (
     PaymentStatusChoices as SalePaymentStatusChoices,
     Sale,
@@ -26,9 +32,37 @@ from apps.sales.models import (
     SaleReturnStatusChoices,
     SaleStatusChoices,
 )
-from apps.users.helpers import can_perform_sensitive_action, can_sell_in_store
+from apps.users.helpers import (
+    can_manage_business_settings,
+    can_perform_sensitive_action,
+    can_sell_in_store,
+)
 
 ZERO = Decimal("0.00")
+
+
+@transaction.atomic
+def update_payment_method_configuration(
+    *, actor, business, payment_method, name, is_active, allows_refund
+):
+    if (
+        not can_manage_business_settings(actor)
+        or actor.business_id != business.pk
+        or payment_method.business_id != business.pk
+        or payment_method.code not in MVP_PAYMENT_METHOD_ORDER
+    ):
+        raise PermissionDenied("No puedes configurar métodos de este negocio.")
+    try:
+        locked = PaymentMethod.objects.select_for_update().get(
+            business=business, pk=payment_method.pk
+        )
+    except PaymentMethod.DoesNotExist as exc:
+        raise PermissionDenied("El método no pertenece a este negocio.") from exc
+    locked.name = name
+    locked.is_active = is_active
+    locked.allows_refund = allows_refund
+    locked.save(update_fields=("name", "is_active", "allows_refund", "updated_at"))
+    return locked
 
 
 def _validate_business(business):
@@ -262,7 +296,7 @@ def register_sale_payment(
     _validate_business(business)
     try:
         sale = (
-            Sale.objects.select_for_update()
+            Sale.objects.select_for_update(of=("self",))
             .select_related("store", "cash_session")
             .get(pk=sale_id, business=business)
         )
@@ -314,6 +348,7 @@ def register_sale_payment(
         raise ValidationError(
             {"method": "La configuración no permite dividir entre métodos."}
         )
+    created_here = False
     try:
         with transaction.atomic():
             payment = Payment.objects.create(
@@ -331,6 +366,7 @@ def register_sale_payment(
                 notes=notes,
             )
             register_payment_cash_movement(payment=payment, locked_session=session)
+        created_here = True
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -347,6 +383,25 @@ def register_sale_payment(
     _apply_customer_debt_payment(
         business=business, sale=sale, payment=payment, user=user
     )
+    if created_here:
+        log_event(
+            business=business,
+            event_type=AuditEventType.PAYMENT_COMPLETED,
+            module=AuditModule.PAYMENTS,
+            message=f"Pago #{payment.pk} completado.",
+            store=payment.store,
+            user=payment.processed_by,
+            entity=payment,
+            old_payload=None,
+            new_payload={
+                "status": payment.status,
+                "payment_type": payment.payment_type,
+                "amount": payment.amount,
+                "method_id": payment.method_id,
+                "cash_session_id": payment.cash_session_id,
+            },
+            metadata={"sale_id": payment.sale_id, "method_code": method.code},
+        )
     return payment
 
 
@@ -376,7 +431,7 @@ def register_refund(
             {"sale_return": "La devolución no pertenece al negocio."}
         ) from exc
     sale = (
-        Sale.objects.select_for_update()
+        Sale.objects.select_for_update(of=("self",))
         .select_related("cash_session")
         .get(pk=returned.original_sale_id, business=business)
     )
@@ -413,25 +468,11 @@ def register_refund(
         cash_session_id=cash_session_id,
     )
     balance = _get_sale_payment_balance(sale)
-    return_refunded = (
-        Payment.objects.filter(
-            sale_return=returned,
-            status=PaymentStatusChoices.COMPLETED,
-            payment_type=PaymentTypeChoices.REFUND,
-        ).aggregate(total=Sum("amount"))["total"]
-        or ZERO
+    refund_summary = get_sale_return_refund_summary(
+        business=business, sale_return=returned
     )
-    debt_reduction = (
-        CustomerAccountEntry.objects.filter(
-            business=business,
-            sale=sale,
-            entry_type=EntryTypeChoices.REFUND,
-            payment__isnull=True,
-            notes=f"Reducción de deuda por devolución #{returned.pk}",
-        ).aggregate(total=Sum("amount"))["total"]
-        or ZERO
-    )
-    monetary_capacity = returned.total_amount - abs(debt_reduction)
+    return_refunded = refund_summary["refunded_total"]
+    monetary_capacity = refund_summary["monetary_capacity"]
     if return_refunded + amount > monetary_capacity:
         raise ValidationError(
             {"amount": "El importe supera la parte monetaria de la devolución."}
@@ -439,9 +480,7 @@ def register_refund(
     # Determine how much money is actually refundable from the sale
     # based on what the customer has paid above the commercial value
     # remaining after returns.
-    monetary_refund_due = max(balance["net_paid"] - balance["effective_total"], ZERO)
-    return_remaining_capacity = monetary_capacity - return_refunded
-    max_refundable = min(monetary_refund_due, return_remaining_capacity)
+    max_refundable = refund_summary["remaining"]
     if amount > max_refundable:
         raise ValidationError(
             {
@@ -452,6 +491,7 @@ def register_refund(
         raise ValidationError(
             {"amount": "No se puede devolver más dinero del cobrado."}
         )
+    created_here = False
     try:
         with transaction.atomic():
             payment = Payment.objects.create(
@@ -470,6 +510,7 @@ def register_refund(
                 notes=notes,
             )
             register_payment_cash_movement(payment=payment, locked_session=session)
+        created_here = True
     except IntegrityError:
         payment = _existing(
             business=business,
@@ -484,6 +525,29 @@ def register_refund(
         if payment is None:
             raise
     recalculate_sale_payment_state(sale)
+    if created_here:
+        log_event(
+            business=business,
+            event_type=AuditEventType.PAYMENT_REFUNDED,
+            module=AuditModule.PAYMENTS,
+            message=f"Reembolso #{payment.pk} completado.",
+            store=payment.store,
+            user=payment.processed_by,
+            entity=payment,
+            old_payload=None,
+            new_payload={
+                "status": payment.status,
+                "payment_type": payment.payment_type,
+                "amount": payment.amount,
+                "method_id": payment.method_id,
+                "cash_session_id": payment.cash_session_id,
+            },
+            metadata={
+                "sale_id": payment.sale_id,
+                "sale_return_id": payment.sale_return_id,
+                "method_code": method.code,
+            },
+        )
     return payment
 
 
@@ -493,7 +557,7 @@ def register_sale_on_account(*, business, sale_id, user):
     _validate_business(business)
     try:
         sale = (
-            Sale.objects.select_for_update()
+            Sale.objects.select_for_update(of=("self",))
             .select_related("store", "customer")
             .get(pk=sale_id, business=business)
         )
@@ -524,14 +588,32 @@ def register_sale_on_account(*, business, sale_id, user):
     recalculate_sale_payment_state(sale)
     if sale.pending_amount <= ZERO:
         raise ValidationError({"sale": "La venta no tiene importe pendiente."})
-    return CustomerAccountService.create_charge(
+    account, entry = CustomerAccountService.create_charge(
         business=business,
         account=account,
         amount=sale.pending_amount,
         user=user,
         sale=sale,
         notes=f"Venta #{sale.pk} pasada a cuenta",
-    )[1]
+    )
+    log_event(
+        business=business,
+        event_type=AuditEventType.SALE_ON_ACCOUNT_REGISTERED,
+        module=AuditModule.PAYMENTS,
+        message=f"Venta #{sale.pk} registrada en cuenta.",
+        store=sale.store,
+        user=user,
+        entity=sale,
+        old_payload=None,
+        new_payload={
+            "customer_account_entry_id": entry.pk,
+            "account_id": entry.account_id,
+            "amount": entry.amount,
+            "balance_after": entry.balance_after,
+        },
+        metadata={"customer_id": sale.customer_id},
+    )
+    return entry
 
 
 @transaction.atomic
@@ -558,6 +640,25 @@ def cancel_payment(*, business, payment_id, user, pin=None):
         return payment
     if payment.status != PaymentStatusChoices.PENDING:
         raise ValidationError({"payment": "Solo se pueden cancelar pagos pendientes."})
+    previous_status = payment.status
     payment.status = PaymentStatusChoices.CANCELLED
     payment.save(update_fields=["status", "updated_at"])
+    log_event(
+        business=business,
+        event_type=AuditEventType.PAYMENT_CANCELLED,
+        module=AuditModule.PAYMENTS,
+        message=f"Pago #{payment.pk} cancelado.",
+        store=payment.store,
+        user=user,
+        entity=payment,
+        old_payload={"status": previous_status},
+        new_payload={"status": payment.status},
+        metadata={
+            "sale_id": payment.sale_id,
+            "payment_type": payment.payment_type,
+            "amount": payment.amount,
+            "method_id": payment.method_id,
+            "cash_session_id": payment.cash_session_id,
+        },
+    )
     return payment

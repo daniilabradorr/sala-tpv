@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Actividad | Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/activity.css' %}">{% endblock %}
+{% block content %}
+<section class="erp-page activity-page" aria-labelledby="activity-title">
+  <header class="erp-header"><div><p class="erp-eyebrow">Análisis</p><h1 id="activity-title">Actividad</h1><p class="erp-subtitle">Historial de operaciones de tu negocio.</p></div></header>
+  {% include "audit/partials/_workspace.html" %}
+  <dialog id="activity-drawer" class="nx-drawer activity-drawer" data-nx-drawer aria-labelledby="activity-detail-title">
+    <div id="activity-drawer-content"><p>Cargando detalle…</p></div>
+  </dialog>
+</section>
+{% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/activity.js' %}"></script>{% endblock %}

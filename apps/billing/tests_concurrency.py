@@ -7,6 +7,8 @@ from django.db import connections
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
 
+from apps.audit.constants import AuditEventType
+from apps.audit.models import AuditEvent
 from apps.billing.models import (
     BillingDocument,
     BillingDocumentRelation,
@@ -22,7 +24,7 @@ from apps.billing.services import (
     issue_sale_return_rectification,
     substitute_simplified_document,
 )
-from apps.business_config.models import BusinessProfile
+from apps.business_config.services import create_business_configuration
 from apps.sales.models import SaleReturnStatusChoices, SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
@@ -45,17 +47,17 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.business = create_sales_business()
         self.store = create_sales_store(business=self.business)
         self.user = create_sales_user(business=self.business)
-        profile = BusinessProfile.objects.get(business=self.business)
-        profile.legal_name = "Netxodo SL"
-        profile.tax_identifier = "B12345678"
-        profile.phone = "600000000"
-        profile.email = "billing@example.test"
-        profile.address_line_1 = "Calle Mayor 1"
-        profile.postal_code = "28001"
-        profile.city = "Madrid"
-        profile.province = "Madrid"
-        profile.country_code = "ES"
-        profile.save()
+        create_business_configuration(
+            business=self.business,
+            legal_name="Netxodo SL",
+            tax_identifier="B12345678",
+            phone="600000000",
+            email="billing@example.test",
+            address_line_1="Calle Mayor 1",
+            postal_code="28001",
+            city="Madrid",
+            province="Madrid",
+        )
         tax = create_sales_tax(business=self.business)
         self.product = create_sales_product(business=self.business, tax=tax)
         self.series = BillingSeries.objects.create(
@@ -112,6 +114,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         failure = next(value for success, value in results if not success)
         self.assertIsInstance(failure, BillingAlreadyIssued)
         self.assertEqual(BillingDocument.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
 
@@ -128,6 +136,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             set(BillingDocument.objects.values_list("number", flat=True)), {1, 2}
         )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            2,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 2)
 
@@ -141,6 +155,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertTrue(all(success for success, _ in results))
         self.assertEqual(
             {result for _, result in results}, {BillingDocument.objects.get().pk}
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
         )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
@@ -158,6 +178,12 @@ class BillingEmissionConcurrencyTests(TransactionTestCase):
         self.assertEqual(len(failures), 1)
         self.assertIsInstance(failures[0], BillingIdempotencyConflict)
         self.assertEqual(BillingDocument.objects.count(), 1)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_ISSUED
+            ).count(),
+            1,
+        )
         self.series.refresh_from_db()
         self.assertEqual(self.series.current_number, 1)
 
@@ -222,6 +248,12 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             BillingDocument.objects.filter(sale_return=return_doc).count(), 1
         )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
         self.rectification_series.refresh_from_db()
         self.assertEqual(self.rectification_series.current_number, 1)
 
@@ -237,6 +269,12 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertEqual(sum(success for success, _ in results), 1)
         failure = next(value for success, value in results if not success)
         self.assertIsInstance(failure, BillingAlreadyIssued)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
         self.rectification_series.refresh_from_db()
         self.assertEqual(self.rectification_series.current_number, 1)
 
@@ -371,6 +409,21 @@ class BillingRectificationConcurrencyTests(TransactionTestCase):
         self.assertFalse(
             BillingDocument.objects.filter(
                 status=BillingDocumentStatusChoices.DRAFT
+            ).exists()
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_type=AuditEventType.BILLING_DOCUMENT_RECTIFIED
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(
+                entity_id=str(companion.pk),
+                event_type__in=[
+                    AuditEventType.BILLING_DOCUMENT_ISSUED,
+                    AuditEventType.BILLING_DOCUMENT_SUBSTITUTED,
+                ],
             ).exists()
         )
 

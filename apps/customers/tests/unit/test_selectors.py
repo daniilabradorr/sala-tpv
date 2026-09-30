@@ -6,6 +6,7 @@ from apps.customers.models import CustomerTypeChoices
 from apps.customers.selectors import (
     get_customer_account_entries,
     get_customer_detail,
+    get_customer_list_kpis,
     get_customers_for_business,
 )
 from apps.customers.tests.factories import create_account, create_customer, create_entry
@@ -66,3 +67,24 @@ class CustomerSelectorTests(TestCase):
         entries = list(get_customer_account_entries(business=b1, account=a1, limit=2))
         self.assertEqual(len(entries), 2)
         self.assertGreater(entries[0].pk, entries[1].pk)
+
+    def test_account_state_filters_and_positive_debt_kpis(self):
+        business = create_business(slug="customer-kpis")
+        debt = create_account(business=business, balance=Decimal("40.00"))
+        create_account(business=business, balance=Decimal("-12.00"))
+        settled = create_account(business=business, balance=Decimal("0.00"))
+        settled.customer.is_active = False
+        settled.customer.save()
+
+        self.assertEqual(
+            list(
+                get_customers_for_business(
+                    business=business, status="all", account_state="debt"
+                )
+            ),
+            [debt.customer],
+        )
+        self.assertEqual(
+            get_customer_list_kpis(business=business),
+            {"active": 2, "with_debt": 1, "debt_total": Decimal("40.00")},
+        )

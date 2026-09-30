@@ -417,7 +417,7 @@ class SaleLine(TimeStampedModel):
 
     IMPORTANTE:
     - Product contiene la configuración actual.
-    - SaleLine conserva nombre, SKU, precio, unidad e impuesto aplicados.
+    - SaleLine conserva nombre, SKU, categoría, precio, unidad e impuesto aplicados.
     - Modificar Product posteriormente no debe cambiar una venta anterior.
     - Los cálculos y la creación de líneas deben realizarse desde services.py.
     """
@@ -460,6 +460,30 @@ class SaleLine(TimeStampedModel):
         max_length=80,
         blank=True,
         help_text="SKU congelado en el momento de la venta.",
+    )
+
+    category_source_id = models.PositiveBigIntegerField(
+        "ID de la categoría original",
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="Identificador escalar de la categoría en el momento de la venta.",
+    )
+
+    category_name = models.CharField(
+        "Nombre de la categoría",
+        max_length=150,
+        blank=True,
+        editable=False,
+        help_text="Nombre de categoría congelado en el momento de la venta.",
+    )
+
+    category_slug = models.SlugField(
+        "Slug de la categoría",
+        max_length=150,
+        blank=True,
+        editable=False,
+        help_text="Slug de categoría congelado en el momento de la venta.",
     )
 
     quantity = models.DecimalField(

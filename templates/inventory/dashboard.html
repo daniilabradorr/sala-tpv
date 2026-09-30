@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Inventario · Netxodo{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/pages/inventory.css' %}">{% endblock %}
+{% block content %}{% include "inventory/partials/_workspace.html" %}{% endblock %}
+{% block extra_js %}<script type="module" src="{% static 'js/pages/inventory.js' %}"></script>{% endblock %}

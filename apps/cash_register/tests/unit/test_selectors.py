@@ -1,15 +1,19 @@
 from decimal import Decimal
+from datetime import datetime
 import uuid
 
 from django.db import transaction
 from django.test import TestCase
+from django.utils import timezone
 
-from apps.cash_register.models import CashSession
+from apps.cash_register.models import CashCount, CashSession
 from apps.cash_register.services import register_payment_cash_movement
 from apps.cash_register.selectors import (
     get_cash_session_counts,
     get_cash_session_movements,
     get_cash_session_payment_summary,
+    get_cash_registers_for_store,
+    get_sales_for_cash_session,
     get_open_cash_session,
 )
 from apps.cash_register.test_factories import (
@@ -56,6 +60,112 @@ class CashRegisterSelectorsTests(TestCase):
             get_cash_session_movements(
                 business=self.business, store=self.store, cash_session=self.session
             ).exists()
+        )
+
+    def test_register_list_prefetches_only_open_sessions(self):
+        registers = list(
+            get_cash_registers_for_store(business=self.business, store=self.store)
+        )
+        self.assertEqual(registers[0].open_sessions, [self.session])
+
+    def test_register_list_fetches_only_latest_closed_session_without_n_plus_one(self):
+        register = self.session.cash_register
+        older = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opened_at=timezone.make_aware(datetime(2025, 1, 1, 9, 0)),
+            opening_amount=Decimal("10.00"),
+            expected_cash_amount=Decimal("10.00"),
+            counted_cash_amount=Decimal("10.00"),
+            difference_amount=Decimal("0.00"),
+            status=CashSession.Status.CLOSED,
+            closed_at=timezone.make_aware(datetime(2025, 1, 1, 10, 0)),
+            closed_by=self.user,
+        )
+        latest = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+            opened_at=timezone.make_aware(datetime(2025, 1, 2, 9, 0)),
+            opening_amount=Decimal("10.00"),
+            expected_cash_amount=Decimal("10.00"),
+            counted_cash_amount=Decimal("10.00"),
+            difference_amount=Decimal("0.00"),
+            status=CashSession.Status.CLOSED,
+            closed_at=timezone.make_aware(datetime(2025, 1, 2, 10, 0)),
+            closed_by=self.user,
+        )
+        with self.assertNumQueries(3):
+            registers = list(
+                get_cash_registers_for_store(business=self.business, store=self.store)
+            )
+            self.assertEqual(registers[0].latest_closed_session, latest)
+            self.assertEqual(registers[0].latest_closed_sessions, [latest])
+            self.assertNotEqual(registers[0].latest_closed_session, older)
+
+    def test_counts_select_related_counted_by_without_per_count_queries(self):
+        for index in range(3):
+            CashCount.objects.create(
+                business=self.business,
+                store=self.store,
+                cash_session=self.session,
+                count_type=CashCount.CountType.REVIEW,
+                counted_amount=Decimal("10.00") + index,
+                expected_amount=Decimal("10.00"),
+                difference_amount=Decimal(index),
+                counted_by=self.user,
+                notes=f"Control {index}",
+            )
+
+        with self.assertNumQueries(1):
+            counts = list(
+                get_cash_session_counts(
+                    business=self.business,
+                    store=self.store,
+                    cash_session=self.session,
+                )
+            )
+            self.assertEqual(
+                [count.counted_by.email for count in counts],
+                [self.user.email] * 3,
+            )
+
+    def test_sales_for_session_are_explicitly_tenant_and_store_scoped(self):
+        included = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=self.session.cash_register,
+            cash_session=self.session,
+        )
+        other_register = create_cash_register(
+            business=self.business, store=self.store, code="OTHER-SESSION"
+        )
+        other_session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=other_register,
+            opened_by=self.user,
+        )
+        create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            cash_register=other_register,
+            cash_session=other_session,
+        )
+        self.assertEqual(
+            list(
+                get_sales_for_cash_session(
+                    business=self.business,
+                    store=self.store,
+                    cash_session=self.session,
+                )
+            ),
+            [included],
         )
         self.assertFalse(
             get_cash_session_counts(
@@ -161,5 +271,9 @@ class CashRegisterSelectorsTests(TestCase):
                 "transfer": (Decimal("40"), Decimal("0"), Decimal("40")),
             },
         )
+        self.assertTrue(summary["cash"]["method__affects_cash_register"])
+        self.assertFalse(summary["card"]["method__affects_cash_register"])
+        self.assertFalse(summary["bizum"]["method__affects_cash_register"])
+        self.assertFalse(summary["transfer"]["method__affects_cash_register"])
         self.session.refresh_from_db()
         self.assertEqual(self.session.expected_cash_amount, Decimal("190.00"))

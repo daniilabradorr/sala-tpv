@@ -8,6 +8,7 @@ from apps.catalog.views import (
     CategoryUpdateView,
     CategoryActivateView,
     CategoryDeactivateView,
+    CategoryDeleteView,
     TaxListView,
     TaxDetailView,
     TaxCreateView,
@@ -15,12 +16,14 @@ from apps.catalog.views import (
     TaxActivateView,
     TaxDeactivateView,
     TaxSetDefaultView,
+    TaxDeleteView,
     ProductListView,
     ProductDetailView,
     ProductCreateView,
     ProductUpdateView,
     ProductActivateView,
     ProductDeactivateView,
+    ProductDeleteView,
 )
 
 
@@ -64,6 +67,11 @@ urlpatterns = [
         CategoryDeactivateView.as_view(),
         name="category_deactivate",
     ),
+    path(
+        "categories/<int:pk>/delete/",
+        CategoryDeleteView.as_view(),
+        name="category_delete",
+    ),
     # Impuestos
     path(
         "taxes/",
@@ -100,6 +108,7 @@ urlpatterns = [
         TaxSetDefaultView.as_view(),
         name="tax_set_default",
     ),
+    path("taxes/<int:pk>/delete/", TaxDeleteView.as_view(), name="tax_delete"),
     # Productos y servicios
     path(
         "products/",
@@ -130,5 +139,8 @@ urlpatterns = [
         "products/<int:pk>/deactivate/",
         ProductDeactivateView.as_view(),
         name="product_deactivate",
+    ),
+    path(
+        "products/<int:pk>/delete/", ProductDeleteView.as_view(), name="product_delete"
     ),
 ]

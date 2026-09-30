@@ -1,0 +1,16 @@
+<header class="topbar">
+    <button class="sidebar-toggle" type="button" aria-label="Abrir menú" aria-controls="app-sidebar" aria-expanded="false" data-sidebar-toggle>
+        {% include "components/icon.html" with name="menu" %}
+    </button>
+    {% include "components/store_switcher.html" %}
+    <button class="command-trigger" type="button" aria-label="Buscar módulo o acción" data-command-trigger>
+        {% include "components/icon.html" with name="search" %}
+        <span class="command-trigger-label">Buscar módulo o acción...</span><kbd>Ctrl K</kbd>
+    </button>
+    {% if shell_capabilities.can_sell %}
+        {% for action in shell_quick_actions %}{% if action.id == "new-sale" %}
+            <a class="button button-primary topbar-sale" href="{{ action.url }}">{% include "components/icon.html" with name="plus" %}<span class="sale-label-long">Nueva venta</span><span class="sale-label-short">Venta</span></a>
+        {% endif %}{% endfor %}
+    {% endif %}
+    {% include "components/user_menu.html" %}
+</header>

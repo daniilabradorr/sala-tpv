@@ -1,0 +1,9 @@
+<section id="purchase-workspace" role="tabpanel">
+{% if tab == 'summary' %}
+  {% include "purchases/partials/_purchase_summary.html" %}
+{% elif tab == 'products' %}
+  {% include "purchases/partials/_purchase_lines.html" %}
+{% else %}
+  {% include "purchases/partials/_purchase_receipts.html" %}
+{% endif %}
+</section>
