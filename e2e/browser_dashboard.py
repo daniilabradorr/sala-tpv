@@ -161,8 +161,24 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
                         page.locator("[data-app-shell]").evaluate(
                             "element => element.dataset.dashboardShell = 'stable'"
                         )
+                        page.evaluate(
+                            """() => {
+                                window.dashboardSettledSwaps = 0;
+                                document.body.addEventListener(
+                                    "htmx:afterSettle",
+                                    (event) => {
+                                        if (event.detail.target?.id === "dashboard-content") {
+                                            window.dashboardSettledSwaps += 1;
+                                        }
+                                    },
+                                );
+                            }"""
+                        )
                         period_select = page.locator("#dashboard-period")
                         period_select.select_option("7d")
+                        page.wait_for_function(
+                            "() => window.dashboardSettledSwaps === 1"
+                        )
                         expect(page).to_have_url(re.compile(r"[?&]period=7d(?:&|$)"))
                         expect(page.locator("#dashboard-period")).to_have_value("7d")
                         expect(
@@ -174,6 +190,9 @@ class BrowserDashboardTests(StaticLiveServerTestCase):
 
                         period_select = page.locator("#dashboard-period")
                         period_select.select_option("30d")
+                        page.wait_for_function(
+                            "() => window.dashboardSettledSwaps === 2"
+                        )
                         expect(page).to_have_url(re.compile(r"[?&]period=30d(?:&|$)"))
                         expect(page.locator("#dashboard-period")).to_have_value("30d")
                         expect(
