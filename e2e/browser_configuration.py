@@ -87,6 +87,8 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
             browser.close()
 
     def test_owner_reviews_and_persists_business_and_pos_changes(self):
+        profile = self.business.profile
+        settings = self.business.pos_settings
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 900})
@@ -105,10 +107,6 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
             page.get_by_role("button", name="Guardar cambios").click()
             expect(page.get_by_text("Antes:", exact=True)).to_be_visible()
             expect(page.get_by_text("Después:", exact=True)).to_be_visible()
-            page.get_by_role("button", name="Seguir editando").click()
-            self.owner.business.profile.refresh_from_db()
-            self.assertEqual(self.owner.business.profile.tax_identifier, "B10000023")
-            page.get_by_role("button", name="Guardar cambios").click()
             page.get_by_role("button", name="Confirmar y guardar").click()
             expect(
                 page.get_by_text("Datos de empresa actualizados correctamente.")
@@ -118,17 +116,68 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
                 page.get_by_role("heading", name="Configuración actual")
             ).to_be_visible()
             page.get_by_label("Permitir descuentos manuales").uncheck()
+            page.get_by_label("Activar control de stock").uncheck()
+            page.get_by_label("Requiere caja abierta").uncheck()
             expect(page.locator("[data-pending-count]")).to_contain_text("cambio")
             page.get_by_role("button", name="Guardar cambios").click()
+            expect(
+                page.get_by_text(
+                    "Desactivar el control de stock hará que las ventas no validen inventario."
+                )
+            ).to_be_visible()
+            expect(
+                page.get_by_text("Las ventas dejarán de exigir una caja abierta.")
+            ).to_be_visible()
             page.get_by_role("button", name="Confirmar y guardar").click()
             browser.close()
-        self.owner.business.profile.refresh_from_db()
-        self.assertEqual(self.owner.business.profile.tax_identifier, "B10000999")
-        self.owner.business.pos_settings.refresh_from_db()
-        self.assertFalse(self.owner.business.pos_settings.allow_manual_discounts)
-        self.assertEqual(
-            self.owner.business.pos_settings.max_manual_discount_percent, 0
-        )
+        profile.refresh_from_db()
+        self.assertEqual(profile.tax_identifier, "B10000999")
+        settings.refresh_from_db()
+        self.assertFalse(settings.allow_manual_discounts)
+        self.assertEqual(settings.max_manual_discount_percent, 0)
+        self.assertFalse(settings.enable_stock_control)
+        self.assertFalse(settings.require_open_cash_register)
+
+    def test_profile_review_cancel_does_not_persist(self):
+        profile = self.business.profile
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self.login(page, self.owner.email)
+            page.goto(f"{self.live_server_url}/config/profile/")
+            tax_identifier = page.get_by_label("NIF/CIF")
+            tax_identifier.fill("B10000998")
+            page.get_by_role("button", name="Guardar cambios").click()
+            page.get_by_role("button", name="Seguir editando").click()
+            expect(tax_identifier).to_have_value("B10000998")
+            browser.close()
+        profile.refresh_from_db()
+        self.assertEqual(profile.tax_identifier, "B10000023")
+
+    def test_owner_updates_payment_method_through_real_form(self):
+        card = PaymentMethod.objects.get(business=self.business, code="card")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self.login(page, self.owner.email)
+            page.goto(f"{self.live_server_url}/config/payments/{card.pk}/")
+            page.get_by_label("Nombre").fill("Tarjeta bancaria")
+            page.get_by_label("Permite reembolso").uncheck()
+            page.get_by_role("button", name="Guardar").click()
+            expect(
+                page.get_by_text("Método de pago actualizado correctamente.")
+            ).to_be_visible()
+            expect(
+                page.get_by_role("heading", name=re.compile("^Tarjeta bancaria"))
+            ).to_be_visible()
+            browser.close()
+        card.refresh_from_db()
+        self.assertEqual(card.name, "Tarjeta bancaria")
+        self.assertTrue(card.is_active)
+        self.assertFalse(card.allows_refund)
+        self.assertEqual(card.code, "card")
+        self.assertFalse(card.affects_cash_register)
+        self.assertEqual(card.business, self.business)
 
     def test_manager_and_cashier_have_no_configuration_access(self):
         method = PaymentMethod.objects.get(business=self.business, code="card")
@@ -154,6 +203,7 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
             browser.close()
 
     def test_configuration_has_no_overflow_at_product_breakpoints(self):
+        card_pk = PaymentMethod.objects.get(business=self.business, code="card").pk
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             for width, height in ((375, 812), (767, 900), (768, 900), (1280, 900)):
@@ -162,7 +212,11 @@ class BrowserConfigurationTests(StaticLiveServerTestCase):
                 )
                 page = context.new_page()
                 self.login(page, self.owner.email)
-                for path in ("/config/profile/", "/config/pos/"):
+                for path in (
+                    "/config/profile/",
+                    "/config/pos/",
+                    f"/config/payments/{card_pk}/",
+                ):
                     page.goto(f"{self.live_server_url}{path}")
                     self.assertLessEqual(
                         page.evaluate("document.documentElement.scrollWidth"), width

@@ -4,6 +4,7 @@ from decimal import Decimal
 from django import forms
 
 from apps.cash_register.models import CashSession
+from apps.core.forms import wire_field_accessibility
 from apps.payments.models import PaymentMethod
 
 
@@ -73,17 +74,7 @@ class PaymentMethodAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        errors = self.errors if self.is_bound else {}
-        for name, field in self.fields.items():
-            control_id = field.widget.attrs.get("id", f"id_{name}")
-            described_by = []
-            if field.help_text:
-                described_by.append(f"{control_id}-help")
-            if name in errors:
-                described_by.append(f"{control_id}-errors")
-                field.widget.attrs["aria-invalid"] = "true"
-            if described_by:
-                field.widget.attrs["aria-describedby"] = " ".join(described_by)
+        wire_field_accessibility(self)
 
 
 class SaleOnAccountForm(forms.Form):

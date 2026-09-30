@@ -3,22 +3,8 @@ from decimal import Decimal
 from django import forms
 
 from apps.business_config.models import BusinessProfile, POSSettings
+from apps.core.forms import wire_field_accessibility
 from apps.core.media.validation import validate_image_upload
-
-
-def _wire_accessibility(form):
-    """Connect rendered help/errors to their controls without template logic."""
-    errors = form.errors if form.is_bound else {}
-    for name, field in form.fields.items():
-        control_id = field.widget.attrs.get("id", f"id_{name}")
-        described_by = []
-        if field.help_text:
-            described_by.append(f"{control_id}-help")
-        if name in errors:
-            described_by.append(f"{control_id}-errors")
-            field.widget.attrs["aria-invalid"] = "true"
-        if described_by:
-            field.widget.attrs["aria-describedby"] = " ".join(described_by)
 
 
 class BusinessProfileForm(forms.ModelForm):
@@ -36,7 +22,7 @@ class BusinessProfileForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _wire_accessibility(self)
+        wire_field_accessibility(self)
 
     def clean_logo_upload(self):
         upload = self.cleaned_data.get("logo_upload")
@@ -89,7 +75,7 @@ class POSSettingsForm(forms.ModelForm):
         # legitimate browser POST omits it. Conditional requiredness belongs
         # in clean(), not in the generated model field.
         self.fields["max_manual_discount_percent"].required = False
-        _wire_accessibility(self)
+        wire_field_accessibility(self)
 
     def clean(self):
         cleaned = super().clean()

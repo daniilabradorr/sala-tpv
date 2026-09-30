@@ -94,7 +94,9 @@ class UpdateBusinessProfileTests(TestCase):
                     business=self.business, updated_by=actor, legal_name="Denegado"
                 )
         superuser = CustomUser.objects.create_superuser(
-            email="profile-root@example.com", password="test"
+            email="profile-root@example.com",
+            password="test",
+            role=RoleChoices.OWNER,
         )
         with self.assertRaises(PermissionDenied):
             update_business_profile(
@@ -262,7 +264,9 @@ class UpdatePOSSettingsTests(TestCase):
                     prices_include_tax=False,
                 )
         superuser = CustomUser.objects.create_superuser(
-            email="settings-root@example.com", password="test"
+            email="settings-root@example.com",
+            password="test",
+            role=RoleChoices.OWNER,
         )
         with self.assertRaises(PermissionDenied):
             update_pos_settings(

@@ -19,6 +19,8 @@ if (form) {
   const discounts = form.elements.allow_manual_discounts;
   const maximumDiscount = form.elements.max_manual_discount_percent;
   const receipt = form.elements.receipt_footer;
+  const logoUpload = form.elements.logo_upload;
+  const removeLogo = form.elements.remove_logo;
   const receiptPreview = document.querySelector("[data-receipt-preview]");
   const asBoolean = (value) => value === "True" || value === true;
   const display = (value) => value === true ? "Sí" : value === false ? "No" : String(value || "—");
@@ -40,6 +42,11 @@ if (form) {
       if (existingMaximum >= 0) items.splice(existingMaximum, 1);
       items.push({ name: maximumDiscount.name, label: labelFor(maximumDiscount), before: persisted.max_manual_discount_percent, after: "0.00" });
     }
+    if (logoUpload?.files.length) {
+      items.push({ name: "logo", label: "Logo", before: persisted.logo_present ? "Logo actual" : "Sin logo", after: "Nuevo archivo" });
+    } else if (removeLogo?.checked) {
+      items.push({ name: "logo", label: "Logo", before: persisted.logo_present ? "Logo actual" : "Sin logo", after: "Eliminar logo" });
+    }
     return items;
   };
 
@@ -54,7 +61,7 @@ if (form) {
     if (reviewButton) reviewButton.disabled = !items.length;
     const list = reviewDialog?.querySelector("[data-change-list]");
     if (list) {
-      list.replaceChildren(...items.map(({ label, before, after }) => {
+      list.replaceChildren(...items.map(({ name, label, before, after }) => {
         const row = document.createElement("dl");
         row.className = "change-review-row";
         const wrapper = document.createElement("div");
@@ -68,6 +75,17 @@ if (form) {
           return detail;
         };
         wrapper.append(term, value("Antes:", before), value("Después:", after));
+        const warnings = {
+          enable_stock_control: "Desactivar el control de stock hará que las ventas no validen inventario.",
+          require_open_cash_register: "Las ventas dejarán de exigir una caja abierta.",
+        };
+        const warning = warnings[name];
+        if (warning && after === false && before === true) {
+          const explanation = document.createElement("p");
+          explanation.className = "fiscal-warning";
+          explanation.textContent = warning;
+          wrapper.append(explanation);
+        }
         row.append(wrapper);
         return row;
       }));

@@ -44,7 +44,8 @@ class BusinessProfileUpdateView(CanManageBusinessSettingsMixin, View):
             "persisted_config": {
                 field: str(getattr(profile, field) or "")
                 for field in BusinessProfileForm.Meta.fields
-            },
+            }
+            | {"logo_present": bool(profile.logo or profile.logo_url)},
         }
 
     def post(self, request):
