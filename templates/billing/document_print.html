@@ -1,0 +1,71 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ document.full_number }} | Netxodo</title>
+  <link rel="stylesheet" href="{% static 'css/pages/billing-print.css' %}">
+</head>
+<body class="document-print-page">
+  <nav class="document-print-controls" aria-label="Acciones del documento">
+    <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">← Volver al documento</a>
+  </nav>
+  <main class="document-print document-print--{{ document.document_type }}">
+    <header class="document-print-header">
+      {% if print_logo_url %}<img class="document-print-logo" src="{{ print_logo_url }}" alt="Logo del negocio" referrerpolicy="no-referrer">{% endif %}
+      {% if business_profile.brand_name or business_profile.trade_name %}<p class="document-print-brand">{{ business_profile.brand_name|default:business_profile.trade_name }}</p>{% endif %}
+      <p><strong>{{ document.issuer_legal_name }}</strong><br>NIF/CIF: {{ document.issuer_tax_identifier }}</p>
+      <p>{{ document.issuer_address_line_1 }}{% if document.issuer_address_line_2 %}<br>{{ document.issuer_address_line_2 }}{% endif %}<br>{{ document.issuer_postal_code }} {{ document.issuer_city }}<br>{{ document.issuer_province }} · {{ document.issuer_country_code }}</p>
+      <h1>{% if document.document_type == 'F2' %}FACTURA SIMPLIFICADA{% elif document.document_type == 'F1' %}FACTURA{% else %}{{ document.get_document_type_display|upper }}{% endif %}</h1>
+      <dl class="document-print-metadata">
+        <div><dt>Documento</dt><dd>{{ document.full_number }}</dd></div>
+        <div><dt>Serie</dt><dd>{{ document.series_text }}</dd></div>
+        <div><dt>Número</dt><dd>{{ document.number }}</dd></div>
+        <div><dt>Fecha de emisión</dt><dd>{{ document.issued_at|date:"d/m/Y H:i" }}</dd></div>
+        {% if document.operation_date %}<div><dt>Fecha de operación</dt><dd>{{ document.operation_date|date:"d/m/Y" }}</dd></div>{% endif %}
+      </dl>
+    </header>
+    {% if document.recipient_legal_name or document.recipient_name or document.recipient_tax_identifier or document.recipient_foreign_id %}
+    <section class="document-print-recipient" aria-labelledby="recipient-title">
+      <h2 id="recipient-title">Destinatario</h2>
+      <p><strong>{{ document.recipient_legal_name|default:document.recipient_name }}</strong>
+        {% if document.recipient_tax_identifier %}<br>NIF/CIF: {{ document.recipient_tax_identifier }}{% endif %}
+        {% if document.recipient_foreign_id %}<br>{{ document.recipient_foreign_id_type }}: {{ document.recipient_foreign_id }}{% endif %}
+        {% if document.recipient_address_line_1 %}<br>{{ document.recipient_address_line_1 }}{% endif %}
+        {% if document.recipient_postal_code or document.recipient_city %}<br>{{ document.recipient_postal_code }} {{ document.recipient_city }}{% endif %}
+        {% if document.recipient_province or document.recipient_country_code %}<br>{{ document.recipient_province }} {{ document.recipient_country_code }}{% endif %}
+      </p>
+    </section>
+    {% endif %}
+    <section aria-labelledby="lines-title">
+      <h2 id="lines-title">Líneas del documento</h2>
+      <div class="document-print-table-scroll">
+        <table class="document-print-lines">
+          <thead><tr><th scope="col">Concepto</th><th scope="col">Cantidad</th><th scope="col">Precio base</th><th scope="col">Descuento</th><th scope="col">Impuesto</th><th scope="col">Cuota</th><th scope="col">Importe</th></tr></thead>
+          <tbody>{% for line in document.lines.all %}
+            <tr><td>{{ line.product_name }}{% if line.sku %}<br><small>{{ line.sku }}</small>{% endif %}</td><td>{{ line.quantity|floatformat:3 }} {{ line.unit }}</td><td>{{ line.unit_base_price|floatformat:2 }} €</td><td>{% if line.discount_amount > 0 %}{{ line.discount_amount|floatformat:2 }} €{% else %}—{% endif %}</td><td>{{ line.tax_type }} {{ line.tax_rate|floatformat:2 }}%{% if line.has_equivalence_surcharge %}<br>Recargo {{ line.equivalence_surcharge_rate|floatformat:2 }}%{% endif %}</td><td>{{ line.tax_amount|floatformat:2 }} €</td><td>{{ line.line_total|floatformat:2 }} €</td></tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+    </section>
+    <dl class="document-print-totals">
+      <div><dt>Subtotal</dt><dd>{{ document.subtotal_amount|floatformat:2 }} €</dd></div>
+      {% if document.discount_amount > 0 %}<div class="document-print-discount"><dt>Descuento</dt><dd>−{{ document.discount_amount|floatformat:2 }} €</dd></div>{% endif %}
+      <div><dt>Impuestos</dt><dd>{{ document.tax_amount|floatformat:2 }} €</dd></div>
+      <div class="document-print-total"><dt>TOTAL</dt><dd>{{ document.total_amount|floatformat:2 }} €</dd></div>
+    </dl>
+    <section aria-labelledby="tax-title">
+      <h2 id="tax-title">Desglose fiscal</h2>
+      <table class="document-print-tax">
+        <thead><tr><th scope="col">Impuesto</th><th scope="col">Porcentaje</th><th scope="col">Base imponible</th><th scope="col">Cuota</th></tr></thead>
+        <tbody>{% for tax in document.tax_breakdowns.all %}
+          <tr><td>{{ tax.tax_type }}{% if tax.operacion_exenta %}<br>Exenta: {{ tax.operacion_exenta }}{% endif %}{% if tax.clave_regimen %}<br>Régimen: {{ tax.clave_regimen }}{% endif %}{% if tax.calificacion_operacion %}<br>Calificación: {{ tax.calificacion_operacion }}{% endif %}</td><td>{{ tax.tax_rate|floatformat:2 }}%{% if tax.has_equivalence_surcharge %}<br>Recargo {{ tax.equivalence_surcharge_rate|floatformat:2 }}%{% endif %}</td><td>{{ tax.taxable_base_amount|floatformat:2 }} €</td><td>{{ tax.tax_amount|floatformat:2 }} €</td></tr>
+        {% endfor %}</tbody>
+      </table>
+    </section>
+    {% comment %}La región fiscal VeriFactu se añadirá cuando exista una integración real con datos persistidos.{% endcomment %}
+    {% if business_profile.receipt_footer %}<footer class="document-print-footer">{{ business_profile.receipt_footer }}</footer>{% endif %}
+  </main>
+</body>
+</html>

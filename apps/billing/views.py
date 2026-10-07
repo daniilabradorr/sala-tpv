@@ -1,6 +1,7 @@
 """Thin HTTP coordination layer for Billing."""
 
 import uuid
+from urllib.parse import urlsplit
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -18,6 +19,9 @@ from apps.billing.forms import (
     SaleReturnRectificationForm,
     SubstituteSimplifiedDocumentForm,
 )
+from apps.billing.models import BillingDocumentStatusChoices
+from apps.business_config.models import BusinessProfile
+from apps.core.media.naming import variant_key
 from apps.billing.selectors import (
     billing_document_detail,
     billing_document_list,
@@ -86,6 +90,14 @@ class BillingStoreContextMixin:
             raise Http404
         return sale_return
 
+    def get_document(self):
+        document = billing_document_detail(
+            business=self.business, document_id=self.kwargs["document_pk"]
+        )
+        if document.store_id != self.store.id:
+            raise Http404
+        return document
+
 
 class BillingDocumentListView(
     BusinessRequiredMixin, StoreAccessRequiredMixin, BillingStoreContextMixin, View
@@ -140,11 +152,7 @@ class BillingDocumentDetailView(
     http_method_names = ["get"]
 
     def get(self, request, *args, **kwargs):
-        document = billing_document_detail(
-            business=self.business, document_id=kwargs["document_pk"]
-        )
-        if document.store_id != self.store.id:
-            raise Http404
+        document = self.get_document()
         tab = request.GET.get("tab", "summary")
         if tab not in {"summary", "lines", "fiscal", "relations"}:
             tab = "summary"
@@ -173,6 +181,56 @@ class BillingDocumentDetailView(
                 "can_substitute": can_substitute,
                 "can_manage_series": request.user.is_superuser
                 or is_owner_or_manager(request.user),
+            },
+        )
+
+
+def _print_logo_url(profile):
+    """Use managed media first, accepting only local or HTTP(S) image URLs."""
+    if profile is None:
+        return ""
+    url = (
+        profile.logo.storage.url(variant_key(profile.logo.name, "master"))
+        if profile.logo
+        else profile.logo_url
+    )
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return ""
+    if any(ord(character) < 32 for character in url) or "\\" in url:
+        return ""
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    if (
+        parsed.scheme in {"https", "http"}
+        and parsed.hostname
+        and not parsed.username
+        and not parsed.password
+    ):
+        return url
+    return ""
+
+
+class BillingDocumentPrintView(
+    BusinessRequiredMixin, StoreAccessRequiredMixin, BillingStoreContextMixin, View
+):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        document = self.get_document()
+        if document.status != BillingDocumentStatusChoices.ISSUED:
+            raise Http404
+        profile = BusinessProfile.objects.filter(business=self.business).first()
+        request.netxodo_skip_app_shell = True
+        return render(
+            request,
+            "billing/document_print.html",
+            {
+                "document": document,
+                "store": self.store,
+                "business_profile": profile,
+                "print_logo_url": _print_logo_url(profile),
             },
         )
 
