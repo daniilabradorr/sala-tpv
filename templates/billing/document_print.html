@@ -6,10 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ document.full_number }} | Netxodo</title>
   <link rel="stylesheet" href="{% static 'css/pages/billing-print.css' %}">
+  <script src="{% static 'js/pages/billing-print.js' %}" defer></script>
 </head>
 <body class="document-print-page">
   <nav class="document-print-controls" aria-label="Acciones del documento">
     <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">← Volver al documento</a>
+    <button type="button" data-print-document>IMPRIMIR</button>
   </nav>
   <main class="document-print document-print--{{ document.document_type }}">
     <header class="document-print-header">

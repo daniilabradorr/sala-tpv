@@ -422,6 +422,42 @@ class CheckoutIntegrationTests(TestCase):
     def checkout_url(self, sale):
         return reverse("sales:sale_checkout", args=(self.store.pk, sale.pk))
 
+    def test_completed_checkout_links_to_print_in_new_tab_for_f1_and_f2(self):
+        for requested in (
+            RequestedDocumentTypeChoices.TICKET,
+            RequestedDocumentTypeChoices.INVOICE,
+        ):
+            with self.subTest(requested=requested):
+                sale = self.sale(
+                    requested=requested,
+                    customer=self.customer
+                    if requested == RequestedDocumentTypeChoices.INVOICE
+                    else None,
+                )
+                kind = (
+                    "F1" if requested == RequestedDocumentTypeChoices.INVOICE else "F2"
+                )
+                state = self._run_checkout(sale, [self.intent()], self.series(kind))
+                url = reverse(
+                    "billing:document_print", args=(self.store.pk, state["document"].pk)
+                )
+                for htmx in (False, True):
+                    response = self.client.get(
+                        self.checkout_url(sale),
+                        HTTP_HX_REQUEST="true" if htmx else "false",
+                    )
+                    self.assertTrue(response.context["complete"])
+                    self.assertContains(response, f'href="{url}?autoprint=1"')
+                    self.assertContains(
+                        response, 'target="_blank" rel="noopener" hx-boost="false"'
+                    )
+
+    def test_open_checkout_has_no_print_action(self):
+        response = self.client.get(
+            self.checkout_url(self.sale()), HTTP_HX_REQUEST="true"
+        )
+        self.assertNotContains(response, "autoprint=1")
+
     def test_http_progressive_enhancement_cash_change_and_card_tampering(self):
         self.product.base_price = Decimal("12.50")
         self.product.save()
@@ -624,6 +660,7 @@ class CheckoutIntegrationTests(TestCase):
         self.assertContains(response, "Cobro registrado")
         self.assertContains(response, "REINTENTAR EMISIÓN")
         self.assertNotContains(response, "CONFIRMAR COBRO")
+        self.assertNotContains(response, "autoprint=1")
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
 
     def test_invalid_htmx_checkout_swaps_partial_with_422_and_preserves_intent(self):

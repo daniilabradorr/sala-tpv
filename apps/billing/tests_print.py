@@ -1,6 +1,7 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.formats import number_format
 
@@ -242,13 +243,12 @@ class BillingDocumentPrintTests(BillingFormsFixture):
         self.assertContains(response, document.issuer_legal_name)
         self.assertNotContains(response, 'class="document-print-logo"')
 
-    def test_no_shell_fake_qr_or_print_execution(self):
+    def test_no_shell_or_fake_qr_and_print_uses_external_script(self):
         response = self.client.get(self.print_url(self.ticket()))
         for value in (
             "app-sidebar",
             "app-topbar",
             "window.print",
-            "<script",
             "QR",
             "VeriFactu",
             "AEAT",
@@ -256,6 +256,9 @@ class BillingDocumentPrintTests(BillingFormsFixture):
         ):
             self.assertNotContains(response, value)
         self.assertContains(response, "Volver al documento")
+        self.assertContains(response, "data-print-document")
+        self.assertContains(response, static("js/pages/billing-print.js"))
+        self.assertNotContains(response, "onclick=")
 
     def test_detail_links_to_print_view(self):
         document = self.ticket()
