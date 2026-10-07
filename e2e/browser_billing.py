@@ -306,12 +306,18 @@ class BrowserBillingTests(StaticLiveServerTestCase):
                     "Array.from(document.styleSheets[0].cssRules, rule => rule.cssText).join('\\n')"
                 )
                 self.assertIn("@page billing-invoice", rules)
-                self.assertEqual(
+                page_size = (
                     page.evaluate("""Array.from(document.styleSheets[0].cssRules)
                         .find(rule => rule.type === CSSRule.PAGE_RULE && rule.selectorText === 'billing-invoice')
-                        .style.getPropertyValue('size')"""),
-                    "a4",
+                        .style.getPropertyValue('size')""")
+                    .strip()
+                    .lower()
                 )
+                # Chromium versions may serialize A4 portrait as "a4" or
+                # "a4 portrait"; verify paper and orientation semantically.
+                tokens = page_size.split()
+                self.assertIn("a4", tokens)
+                self.assertNotIn("landscape", tokens)
             finally:
                 browser.close()
 
