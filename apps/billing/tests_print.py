@@ -1,4 +1,5 @@
 from decimal import Decimal
+import uuid
 from unittest.mock import patch
 
 from django.templatetags.static import static
@@ -9,6 +10,11 @@ from apps.billing.models import BillingDocument, BillingDocumentTypeChoices
 from apps.billing.selectors import billing_document_detail
 from apps.billing.tests_forms import BillingFormsFixture
 from apps.business_config.models import BusinessProfile
+from apps.cash_register.models import CashSession
+from apps.cash_register.test_factories import create_cash_register
+from apps.payments.models import Payment, PaymentMethod
+from apps.payments.services import register_sale_payment
+from apps.sales.models import Sale
 from apps.sales.models import RequestedDocumentTypeChoices
 from apps.sales.tests.factories import (
     create_sale_line,
@@ -123,7 +129,46 @@ class BillingDocumentPrintTests(BillingFormsFixture):
                 kwargs={"store_id": self.store.pk, "document_pk": draft.pk},
             )
         )
-        self.assertNotContains(response, "Vista de impresión")
+        self.assertNotContains(response, "IMPRIMIR")
+
+    def _assert_repeated_print_gets_are_read_only(self, query=""):
+        document = self.ticket()
+        method = PaymentMethod.objects.create(
+            business=self.business, name="Tarjeta", code="card"
+        )
+        register = create_cash_register(business=self.business, store=self.store)
+        session = CashSession.objects.create(
+            business=self.business,
+            store=self.store,
+            cash_register=register,
+            opened_by=self.user,
+        )
+        register_sale_payment(
+            business=self.business,
+            sale_id=document.sale_id,
+            method_id=method.pk,
+            amount=document.total_amount,
+            user=self.user,
+            idempotency_key=uuid.uuid4(),
+            cash_session_id=session.pk,
+        )
+        models = (Sale, Payment, BillingDocument)
+        before = tuple(model.objects.count() for model in models)
+        for attempt in range(3):
+            with self.subTest(attempt=attempt, query=query):
+                response = self.client.get(self.print_url(document) + query)
+                self.assertContains(response, document.full_number)
+                self.assertEqual(
+                    tuple(model.objects.count() for model in models), before
+                )
+
+    def test_multiple_print_gets_do_not_change_sale_payment_or_document_counts(self):
+        self._assert_repeated_print_gets_are_read_only()
+
+    def test_multiple_autoprint_gets_do_not_change_sale_payment_or_document_counts(
+        self,
+    ):
+        self._assert_repeated_print_gets_are_read_only("?autoprint=1")
 
     def test_read_only_endpoint_rejects_mutating_methods(self):
         document = self.ticket()
@@ -268,8 +313,13 @@ class BillingDocumentPrintTests(BillingFormsFixture):
                 kwargs={"store_id": self.store.pk, "document_pk": document.pk},
             )
         )
-        self.assertContains(response, f'href="{self.print_url(document)}"')
-        self.assertContains(response, "Vista de impresión")
+        self.assertContains(
+            response,
+            f'<a class="button button-secondary" href="{self.print_url(document)}?autoprint=1" '
+            'target="_blank" rel="noopener" hx-boost="false">IMPRIMIR</a>',
+            html=True,
+        )
+        self.assertNotContains(response, "Vista de impresión")
 
     def test_selector_prefetches_lines_and_tax_breakdowns(self):
         sale = self.sale()

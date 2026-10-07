@@ -1,0 +1,10 @@
+<section class="checkout-document-preview" aria-labelledby="document-preview-title">
+  <h4 id="document-preview-title">Vista previa del documento</h4>
+  <p class="document-preview-issuer">{{ document.issuer_legal_name }}</p>
+  <p>{% if document.document_type == 'F2' %}Factura simplificada{% else %}Factura{% endif %}</p>
+  <dl>
+    <div><dt>Documento</dt><dd>{{ document.full_number }}</dd></div>
+    <div><dt>Líneas</dt><dd>{{ document.preview_line_count }}</dd></div>
+    <div class="document-preview-total"><dt>Total</dt><dd>{{ document.total_amount|floatformat:2 }} €</dd></div>
+  </dl>
+</section>

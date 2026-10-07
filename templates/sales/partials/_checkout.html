@@ -22,6 +22,7 @@
         {% if cash_change != None %}<div><dt>Cambio</dt><dd>{{ cash_change|floatformat:2 }} €</dd></div>{% endif %}
         <div><dt>Documento</dt><dd>{{ document.series_text }} / {{ document.number|stringformat:"06d" }}</dd></div>
       </dl>
+      {% include "sales/partials/_document_preview.html" %}
       <div class="success-actions">
         {% if sale.cash_session_id %}<form method="post" action="{% url 'sales:sale_open_for_session' store.pk sale.cash_session_id %}">{% csrf_token %}<input type="hidden" name="document_type_requested" value="ticket"><button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
         {% if document.status == 'issued' %}<a class="button button-secondary" href="{% url 'billing:document_print' store.pk document.pk %}?autoprint=1" target="_blank" rel="noopener" hx-boost="false" aria-label="IMPRIMIR (abre una nueva pestaña)">IMPRIMIR</a>{% endif %}

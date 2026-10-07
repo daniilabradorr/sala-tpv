@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db.models import Count
 from django.utils import timezone
 
 from apps.billing.models import BillingDocumentStatusChoices, BillingDocumentTypeChoices
@@ -48,6 +49,7 @@ def initial_document(sale, business):
         return None
     return (
         billing_documents_for_sale(business=business, sale=sale)
+        .annotate(preview_line_count=Count("lines"))
         .filter(
             status=BillingDocumentStatusChoices.ISSUED,
             document_type=document_type,

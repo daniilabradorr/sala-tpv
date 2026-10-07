@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
@@ -451,12 +452,52 @@ class CheckoutIntegrationTests(TestCase):
                     self.assertContains(
                         response, 'target="_blank" rel="noopener" hx-boost="false"'
                     )
+                    document = response.context["document"]
+                    self.assertTemplateUsed(
+                        response, "sales/partials/_document_preview.html"
+                    )
+                    self.assertEqual(document.preview_line_count, 1)
+                    with self.assertNumQueries(0):
+                        preview = render_to_string(
+                            "sales/partials/_document_preview.html",
+                            {"document": document},
+                        )
+                    self.assertIn(document.issuer_legal_name, preview)
+                    self.assertIn(document.full_number, preview)
+                    self.assertIn(
+                        "Factura simplificada" if kind == "F2" else "Factura", preview
+                    )
+                    self.assertIn("<dt>Líneas</dt><dd>1</dd>", preview)
+                    self.assertIn("<dt>Total</dt><dd>40,00 €</dd>", preview)
+                    self.assertNotIn("QR", preview)
+                    self.assertNotIn("VeriFactu", preview)
 
     def test_open_checkout_has_no_print_action(self):
         response = self.client.get(
             self.checkout_url(self.sale()), HTTP_HX_REQUEST="true"
         )
         self.assertNotContains(response, "autoprint=1")
+        self.assertNotContains(response, 'class="checkout-document-preview"')
+
+    def test_preview_counts_fiscal_lines_instead_of_quantities(self):
+        sale = self.sale()
+        create_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("3.000"),
+            tax_rate=Decimal("0.00"),
+        )
+        state = self._run_checkout(
+            sale, [self.intent(amount=Decimal("160.00"))], self.series()
+        )
+        self.assertEqual(state["document"].preview_line_count, 2)
+        with self.assertNumQueries(0):
+            preview = render_to_string(
+                "sales/partials/_document_preview.html", {"document": state["document"]}
+            )
+        self.assertIn("<dt>Líneas</dt><dd>2</dd>", preview)
+        self.assertIn("<dt>Total</dt><dd>160,00 €</dd>", preview)
 
     def test_http_progressive_enhancement_cash_change_and_card_tampering(self):
         self.product.base_price = Decimal("12.50")
@@ -659,6 +700,7 @@ class CheckoutIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Cobro registrado")
         self.assertContains(response, "REINTENTAR EMISIÓN")
+        self.assertNotContains(response, 'class="checkout-document-preview"')
         self.assertNotContains(response, "CONFIRMAR COBRO")
         self.assertNotContains(response, "autoprint=1")
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)

@@ -148,6 +148,18 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                 dialog.get_by_role("heading", name="VENTA COMPLETADA")
             ).to_be_visible()
             original_url = page.url
+            preview = dialog.locator(".checkout-document-preview")
+            expect(preview).to_contain_text("Checkout E2E SL")
+            expect(preview).to_contain_text("Factura simplificada")
+            expect(preview.locator("dd").nth(1)).to_have_text("1")
+            for width in (375, 900, 1440):
+                page.set_viewport_size({"width": width, "height": 900})
+                expect(preview).to_be_visible()
+                self.assertTrue(
+                    preview.evaluate(
+                        "element => element.scrollWidth <= element.clientWidth"
+                    )
+                )
             page.evaluate("window.tpvPrintMarker = 'preserved'")
             panel_before = page.locator("#checkout-panel").inner_html()
             with page.expect_popup() as popup_info:
