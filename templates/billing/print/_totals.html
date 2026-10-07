@@ -1,0 +1,6 @@
+<dl class="document-print-totals">
+  <div><dt>Subtotal base</dt><dd>{{ document.subtotal_amount|floatformat:2 }} €</dd></div>
+  {% if document.discount_amount > 0 %}<div class="document-print-discount"><dt>Descuento</dt><dd>−{{ document.discount_amount|floatformat:2 }} €</dd></div>{% endif %}
+  <div><dt>Impuestos</dt><dd>{{ document.tax_amount|floatformat:2 }} €</dd></div>
+  <div class="document-print-total"><dt>TOTAL</dt><dd>{{ document.total_amount|floatformat:2 }} €</dd></div>
+</dl>

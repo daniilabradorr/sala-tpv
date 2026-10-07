@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from decimal import Decimal
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
@@ -11,7 +12,7 @@ from playwright.sync_api import expect, sync_playwright
 from apps.billing.models import BillingDocumentTypeChoices, BillingSeries
 from apps.billing.services import issue_sale_document
 from apps.onboarding.services import OnboardingService
-from apps.sales.models import SaleStatusChoices
+from apps.sales.models import RequestedDocumentTypeChoices, SaleStatusChoices
 from apps.sales.tests.factories import (
     create_sale,
     create_sale_line,
@@ -53,6 +54,7 @@ class BrowserBillingTests(StaticLiveServerTestCase):
             owner_pin="1234",
         )
         self.store_id = result.store.pk
+        self.result = result
         customer = create_sales_customer(
             business=result.business,
             name="Cliente snapshot E2E",
@@ -119,6 +121,199 @@ class BrowserBillingTests(StaticLiveServerTestCase):
         page.get_by_label("Contraseña").fill(self.password)
         page.get_by_role("button", name="Iniciar sesión").click()
         page.wait_for_url(f"{self.live_server_url}/")
+
+    def print_document(self, kind, line_count=2):
+        result = self.result
+        customer = (
+            create_sales_customer(
+                business=result.business,
+                name="Cliente de impresión",
+                legal_name="Cliente Impresión SL",
+                tax_identifier="B99887766",
+            )
+            if kind == "F1"
+            else None
+        )
+        sale = create_sale(
+            business=result.business,
+            store=result.store,
+            opened_by=result.owner,
+            customer=customer,
+            status=SaleStatusChoices.COMPLETED,
+            document_type_requested=(
+                RequestedDocumentTypeChoices.INVOICE
+                if kind == "F1"
+                else RequestedDocumentTypeChoices.TICKET
+            ),
+        )
+        product = create_sales_product(
+            business=result.business,
+            tax=create_sales_tax(business=result.business, rate=Decimal("10.00")),
+            name="Producto con descripción larga " + "X" * 140,
+            base_price=Decimal("20.00"),
+        )
+        for index in range(line_count):
+            line = create_sale_line(
+                business=result.business,
+                sale=sale,
+                product=product,
+                quantity=Decimal("1.500") if index == 0 else Decimal("1.000"),
+                discount_amount=Decimal("2.00") if index == 0 else Decimal("0.00"),
+            )
+            if index > 0:
+                type(line).objects.filter(pk=line.pk).update(
+                    product_name=f"Producto de impresión {index}"
+                )
+        series = BillingSeries.objects.create(
+            business=result.business,
+            store=result.store,
+            name=f"Impresión {kind}",
+            document_type=kind,
+            prefix=f"PRINT-{kind}",
+            year=timezone.localdate().year,
+        )
+        return issue_sale_document(
+            business=result.business,
+            sale_id=sale.pk,
+            series_id=series.pk,
+            issued_by=result.owner,
+            idempotency_key=uuid.uuid4(),
+        )
+
+    def test_f2_receipt_wraps_long_lines_and_hides_controls_in_print(self):
+        document = self.print_document("F2")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(viewport={"width": 1280, "height": 900})
+                context.add_init_script(
+                    "window.printCalls = 0; window.print = () => { window.printCalls += 1; };"
+                )
+                page = context.new_page()
+                self.login(page)
+                page.goto(
+                    f"{self.live_server_url}/billing/stores/{self.store_id}/documents/{document.pk}/print/"
+                )
+                receipt = page.locator(".document-print--F2")
+                expect(receipt).to_be_visible()
+                expect(receipt.locator("table")).to_have_count(0)
+                expect(receipt.locator(".document-print-quantity").first).to_have_text(
+                    "1,5"
+                )
+                expect(receipt.locator(".document-print-line-discount")).to_have_count(
+                    1
+                )
+                self.assertEqual(page.evaluate("window.printCalls"), 0)
+                page.get_by_role("button", name="IMPRIMIR", exact=True).click()
+                self.assertEqual(page.evaluate("window.printCalls"), 1)
+                for width in (320, 375, 1280):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    self.assertTrue(
+                        receipt.evaluate(
+                            "element => element.scrollWidth <= element.clientWidth"
+                        )
+                    )
+                    self.assertTrue(
+                        page.evaluate(
+                            "document.documentElement.scrollWidth <= window.innerWidth"
+                        )
+                    )
+                page.emulate_media(media="print")
+                expect(page.locator(".document-print-controls")).to_be_hidden()
+                expect(receipt).to_be_visible()
+                self.assertTrue(
+                    receipt.evaluate(
+                        "element => element.scrollWidth <= element.clientWidth"
+                    )
+                )
+                self.assertEqual(
+                    receipt.evaluate("element => getComputedStyle(element).page"),
+                    "billing-receipt",
+                )
+                rules = page.evaluate(
+                    "Array.from(document.styleSheets[0].cssRules, rule => rule.cssText).join('\\n')"
+                )
+                self.assertIn("@page billing-receipt", rules)
+                self.assertFalse(page.evaluate("CSS.supports('size', '80mm auto')"))
+            finally:
+                browser.close()
+
+    def test_f1_many_lines_remain_visible_and_have_pagination_rules(self):
+        document = self.print_document("F1", line_count=70)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1280, "height": 900})
+                self.login(page)
+                page.goto(
+                    f"{self.live_server_url}/billing/stores/{self.store_id}/documents/{document.pk}/print/"
+                )
+                invoice = page.locator(".document-print--F1")
+                expect(invoice).to_be_visible()
+                expect(invoice.locator(".document-print-recipient")).to_contain_text(
+                    "Cliente Impresión SL"
+                )
+                expect(invoice.locator(".document-print-lines tbody tr")).to_have_count(
+                    70
+                )
+                expect(invoice.locator(".document-print-receipt-lines")).to_have_count(
+                    0
+                )
+                table = invoice.locator(".document-print-lines")
+                self.assertTrue(
+                    table.evaluate(
+                        "element => element.scrollWidth <= element.clientWidth"
+                    )
+                )
+                page.set_viewport_size({"width": 375, "height": 812})
+                self.assertTrue(
+                    page.evaluate(
+                        "document.documentElement.scrollWidth <= window.innerWidth"
+                    )
+                )
+                page.set_viewport_size({"width": 1280, "height": 900})
+                page.emulate_media(media="print")
+                expect(page.locator(".document-print-controls")).to_be_hidden()
+                expect(invoice).to_be_visible()
+                self.assertEqual(
+                    invoice.evaluate("element => getComputedStyle(element).page"),
+                    "billing-invoice",
+                )
+                self.assertEqual(
+                    table.locator("thead").evaluate(
+                        "element => getComputedStyle(element).display"
+                    ),
+                    "table-header-group",
+                )
+                for locator in (
+                    table.locator("tbody tr").first,
+                    invoice.locator(".document-print-totals"),
+                    invoice.locator(".document-print-recipient"),
+                    invoice.locator(".document-print-tax-section"),
+                ):
+                    self.assertEqual(
+                        locator.evaluate(
+                            "element => getComputedStyle(element).breakInside"
+                        ),
+                        "avoid",
+                    )
+                self.assertTrue(
+                    table.evaluate(
+                        "element => element.scrollWidth <= element.clientWidth"
+                    )
+                )
+                rules = page.evaluate(
+                    "Array.from(document.styleSheets[0].cssRules, rule => rule.cssText).join('\\n')"
+                )
+                self.assertIn("@page billing-invoice", rules)
+                self.assertEqual(
+                    page.evaluate("""Array.from(document.styleSheets[0].cssRules)
+                        .find(rule => rule.type === CSSRule.PAGE_RULE && rule.selectorText === 'billing-invoice')
+                        .style.getPropertyValue('size')"""),
+                    "a4",
+                )
+            finally:
+                browser.close()
 
     def test_detail_print_opens_new_tab_without_leaving_document(self):
         with sync_playwright() as playwright:

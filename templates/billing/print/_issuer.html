@@ -1,0 +1,6 @@
+<div class="document-print-issuer">
+  {% if print_logo_url %}<img class="document-print-logo" src="{{ print_logo_url }}" alt="Logo del negocio" referrerpolicy="no-referrer">{% endif %}
+  {% if business_profile.brand_name or business_profile.trade_name %}<p class="document-print-brand">{{ business_profile.brand_name|default:business_profile.trade_name }}</p>{% endif %}
+  <p><strong>{{ document.issuer_legal_name }}</strong><br>NIF/CIF: {{ document.issuer_tax_identifier }}</p>
+  <p>{{ document.issuer_address_line_1 }}{% if document.issuer_address_line_2 %}<br>{{ document.issuer_address_line_2 }}{% endif %}<br>{{ document.issuer_postal_code }} {{ document.issuer_city }}<br>{{ document.issuer_province }} · {{ document.issuer_country_code }}</p>
+</div>

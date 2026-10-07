@@ -1,37 +1,102 @@
-.document-print-page { margin: 0; background: #eef0f3; color: #111; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; }
+/* Shared document styles, including the existing F3/rectification fallback. */
+.document-print-page { margin: 0; color: #111; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; }
 .document-print-controls { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 960px; margin: 1rem auto; padding: 0 1rem; }
 .document-print-controls a { color: #163d67; }
-.document-print-controls button { padding: .75rem 1.25rem; border: 0; border-radius: .4rem; background: #163d67; color: #fff; font: inherit; font-weight: bold; cursor: pointer; }
-.document-print-controls :focus-visible { outline: 2px solid #163d67; outline-offset: 4px; }
-.document-print { box-sizing: border-box; max-width: 960px; margin: 1rem auto 2rem; padding: 2rem; background: #fff; box-shadow: 0 2px 12px #0002; overflow-wrap: anywhere; }
+.document-print-controls button { padding: .6rem 1rem; border: 1px solid #163d67; border-radius: 4px; background: #163d67; color: #fff; font: inherit; cursor: pointer; }
+.document-print-controls a:focus-visible, .document-print-controls button:focus-visible, .document-print-table-scroll:focus-visible { outline: 2px solid #163d67; outline-offset: 4px; }
+.document-print { box-sizing: border-box; background: #fff; overflow-wrap: anywhere; }
 .document-print h1 { font-size: 1.5rem; }
-.document-print h2 { font-size: 1rem; margin-top: 1.5rem; }
-.document-print-logo { max-width: 180px; max-height: 90px; object-fit: contain; }
+.document-print h2, .document-print h3 { font-size: 1rem; margin-top: 1.5rem; }
+.document-print-logo { display: block; max-width: 180px; width: auto; height: auto; max-height: 90px; object-fit: contain; }
 .document-print-brand { font-size: 1.4rem; font-weight: bold; }
 .document-print dl { margin: 1rem 0; }
 .document-print dl div { display: flex; justify-content: space-between; gap: 1rem; }
-.document-print dd { margin: 0; text-align: right; }
+.document-print dd { min-width: 0; margin: 0; text-align: right; }
 .document-print-table-scroll { overflow-x: auto; }
 .document-print table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .document-print th, .document-print td { padding: .5rem .35rem; border-bottom: 1px solid #ccc; text-align: right; vertical-align: top; }
 .document-print th:first-child, .document-print td:first-child { text-align: left; }
-.document-print-totals { max-width: 360px; margin-left: auto !important; }
+.document-print .document-print-totals { max-width: 360px; margin-left: auto; }
 .document-print-total { border-top: 2px solid #111; padding-top: .5rem; font-size: 1.2rem; font-weight: bold; }
 .document-print-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #ccc; white-space: pre-line; }
-@media (max-width: 600px) {
+.document-print-number { font-weight: bold; }
+.document-print-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* F2 has 74 mm of usable content on an 80 mm roll with 3 mm side margins. */
+.document-print--F2 { width: 80mm; max-width: 100%; padding: 3mm; font-size: 10pt; line-height: 1.35; }
+.document-print--F2 .document-print-header { text-align: center; }
+.document-print--F2 .document-print-logo { max-width: 55mm; max-height: 20mm; margin: 0 auto 2mm; }
+.document-print--F2 .document-print-brand { margin: 2mm 0; font-size: 13pt; }
+.document-print--F2 h1 { font-size: 11pt; margin: 0 0 2mm; }
+.document-print--F2 h2, .document-print--F2 h3 { font-size: 10pt; }
+.document-print--F2 p { margin: 1.5mm 0; }
+.document-print--F2 .document-print-identity { margin-top: 3mm; padding: 3mm 0; border-top: 1px dashed #555; border-bottom: 1px dashed #555; }
+.document-print-receipt-lines { list-style: none; margin: 3mm 0; padding: 0; }
+.document-print-receipt-line { padding: 1.5mm 0; }
+.document-print-product { font-weight: bold; }
+.document-print-line-pricing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 2mm; }
+.document-print-line-total { text-align: right; }
+.document-print-line-discount { display: flex; justify-content: space-between; gap: 2mm; }
+.document-print--F2 .document-print-line-tax { font-size: 9pt; }
+.document-print--F2 .document-print-totals { max-width: none; padding-top: 3mm; border-top: 1px dashed #555; }
+.document-print--F2 dl div { gap: 2mm; }
+.document-print--F2 .document-print-total { font-size: 13pt; }
+.document-print--F2 .document-print-tax-section { border-top: 1px dashed #555; margin-top: 3mm; padding-top: 1mm; }
+.document-print--F2 .document-print-tax-section h2 { margin: 2mm 0; }
+.document-print-tax-item { margin: 2mm 0; }
+.document-print-tax-item h3 { margin: 0; }
+.document-print-tax-item p { font-size: 9pt; }
+.document-print-tax-item dl { margin: 1mm 0; }
+.document-print--F2 .document-print-footer { text-align: center; border-top-style: dashed; margin-top: 3mm; padding-top: 3mm; }
+
+/* F1 uses the available A4 area, with a six-column commercial table. */
+.document-print--F1 { width: 210mm; max-width: 100%; padding: 14mm; }
+.document-print--F1 .document-print-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8mm; padding-bottom: 5mm; border-bottom: 2px solid #111; }
+.document-print--F1 .document-print-identity { text-align: right; }
+.document-print--F1 .document-print-logo { max-width: 45mm; max-height: 22mm; }
+.document-print--F1 .document-print-brand { margin: 3mm 0; }
+.document-print--F1 .document-print-recipient { padding: 4mm 0; border-bottom: 1px solid #ccc; }
+.document-print--F1 .document-print-recipient h2 { margin-top: 0; }
+.document-print--F1 .document-print-lines { table-layout: fixed; }
+.document-print--F1 .document-print-lines th:first-child { width: 28%; }
+.document-print--F1 .document-print-tax { table-layout: fixed; }
+
+@media screen {
+  .document-print-page { background: #eef0f3; }
+  .document-print { max-width: 960px; margin: 1rem auto 2rem; padding: 2rem; box-shadow: 0 2px 12px #0002; }
+  .document-print--F2 { max-width: 100%; padding: 3mm; }
+  .document-print--F1 { max-width: 100%; min-height: 297mm; padding: 14mm; }
+}
+@media screen and (max-width: 600px) {
   .document-print { padding: 1rem; margin: 0; }
   .document-print-lines { min-width: 600px; }
+  .document-print--F2 { margin: 1rem auto; padding: 3mm; }
+  .document-print--F1 { padding: 5mm; min-height: 0; }
+  .document-print--F1 .document-print-header { grid-template-columns: minmax(0, 1fr); gap: 3mm; }
+  .document-print--F1 .document-print-identity { text-align: left; }
 }
+
+/* CSS paged media cannot express a fixed width with an automatic roll height.
+   size: 80mm auto is invalid. Select 80 mm roll paper in the printer dialog;
+   size: auto respects that driver setting and content stays within 74 mm. */
+@page billing-receipt { size: auto; margin: 3mm; }
+@page billing-invoice { size: A4 portrait; margin: 14mm; }
 @media print {
   .document-print-page { background: #fff; margin: 0; padding: 0; color: #000; font-size: 10pt; }
-  .document-print-page > :not(.document-print), .document-print button, .document-print input, .document-print select, .document-print textarea { display: none !important; }
-  .document-print a::after { content: none !important; }
+  .document-print-controls, .document-print [data-print-document] { display: none; }
+  .document-print a[href]::after { content: none; }
   .document-print { max-width: none; width: auto; margin: 0; padding: 0; box-shadow: none; }
   .document-print-table-scroll { overflow: visible; }
   .document-print-lines { min-width: 0; table-layout: fixed; }
   .document-print-lines th:first-child { width: 25%; }
   .document-print th, .document-print td { padding: .3rem .2rem; }
   .document-print thead { display: table-header-group; }
-  .document-print tr, .document-print-totals, .document-print-recipient { break-inside: avoid; }
-  .document-print h2 { break-after: avoid; }
+  .document-print tr, .document-print-totals, .document-print-recipient, .document-print-tax-item { break-inside: avoid; page-break-inside: avoid; }
+  .document-print h2, .document-print h3 { break-after: avoid; }
+  .document-print--F2 { page: billing-receipt; width: 74mm; max-width: 100%; font-size: 10pt; }
+  .document-print--F2 .document-print-header, .document-print-receipt-line { break-inside: avoid; page-break-inside: avoid; }
+  .document-print--F1 { page: billing-invoice; width: 100%; font-size: 10pt; }
+  .document-print--F1 .document-print-header { break-inside: avoid; page-break-inside: avoid; }
+  .document-print--F1 .document-print-lines th:first-child { width: 28%; }
+  .document-print--F1 .document-print-tax-section { break-inside: avoid; page-break-inside: avoid; }
 }

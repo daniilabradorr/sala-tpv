@@ -1,0 +1,33 @@
+{% load billing_print %}
+<header class="document-print-header">
+  {% include "billing/print/_issuer.html" %}
+  <div class="document-print-identity">
+    <h1>FACTURA</h1>
+    <p class="document-print-number">{{ document.full_number }}</p>
+    <dl class="document-print-metadata">
+      <div><dt>Fecha de emisión</dt><dd>{{ document.issued_at|date:"d/m/Y H:i" }}</dd></div>
+      {% if document.operation_date %}<div><dt>Fecha de operación</dt><dd>{{ document.operation_date|date:"d/m/Y" }}</dd></div>{% endif %}
+    </dl>
+  </div>
+</header>
+{% include "billing/print/_recipient.html" %}
+<section aria-labelledby="lines-title">
+  <h2 id="lines-title">Líneas del documento</h2>
+  <div class="document-print-table-scroll" role="region" aria-labelledby="lines-title" tabindex="0">
+    <table class="document-print-lines">
+      <thead><tr><th scope="col">Concepto</th><th scope="col">Cant.</th><th scope="col">Precio base</th><th scope="col">Dto. base</th><th scope="col">Impuesto</th><th scope="col">Total</th></tr></thead>
+      <tbody>{% for line in document.lines.all %}
+        <tr>
+          <td>{{ line.product_name }}</td>
+          <td><span class="document-print-quantity">{{ line.quantity|quantity }}</span> {{ line.unit }}</td>
+          <td>{{ line.unit_base_price|floatformat:2 }} €</td>
+          <td>{% if line.discount_amount > 0 %}−{{ line.discount_amount|floatformat:2 }} €{% else %}—{% endif %}</td>
+          <td>{{ line.tax_type }} {{ line.tax_rate|quantity }} %{% if line.has_equivalence_surcharge %}<br>Recargo {{ line.equivalence_surcharge_rate|quantity }} %{% endif %}</td>
+          <td>{{ line.line_total|floatformat:2 }} €</td>
+        </tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% include "billing/print/_totals.html" %}
+{% include "billing/print/_tax_breakdown.html" with compact=False %}

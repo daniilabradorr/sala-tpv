@@ -1,0 +1,12 @@
+{% if document.recipient_legal_name or document.recipient_name or document.recipient_tax_identifier or document.recipient_foreign_id %}
+<section class="document-print-recipient" aria-labelledby="recipient-title">
+  <h2 id="recipient-title">Destinatario</h2>
+  <p><strong>{{ document.recipient_legal_name|default:document.recipient_name }}</strong>
+    {% if document.recipient_tax_identifier %}<br>NIF/CIF: {{ document.recipient_tax_identifier }}{% endif %}
+    {% if document.recipient_foreign_id %}<br>{{ document.recipient_foreign_id_type }}: {{ document.recipient_foreign_id }}{% endif %}
+    {% if document.recipient_address_line_1 %}<br>{{ document.recipient_address_line_1 }}{% endif %}
+    {% if document.recipient_postal_code or document.recipient_city %}<br>{{ document.recipient_postal_code }} {{ document.recipient_city }}{% endif %}
+    {% if document.recipient_province or document.recipient_country_code %}<br>{{ document.recipient_province }} {{ document.recipient_country_code }}{% endif %}
+  </p>
+</section>
+{% endif %}
