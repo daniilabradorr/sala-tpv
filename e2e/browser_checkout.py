@@ -126,6 +126,71 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         self.assertEqual(payment.status, PaymentStatusChoices.COMPLETED)
         self.assertTrue(BillingDocument.objects.filter(sale=payment.sale).exists())
 
+    def test_print_opens_fiscal_document_and_preserves_tpv(self):
+        self._assert_checkout_print_flow()
+
+    def _assert_checkout_print_flow(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1440, "height": 900})
+            context.add_init_script(
+                "window.printCalls = 0; window.print = () => { window.printCalls += 1; };"
+            )
+            page = context.new_page()
+            self._login_and_sale(page)
+            dialog = self._open_checkout(page, 1440)
+            expect(
+                dialog.get_by_role("link", name=re.compile("IMPRIMIR"))
+            ).to_have_count(0)
+            dialog.get_by_role("radio", name=re.compile("Tarjeta")).check()
+            dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+            expect(
+                dialog.get_by_role("heading", name="VENTA COMPLETADA")
+            ).to_be_visible()
+            original_url = page.url
+            preview = dialog.locator(".checkout-document-preview")
+            expect(preview).to_contain_text("Checkout E2E SL")
+            expect(preview).to_contain_text("Factura simplificada")
+            expect(preview.locator("dd").nth(1)).to_have_text("1")
+            for width in (375, 900, 1440):
+                page.set_viewport_size({"width": width, "height": 900})
+                expect(preview).to_be_visible()
+                self.assertTrue(
+                    preview.evaluate(
+                        "element => element.scrollWidth <= element.clientWidth"
+                    )
+                )
+            page.evaluate("window.tpvPrintMarker = 'preserved'")
+            panel_before = page.locator("#checkout-panel").inner_html()
+            with page.expect_popup() as popup_info:
+                dialog.get_by_role("link", name=re.compile("IMPRIMIR")).click()
+            popup = popup_info.value
+            popup.wait_for_load_state("load")
+            popup.wait_for_function("window.printCalls === 1")
+            self.assertIn("/print/?autoprint=1", popup.url)
+            self.assertIsNone(popup.evaluate("window.opener"))
+            expect(
+                popup.get_by_role("heading", name="FACTURA SIMPLIFICADA")
+            ).to_be_visible()
+            expect(popup.locator(".app-sidebar, .app-topbar")).to_have_count(0)
+            popup.emulate_media(media="print")
+            expect(popup.locator(".document-print-controls")).not_to_be_visible()
+            expect(popup.locator(".document-print")).to_be_visible()
+            popup.emulate_media(media="screen")
+            popup.get_by_role("button", name="IMPRIMIR").click()
+            self.assertEqual(popup.evaluate("window.printCalls"), 2)
+            popup.goto(popup.url.split("?")[0])
+            self.assertEqual(popup.evaluate("window.printCalls"), 0)
+            popup.get_by_role("button", name="IMPRIMIR").click()
+            self.assertEqual(popup.evaluate("window.printCalls"), 1)
+            popup.close()
+            self.assertEqual(page.url, original_url)
+            self.assertEqual(page.evaluate("window.tpvPrintMarker"), "preserved")
+            self.assertEqual(page.locator("#checkout-panel").inner_html(), panel_before)
+            expect(dialog).to_have_attribute("open", "")
+            expect(dialog.get_by_role("button", name="NUEVA VENTA")).to_be_visible()
+            browser.close()
+
     def test_cash_checkout_and_change_preview(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)

@@ -120,6 +120,43 @@ class BrowserBillingTests(StaticLiveServerTestCase):
         page.get_by_role("button", name="Iniciar sesión").click()
         page.wait_for_url(f"{self.live_server_url}/")
 
+    def test_detail_print_opens_new_tab_without_leaving_document(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(viewport={"width": 1440, "height": 900})
+                context.add_init_script(
+                    "window.printCalls = 0; window.print = () => { window.printCalls += 1; };"
+                )
+                page = context.new_page()
+                self.login(page)
+                detail_url = (
+                    f"{self.live_server_url}/billing/stores/{self.store_id}/"
+                    f"documents/{self.document_id}/"
+                )
+                page.goto(detail_url)
+                page.evaluate("window.detailPrintMarker = 'preserved'")
+                action = page.get_by_role("link", name="IMPRIMIR", exact=True)
+                expect(action).to_have_attribute("target", "_blank")
+                expect(action).to_have_attribute("rel", "noopener")
+                expect(action).to_have_attribute("hx-boost", "false")
+                with page.expect_popup() as popup_info:
+                    action.click()
+                popup = popup_info.value
+                popup.wait_for_load_state("load")
+                popup.wait_for_function("window.printCalls === 1")
+                self.assertEqual(popup.url, detail_url + "print/?autoprint=1")
+                expect(popup.locator(".document-print")).to_contain_text(
+                    self.document_number
+                )
+                self.assertIsNone(popup.evaluate("window.opener"))
+                popup.close()
+                self.assertEqual(page.url, detail_url)
+                self.assertEqual(page.evaluate("window.detailPrintMarker"), "preserved")
+                expect(action).to_be_visible()
+            finally:
+                browser.close()
+
     def install_workspace_settle_counter(self, page):
         page.evaluate(
             """() => {
