@@ -84,7 +84,6 @@ TEST_TEMPLATES = [
                         "sales/partials/_line_update_success.html": (
                             "{% include 'sales/partials/_cart_content.html' %}"
                         ),
-                        "sales/sale_open.html": "{{ form.errors }}",
                         "sales/sale_header_form.html": "{{ form.errors }}",
                         "sales/sale_line_form.html": "{{ form.errors }}",
                         "sales/sale_cancel_confirm.html": "{{ form.errors }}",
@@ -386,23 +385,23 @@ class SaleViewsIntegrationTests(TestCase):
                 )
                 self.assertContains(response, "Café Especial")
 
-    def test_sale_open_preselects_only_active_same_business_customer(self):
+    def test_start_preserves_only_explicit_active_same_business_customer(self):
         self.login_as(self.owner)
         customer = create_sales_customer(business=self.business)
         foreign = create_sales_customer(business=self.other_business)
-        url = reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
-        count = Sale.objects.count()
-
-        response = self.client.get(url, {"customer": customer.pk})
-        self.assertEqual(response.context["form"].initial["customer"], customer)
-        self.assertEqual(Sale.objects.count(), count)
-
+        url = reverse("sales:sale_start", kwargs={"store_id": self.store.pk})
+        self.assertEqual(
+            self.client.get(url, {"customer": customer.pk}).status_code, 302
+        )
+        self.assertFalse(Sale.objects.exists())
+        response = self.client.post(url, {"customer": customer.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Sale.objects.get().customer, customer)
         customer.is_active = False
         customer.save()
         for rejected in (customer, foreign):
-            response = self.client.get(url, {"customer": rejected.pk})
-            self.assertNotIn("customer", response.context["form"].initial)
-        self.assertEqual(Sale.objects.count(), count)
+            self.client.post(url, {"customer": rejected.pk})
+        self.assertEqual(Sale.objects.count(), 1)
 
     def test_workspace_category_filter_is_tenant_scoped(self):
         self.login_as(self.owner)
@@ -673,16 +672,8 @@ class SaleViewsIntegrationTests(TestCase):
         )
 
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["locked_cash_session"], session)
-        self.assertEqual(
-            response.context["form"].fields["cash_register"].widget.input_type,
-            "hidden",
-        )
-        self.assertEqual(
-            response.context["form"].fields["cash_session"].widget.input_type,
-            "hidden",
-        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Sale.objects.exists())
 
         response = self.client.post(
             url,
@@ -700,21 +691,27 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertEqual(sale.cash_register, register)
         self.assertEqual(sale.cash_session, session)
 
-    def test_open_sale_renders_non_field_service_errors(self):
+    def test_start_redirects_with_non_field_service_errors(self):
+        from django.contrib.messages import get_messages
+
         self.login_as(self.owner)
         with patch(
             "apps.sales.views.open_sale",
             side_effect=ValidationError("No se puede abrir esta venta."),
         ):
             response = self.client.post(
-                reverse("sales:sale_open", kwargs={"store_id": self.store.pk}),
-                {"document_type_requested": "ticket", "customer": ""},
+                reverse("sales:sale_start", args=[self.store.pk])
             )
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "No se puede abrir esta venta.", response.context["form"].non_field_errors()
+        self.assertRedirects(
+            response,
+            reverse("sales:sale_list", args=[self.store.pk]),
+            fetch_redirect_response=False,
         )
-        self.assertContains(response, "No se puede abrir esta venta.")
+        self.assertIn(
+            "No se puede abrir esta venta.",
+            [str(message) for message in get_messages(response.wsgi_request)],
+        )
+        self.assertFalse(Sale.objects.exists())
 
     def test_htmx_delete_returns_only_updated_cart(self):
         self.login_as(self.owner)
@@ -735,7 +732,7 @@ class SaleViewsIntegrationTests(TestCase):
         self.assertTemplateNotUsed(response, "sales/sale_workspace.html")
         self.assertFalse(sale.lines.exists())
 
-    def test_open_get_initializes_single_register_and_only_exposes_safe_session(self):
+    def test_start_assigns_only_valid_session_in_store(self):
         settings = self.business.pos_settings
         settings.require_open_cash_register = True
         settings.save(update_fields=["require_open_cash_register", "updated_at"])
@@ -761,57 +758,30 @@ class SaleViewsIntegrationTests(TestCase):
         inactive_register.save(update_fields=["is_active", "updated_at"])
 
         self.login_as(self.owner)
-        response = self.client.get(
-            reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
-        )
+        response = self.client.post(reverse("sales:sale_start", args=[self.store.pk]))
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.get()
+        self.assertEqual(sale.cash_register, register)
+        self.assertEqual(sale.cash_session, open_session)
+        self.assertNotEqual(sale.cash_session, inactive_session)
 
-        self.assertEqual(response.status_code, 200)
-        form = response.context["form"]
-        self.assertEqual(form.initial["cash_register"], register)
-        self.assertEqual(form.initial["cash_session"], open_session)
-        self.assertEqual(
-            set(form.fields["cash_session"].queryset.values_list("pk", flat=True)),
-            {open_session.pk},
-        )
-        self.assertNotIn(
-            inactive_session.pk,
-            form.fields["cash_session"].queryset.values_list("pk", flat=True),
-        )
-
-    def test_open_get_with_multiple_registers_does_not_choose_one_arbitrarily(self):
-        settings = self.business.pos_settings
-        settings.require_open_cash_register = True
-        settings.save(update_fields=["require_open_cash_register", "updated_at"])
+    def test_start_with_multiple_registers_does_not_choose_one_arbitrarily(self):
         first_register = self.create_cash_register(name="Caja primera")
         second_register = self.create_cash_register(name="Caja segunda")
-        first_session = self.create_cash_session(register=first_register)
+        self.create_cash_session(register=first_register)
         second_session = self.create_cash_session(register=second_register)
-
         self.login_as(self.owner)
-        response = self.client.get(
-            reverse("sales:sale_open", kwargs={"store_id": self.store.pk})
+        url = reverse("sales:sale_start", args=[self.store.pk])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.get()
+        self.assertIsNone(sale.cash_register)
+        self.assertIsNone(sale.cash_session)
+        response = self.client.post(
+            url, {"cash_register": first_register.pk, "cash_session": second_session.pk}
         )
-
-        self.assertEqual(response.status_code, 200)
-        form = response.context["form"]
-        self.assertNotIn("cash_register", form.initial)
-        self.assertNotIn("cash_session", form.initial)
-        self.assertEqual(
-            set(form.fields["cash_session"].queryset.values_list("pk", flat=True)),
-            {first_session.pk, second_session.pk},
-        )
-
-        mismatch_response = self.client.post(
-            reverse("sales:sale_open", kwargs={"store_id": self.store.pk}),
-            data={
-                "document_type_requested": "ticket",
-                "cash_register": first_register.pk,
-                "cash_session": second_session.pk,
-            },
-        )
-        self.assertEqual(mismatch_response.status_code, 200)
-        self.assertIn("cash_session", mismatch_response.context["form"].errors)
-        self.assertFalse(Sale.objects.exists())
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Sale.objects.count(), 1)
 
     def test_cashier_without_store_access_cannot_open_sale(self):
         self.login_as(self.cashier_without_access)

@@ -76,17 +76,112 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         self.store_id = result.store.pk
         self.session_id = self.session.pk
 
-    def _login_and_sale(self, page):
+    def _login(self, page):
         page.goto(f"{self.live_server_url}/users/login/")
         page.get_by_label("Correo electrónico").fill(self.email)
         page.get_by_label("Contraseña").fill(self.password)
         page.get_by_role("button", name="Iniciar sesión").click()
+        page.wait_for_url(f"{self.live_server_url}/")
+
+    def _login_and_sale(self, page):
+        self._login(page)
         page.goto(
-            f"{self.live_server_url}/sales/stores/{self.store_id}/"
-            f"cash-sessions/{self.session_id}/sales/open/"
+            f"{self.live_server_url}/cash-register/stores/{self.store_id}/sessions/{self.session_id}/"
         )
-        page.get_by_role("button", name="Iniciar venta").click()
+        page.locator(".cash-session-header").get_by_role(
+            "button", name="Nueva venta"
+        ).click()
+        expect(page.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
+        expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         page.get_by_role("button", name=re.compile("Producto checkout")).click()
+
+    def test_global_start_is_direct_responsive_and_safe_to_refresh_or_go_back(self):
+        sale_ids = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            for width in (1440, 390):
+                page = browser.new_page(viewport={"width": width, "height": 900})
+                self._login(page)
+                start = page.locator("main").get_by_role(
+                    "button", name="Nueva venta", exact=True
+                )
+                expect(start).to_be_visible()
+                if width == 1440:
+                    # Two synchronous submit events represent one duplicated interaction.
+                    start.evaluate(
+                        "button => { const form = button.form; form.requestSubmit(); form.requestSubmit(); }"
+                    )
+                else:
+                    start.click()
+                expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
+                sale_id = int(re.search(r"/sales/(\d+)/$", page.url).group(1))
+                sale_ids.append(sale_id)
+                expect(page.locator("#product-search")).to_be_visible()
+                expect(page.locator("#product-grid")).to_be_visible()
+                expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(
+                    0
+                )
+                expect(page.locator("#workspace-header")).to_be_visible()
+                page.wait_for_load_state("load")
+                page.evaluate("document.fonts.ready")
+                self.assertTrue(
+                    page.evaluate(
+                        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                    ),
+                    f"Workspace overflow at viewport width {width}",
+                )
+                page.reload()
+                expect(page).to_have_url(re.compile(rf"/sales/{sale_id}/$"))
+                if width < 1200:
+                    page.locator('[data-nx-drawer-trigger="sale-cart"]').click()
+                expect(page.locator("#sale-cart")).to_be_visible()
+                page.go_back()
+                expect(page).to_have_url(f"{self.live_server_url}/")
+                expect(
+                    page.locator("main").get_by_role(
+                        "button", name="Nueva venta", exact=True
+                    )
+                ).to_be_enabled()
+                page.close()
+            browser.close()
+        self.assertEqual(Sale.objects.count(), 2)
+        for sale in Sale.objects.filter(pk__in=sale_ids):
+            self.assertEqual(sale.cash_session_id, self.session_id)
+            self.assertIsNone(sale.customer_id)
+            self.assertEqual(sale.document_type_requested, "ticket")
+
+    def test_palette_start_by_keyboard(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            self._login(page)
+            page.keyboard.press("Control+k")
+            page.locator("[data-command-input]").fill("Nueva venta")
+            expect(
+                page.locator("[data-command-dialog]").get_by_role(
+                    "button", name="Nueva venta", exact=True
+                )
+            ).to_be_visible()
+            page.keyboard.press("ArrowDown")
+            page.keyboard.press("Enter")
+            expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
+            expect(page.locator("#product-grid")).to_be_visible()
+            browser.close()
+        self.assertEqual(Sale.objects.count(), 1)
+
+    def test_global_start_works_without_javascript(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(
+                java_script_enabled=False, viewport={"width": 1440, "height": 900}
+            )
+            self._login(page)
+            page.locator(".topbar-sale").click()
+            expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
+            expect(page.locator("#product-grid")).to_be_visible()
+            expect(page.locator("#sale-cart")).to_be_visible()
+            browser.close()
+        self.assertEqual(Sale.objects.count(), 1)
 
     def _open_checkout(self, page, width):
         if width < 1200:

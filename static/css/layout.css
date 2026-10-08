@@ -61,8 +61,10 @@ body.sidebar-open { overflow: hidden; }
 .command-search input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; }
 .command-results { max-height: 60vh; overflow-y: auto; padding: .6rem; }
 .command-results section h3 { margin: .75rem .65rem .3rem; color: var(--muted); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
-.command-results a { display: flex; min-height: 44px; align-items: center; gap: .7rem; padding: .55rem .65rem; border-radius: 7px; color: var(--text); font-weight: 700; }
-.command-results a:hover, .command-results a.is-highlighted { background: var(--nx-info-bg); }
+.command-results a, .command-results form button { display: flex; width: 100%; min-height: 44px; align-items: center; gap: .7rem; padding: .55rem .65rem; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.command-results a:hover, .command-results a.is-highlighted, .command-results form button:hover, .command-results form.is-highlighted button { background: var(--nx-info-bg); }
+.topbar > form { flex: none; margin: 0; }
+[data-nx-sale-start] { margin: 0; }
 .command-empty { padding: 1.5rem; color: var(--muted); text-align: center; }
 
 @media (max-width: 1199px) {

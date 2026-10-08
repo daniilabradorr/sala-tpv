@@ -24,3 +24,6 @@
 .checkout [hidden]{display:none!important}
 
 .checkout-document-preview{box-sizing:border-box;max-width:100%;margin:0 0 1.25rem;padding:1rem;border:1px solid var(--border);border-radius:.75rem;text-align:left;overflow-wrap:anywhere}.checkout-document-preview h4,.checkout-document-preview p{margin:0 0 .5rem}.document-preview-issuer{font-weight:700}.checkout-document-preview dl{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.75rem;margin:.75rem 0 0}.checkout-document-preview dd{margin:.25rem 0 0;font-weight:650}.document-preview-total{grid-column:1 / -1;display:flex;flex-wrap:wrap;justify-content:space-between;gap:.5rem;border-top:1px solid var(--border);padding-top:.75rem}.document-preview-total dd{margin:0}@media(max-width:520px){.checkout-document-preview dl{grid-template-columns:minmax(0,1fr)}}
+.tpv-cash-context { margin-block: .75rem; padding: .75rem; border: 1px solid var(--border); border-radius: 8px; }
+.tpv-cash-context form { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.tpv-cash-context select { max-width: 100%; }

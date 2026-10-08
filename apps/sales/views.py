@@ -48,7 +48,8 @@ from apps.sales.forms import (
     SaleLineCreateForm,
     SaleLineQuantityUpdateForm,
     SaleLineUpdateForm,
-    SaleOpenForm,
+    SaleStartForm,
+    SaleCashSessionForm,
     SaleReturnCancelForm,
     SaleReturnCreateForm,
     SaleReturnFilterForm,
@@ -65,6 +66,7 @@ from apps.sales.checkout import (
 )
 from apps.sales.selectors import (
     get_sale_open_cash_initial,
+    get_sale_cash_sessions,
     get_completed_returned_quantity_for_line,
     get_returnable_sale_lines,
     get_sale_detail,
@@ -88,6 +90,7 @@ from apps.sales.services import (
     delete_sale_return_line,
     open_sale,
     update_sale_header,
+    update_sale_cash_session,
     update_sale_line,
     update_sale_return_line,
 )
@@ -462,6 +465,13 @@ class SaleDetailView(
                 "categories": get_workspace_categories(business=business),
                 "selected_category": category,
                 "query": query,
+                "cash_session_form": SaleCashSessionForm(
+                    sessions=get_sale_cash_sessions(
+                        business=business, store=self.store
+                    ),
+                    initial={"cash_session": sale.cash_session_id},
+                ),
+                "can_sell": can_sell_in_store(request.user, self.store),
                 "header_form": SaleHeaderUpdateForm(
                     business=business,
                     store=self.store,
@@ -554,8 +564,6 @@ class SaleOpenView(
     La venta nace directamente en estado open.
     """
 
-    template_name = "sales/sale_open.html"
-
     def get_locked_cash_session(self, business, store):
         session_id = self.kwargs.get("session_id")
         if session_id is None:
@@ -574,117 +582,59 @@ class SaleOpenView(
 
     def get(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
-        locked_session = self.get_locked_cash_session(business, store)
-        initial = (
-            {
-                "cash_register": locked_session.cash_register,
-                "cash_session": locked_session,
-            }
-            if locked_session
-            else get_sale_open_cash_initial(business=business, store=store)
-        )
-        customer_id = request.GET.get("customer")
-        if customer_id and customer_id.isdigit():
-            from apps.customers.models import Customer
-
-            customer = Customer.objects.filter(
-                pk=customer_id, business=business, is_active=True
-            ).first()
-            if customer is not None:
-                initial["customer"] = customer
-
-        form = SaleOpenForm(
-            business=business,
-            store=store,
-            user=request.user,
-            initial=initial,
-            locked_cash_session=locked_session,
-        )
-
-        return render(
-            request,
-            self.template_name,
-            {
-                "store": store,
-                "form": form,
-                "locked_cash_session": locked_session,
-            },
-        )
+        self.get_locked_cash_session(business, store)
+        return redirect("sales:sale_list", store_id=store.pk)
 
     def post(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
-        locked_session = self.get_locked_cash_session(business, store)
-
-        form = SaleOpenForm(
-            request.POST,
-            business=business,
-            store=store,
-            user=request.user,
-            initial=(
-                {
-                    "cash_register": locked_session.cash_register,
-                    "cash_session": locked_session,
-                }
-                if locked_session
-                else None
-            ),
-            locked_cash_session=locked_session,
+        session = self.get_locked_cash_session(business, store)
+        cash_context = (
+            {"cash_register": session.cash_register, "cash_session": session}
+            if session
+            else get_sale_open_cash_initial(business=business, store=store)
         )
-
+        form = SaleStartForm(request.POST, business=business, cash_context=cash_context)
         if not form.is_valid():
             _add_invalid_form_messages(request, form)
-
-            return render(
-                request,
-                self.template_name,
-                {
-                    "store": store,
-                    "form": form,
-                    "locked_cash_session": locked_session,
-                },
-            )
-
+            return redirect("sales:sale_list", store_id=store.pk)
         try:
             sale = open_sale(
                 business=business,
                 store=store,
                 opened_by=request.user,
-                customer=form.cleaned_data.get("customer"),
-                document_type_requested=(form.cleaned_data["document_type_requested"]),
-                cash_register=(
-                    locked_session.cash_register
-                    if locked_session
-                    else form.cleaned_data.get("cash_register")
-                ),
-                cash_session=(
-                    locked_session
-                    if locked_session
-                    else form.cleaned_data.get("cash_session")
-                ),
+                customer=form.cleaned_data["customer"],
+                **cash_context,
             )
         except ValidationError as error:
-            _add_service_errors_to_form(form, error)
+            _add_validation_error_messages(request, error)
+            return redirect("sales:sale_list", store_id=store.pk)
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
-            return render(
-                request,
-                self.template_name,
-                {
-                    "store": store,
-                    "form": form,
-                    "locked_cash_session": locked_session,
-                },
-            )
 
-        messages.success(
-            request,
-            "Venta abierta correctamente.",
+class SaleCashSessionUpdateView(
+    SaleObjectMixin, CanSellInStoreMixin, BusinessRequiredMixin, View
+):
+    def post(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
+        form = SaleCashSessionForm(
+            request.POST,
+            sessions=get_sale_cash_sessions(business=business, store=store),
         )
-
-        return redirect(
-            "sales:sale_detail",
-            store_id=store.pk,
-            sale_pk=sale.pk,
-        )
+        if form.is_valid():
+            try:
+                update_sale_cash_session(
+                    business=business,
+                    sale=sale,
+                    cash_session=form.cleaned_data["cash_session"],
+                    updated_by=request.user,
+                )
+            except ValidationError as error:
+                _add_validation_error_messages(request, error)
+        else:
+            _add_invalid_form_messages(request, form)
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
 # ==========================================================

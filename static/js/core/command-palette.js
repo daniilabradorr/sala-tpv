@@ -75,7 +75,9 @@ export const initCommandPalette = () => {
       }
     } else if (event.key === "Enter" && highlighted >= 0) {
       event.preventDefault();
-      visibleItems()[highlighted].click();
+      const item = visibleItems()[highlighted];
+      if (item.matches("form")) item.requestSubmit();
+      else item.click();
     }
   });
   dialog.addEventListener("keydown", (event) => {
