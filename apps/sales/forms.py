@@ -441,21 +441,19 @@ class SaleOpenForm(forms.Form):
 class SaleHeaderUpdateForm(forms.Form):
     """Formulario para modificar la cabecera editable."""
 
-    customer_mode = forms.ChoiceField(
-        label="Tipo de venta",
-        choices=(("counter", "Mostrador"), ("customer", "Cliente")),
-        required=False,
-    )
-
     customer = forms.ModelChoiceField(
         label="Cliente",
         required=False,
         queryset=Customer.objects.none(),
+        empty_label="Sin cliente",
     )
 
     document_type_requested = forms.ChoiceField(
         label="Documento solicitado",
-        choices=(RequestedDocumentTypeChoices.choices),
+        choices=(
+            (RequestedDocumentTypeChoices.TICKET, "Ticket"),
+            (RequestedDocumentTypeChoices.INVOICE, "Factura"),
+        ),
     )
 
     def __init__(
@@ -480,33 +478,6 @@ class SaleHeaderUpdateForm(forms.Form):
             "pk",
         )
         wire_field_accessibility(self)
-
-    def clean(self):
-        cleaned_data = super().clean()
-
-        customer_mode = cleaned_data.get("customer_mode")
-        customer = cleaned_data.get("customer")
-        if customer_mode == "counter":
-            customer = None
-            cleaned_data["customer"] = None
-        elif customer_mode == "customer":
-            pass
-        elif "customer_mode" not in self.data:
-            # Preserve the legacy form/HTTP contract outside the workspace.
-            customer_mode = "customer" if customer is not None else "counter"
-            cleaned_data["customer_mode"] = customer_mode
-
-        document_type = cleaned_data.get(
-            "document_type_requested",
-        )
-
-        if document_type == RequestedDocumentTypeChoices.INVOICE and customer is None:
-            self.add_error(
-                "customer",
-                ("Debes seleccionar un cliente cuando se solicita factura."),
-            )
-
-        return cleaned_data
 
 
 # ==========================================================

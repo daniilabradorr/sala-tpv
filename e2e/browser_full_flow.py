@@ -180,18 +180,20 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             session_id,
         )
         if customer:
-            self.page.get_by_role("radio", name="Cliente", exact=True).check()
-            self.page.locator("#id_customer").select_option(label=customer)
-        self.page.get_by_role(
-            "radio",
-            name=(
-                "Factura"
-                if document_type == RequestedDocumentTypeChoices.INVOICE
-                else "Ticket"
-            ),
-            exact=True,
-        ).check()
-        self.page.get_by_role("button", name="Actualizar cabecera").click()
+            with self.page.expect_response(lambda r: "/header/" in r.url):
+                self.page.locator("#id_customer").select_option(label=customer)
+            expect(self.page.locator("#workspace-header.htmx-settling")).to_have_count(
+                0
+            )
+        if document_type == RequestedDocumentTypeChoices.INVOICE:
+            self.page.locator("#workspace-header").evaluate(
+                "el => el.dataset.beforeSave = 'true'"
+            )
+            with self.page.expect_response(lambda r: "/header/" in r.url):
+                self.page.get_by_role("radio", name="Factura", exact=True).check()
+            expect(
+                self.page.locator("#workspace-header[data-before-save]")
+            ).to_have_count(0)
         return self._id_from_url(r"/sales/(\d+)/$")
 
     def _add_product(self, product_name, quantity):

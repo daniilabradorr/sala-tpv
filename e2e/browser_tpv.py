@@ -106,6 +106,249 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
 
+    def _save_header(self, page, change):
+        page.locator("#workspace-header").evaluate(
+            "el => el.dataset.beforeSave = 'true'"
+        )
+        with page.expect_response(
+            lambda r: "/header/" in r.url and r.request.method == "POST"
+        ) as response:
+            change()
+        self.assertEqual(response.value.status, 200)
+        expect(page.locator("#workspace-header[data-before-save]")).to_have_count(0)
+        expect(page.locator("#workspace-header.htmx-settling")).to_have_count(0)
+
+    def test_header_autosave_drafts_quick_customer_and_responsive(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                for viewport in self.viewports:
+                    with self.subTest(viewport=viewport):
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        self._login(page)
+                        self._open_sale(page)
+                        header = page.locator("#workspace-header")
+                        expect(header.locator("option:checked")).to_have_text(
+                            "Sin cliente"
+                        )
+                        expect(
+                            header.get_by_role("radio", name="Ticket", exact=True)
+                        ).to_be_checked()
+                        expect(
+                            header.get_by_text("Mostrador", exact=True)
+                        ).to_have_count(0)
+                        expect(
+                            header.get_by_role("radio", name="Cliente", exact=True)
+                        ).to_have_count(0)
+                        expect(
+                            header.get_by_role("button", name="Guardar", exact=True)
+                        ).to_have_count(0)
+                        sale_url = page.url
+                        page.locator("#product-grid").evaluate(
+                            "el => el.dataset.headerTest = 'unchanged'"
+                        )
+                        page.locator("#sale-cart").evaluate(
+                            "el => el.dataset.headerTest = 'unchanged'"
+                        )
+                        page.locator("#id_customer").focus()
+                        self._save_header(
+                            page,
+                            lambda: page.locator("#id_customer").select_option(
+                                str(self.customer_id)
+                            ),
+                        )
+                        expect(
+                            header.get_by_role("radio", name="Ticket", exact=True)
+                        ).to_be_checked()
+                        expect(
+                            page.locator('#product-grid[data-header-test="unchanged"]')
+                        ).to_have_count(1)
+                        expect(
+                            page.locator('#sale-cart[data-header-test="unchanged"]')
+                        ).to_have_count(1)
+                        expect(page.locator("#id_customer")).to_be_focused()
+                        page.reload()
+                        expect(page.locator("#id_customer")).to_have_value(
+                            str(self.customer_id)
+                        )
+                        expect(
+                            header.get_by_role("radio", name="Ticket", exact=True)
+                        ).to_be_checked()
+                        self._save_header(
+                            page, lambda: page.locator("#id_customer").select_option("")
+                        )
+                        self._save_header(
+                            page,
+                            lambda: header.get_by_role(
+                                "radio", name="Factura", exact=True
+                            ).check(),
+                        )
+                        expect(header.locator(".header-help")).to_be_visible()
+                        expect(header.locator('[role="alert"]')).to_have_count(0)
+                        expect(
+                            header.get_by_role("radio", name="Factura", exact=True)
+                        ).to_be_focused()
+                        page.reload()
+                        expect(
+                            header.get_by_role("radio", name="Factura", exact=True)
+                        ).to_be_checked()
+                        expect(page.locator("#id_customer")).to_have_value("")
+                        page.get_by_role(
+                            "button", name=re.compile("Café especial")
+                        ).click()
+                        for document in ("Factura", "Ticket"):
+                            if document == "Ticket":
+                                self._save_header(
+                                    page,
+                                    lambda: header.get_by_role(
+                                        "radio", name="Ticket", exact=True
+                                    ).check(),
+                                )
+                            header.get_by_role(
+                                "button", name="+ Nuevo cliente", exact=True
+                            ).click()
+                            panel = page.locator("#quick-customer-panel")
+                            expect(panel.locator('input[name="name"]')).to_be_visible()
+                            name = f"Cliente {document} {viewport['width']}"
+                            panel.locator('input[name="name"]').fill(name)
+                            with page.expect_response(
+                                lambda r: (
+                                    "/quick-create/" in r.url
+                                    and r.request.method == "POST"
+                                )
+                            ):
+                                panel.get_by_role(
+                                    "button", name="Crear y seleccionar"
+                                ).click()
+                            expect(
+                                page.locator("#quick-customer-dialog")
+                            ).not_to_be_visible()
+                            expect(header.locator("option:checked")).to_have_text(name)
+                            expect(
+                                header.get_by_role("radio", name=document, exact=True)
+                            ).to_be_checked()
+                            self.assertEqual(page.url, sale_url)
+                        self.assertTrue(
+                            page.evaluate(
+                                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                            )
+                        )
+                        context.close()
+            finally:
+                browser.close()
+
+    def test_rapid_changes_keep_last_server_state_after_older_response(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                self._login(page)
+                self._open_sale(page)
+                requests = []
+
+                def hold_first_response(route):
+                    requests.append(route.request.post_data)
+                    response = route.fetch()
+                    if len(requests) == 1:
+                        # The server saved Ticket, but its response is still held.
+                        # Queue several choices while that first request is in flight.
+                        page.evaluate(
+                            """customer => {
+                            const select = document.querySelector('#id_customer');
+                            select.value = '';
+                            select.dispatchEvent(new Event('change', {bubbles: true}));
+                            select.value = customer;
+                            select.dispatchEvent(new Event('change', {bubbles: true}));
+                            const invoice = document.querySelector('#header-document-invoice');
+                            invoice.checked = true;
+                            invoice.dispatchEvent(new Event('change', {bubbles: true}));
+                        }""",
+                            str(self.customer_id),
+                        )
+                    route.fulfill(response=response)
+
+                page.route("**/header/", hold_first_response)
+                self._save_header(
+                    page,
+                    lambda: page.locator("#id_customer").select_option(
+                        str(self.customer_id)
+                    ),
+                )
+                expect(
+                    page.get_by_role("radio", name="Factura", exact=True)
+                ).to_be_checked()
+                self.assertEqual(len(requests), 2)
+                self.assertIn("document_type_requested=invoice", requests[-1])
+                self.assertIn(f"customer={self.customer_id}", requests[-1])
+                page.reload()
+                expect(page.locator("#id_customer")).to_have_value(
+                    str(self.customer_id)
+                )
+                expect(
+                    page.get_by_role("radio", name="Factura", exact=True)
+                ).to_be_checked()
+            finally:
+                browser.close()
+
+    def test_rejected_header_change_restores_server_values_and_shows_error(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.locator("#workspace-header").evaluate(
+                    "el => el.dataset.beforeSave = 'true'"
+                )
+                with page.expect_response(lambda r: "/header/" in r.url) as response:
+                    page.evaluate("""() => {
+                        const select = document.querySelector('#id_customer');
+                        select.add(new Option('Cliente inexistente', '999999999'));
+                        select.value = '999999999';
+                        select.dispatchEvent(new Event('change', {bubbles: true}));
+                    }""")
+                self.assertEqual(response.value.status, 422)
+                expect(
+                    page.locator("#workspace-header[data-before-save]")
+                ).to_have_count(0)
+                expect(page.locator("#id_customer")).to_have_value("")
+                expect(
+                    page.get_by_role("radio", name="Ticket", exact=True)
+                ).to_be_checked()
+                expect(page.locator('#workspace-header [role="alert"]')).to_be_visible()
+                expect(page.locator("#nx-toast-region .nx-toast--error")).to_have_text(
+                    "No se ha podido guardar la cabecera."
+                )
+                page.reload()
+                expect(page.locator("#id_customer")).to_have_value("")
+            finally:
+                browser.close()
+
+    def test_header_submission_without_javascript(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(java_script_enabled=False)
+            page = context.new_page()
+            try:
+                self._login(page)
+                self._open_sale(page)
+                header = page.locator("#workspace-header")
+                expect(
+                    header.get_by_role("button", name="Guardar", exact=True)
+                ).to_be_visible()
+                header.get_by_role("radio", name="Factura", exact=True).check()
+                header.get_by_role("button", name="Guardar", exact=True).click()
+                expect(
+                    header.get_by_role("radio", name="Factura", exact=True)
+                ).to_be_checked()
+                page.reload()
+                expect(
+                    header.get_by_role("radio", name="Factura", exact=True)
+                ).to_be_checked()
+            finally:
+                browser.close()
+
     def _open_ticket_if_needed(self, page, width):
         if width >= 1200:
             expect(page.locator("#sale-cart")).to_be_visible()
@@ -232,21 +475,31 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         if viewport["width"] < 1200:
                             cart.get_by_role("button", name="Cerrar ticket").click()
 
-                        page.get_by_role("radio", name="Factura", exact=True).check()
-                        page.get_by_role("button", name="Actualizar cabecera").click()
-                        expect(
-                            page.get_by_text("Debes seleccionar un cliente")
-                        ).to_be_visible()
-                        page.get_by_role("radio", name="Cliente", exact=True).check()
-                        page.locator("#id_customer").select_option(
-                            str(self.customer_id)
+                        self._save_header(
+                            page,
+                            lambda: page.get_by_role(
+                                "radio", name="Factura", exact=True
+                            ).check(),
                         )
-                        page.get_by_role("button", name="Actualizar cabecera").click()
+                        expect(page.locator(".header-help")).to_be_visible()
+                        self._save_header(
+                            page,
+                            lambda: page.locator("#id_customer").select_option(
+                                str(self.customer_id)
+                            ),
+                        )
                         expect(page.locator("#id_customer")).to_have_value(
                             str(self.customer_id)
                         )
-                        page.get_by_role("radio", name="Ticket", exact=True).check()
-                        page.get_by_role("button", name="Actualizar cabecera").click()
+                        self._save_header(
+                            page,
+                            lambda: page.get_by_role(
+                                "radio", name="Ticket", exact=True
+                            ).check(),
+                        )
+                        expect(page.locator("#id_customer")).to_have_value(
+                            str(self.customer_id)
+                        )
                         if viewport["width"] < 1200:
                             page.locator('[data-nx-drawer-trigger="sale-cart"]').click()
                         expect(

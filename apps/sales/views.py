@@ -58,6 +58,7 @@ from apps.sales.forms import (
     SaleReturnLineUpdateForm,
     SaleReturnCompleteForm,
 )
+from apps.sales.models import Sale
 from apps.sales.checkout import (
     PaymentIntent,
     checkout_options,
@@ -65,6 +66,7 @@ from apps.sales.checkout import (
     run_checkout,
 )
 from apps.sales.selectors import (
+    get_sale_header,
     get_sale_open_cash_initial,
     get_sale_cash_sessions,
     get_completed_returned_quantity_for_line,
@@ -642,144 +644,109 @@ class SaleCashSessionUpdateView(
 # ==========================================================
 
 
+class SaleHeaderObjectMixin(SaleObjectMixin):
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs[self.sale_kwarg]
+        )
+
+
 class SaleHeaderUpdateView(
-    SaleObjectMixin,
+    SaleHeaderObjectMixin,
     CanSellInStoreMixin,
     BusinessRequiredMixin,
     View,
 ):
-    """
-    Actualiza únicamente los datos editables de la cabecera.
-
-    Campos modificables:
-
-    - customer
-    - document_type_requested
-    """
+    """Persist the two independent draft choices and render only the header."""
 
     template_name = "sales/sale_header_form.html"
 
-    def get(self, request, store_id, sale_pk):
-        business, store = self.get_business_and_store()
-        sale = self.get_sale()
-
-        _ensure_sale_editable(sale)
-
-        form = SaleHeaderUpdateForm(
+    def get_form(self, business, store, sale):
+        return SaleHeaderUpdateForm(
             business=business,
             store=store,
             sale=sale,
             initial={
-                "customer": sale.customer,
-                "document_type_requested": (sale.document_type_requested),
+                "customer": sale.customer_id,
+                "document_type_requested": sale.document_type_requested,
             },
         )
 
+    def get(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
         return render(
             request,
             self.template_name,
             {
                 "store": store,
                 "sale": sale,
-                "form": form,
+                "form": self.get_form(business, store, sale),
             },
         )
 
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
-
         _ensure_sale_editable(sale)
-
         form = SaleHeaderUpdateForm(
-            request.POST,
-            business=business,
-            store=store,
-            sale=sale,
+            request.POST, business=business, store=store, sale=sale
         )
-
-        if not form.is_valid():
-            _add_invalid_form_messages(request, form)
-
-            return render(
-                request,
-                (
-                    "sales/partials/_workspace_header.html"
-                    if request.htmx
-                    else self.template_name
-                ),
-                {
-                    "store": store,
-                    "sale": sale,
-                    "form": form,
-                    "header_form": form,
-                },
-                status=422 if request.htmx else 200,
-            )
-
-        try:
-            sale = update_sale_header(
-                business=business,
-                sale=sale,
-                customer=form.cleaned_data.get("customer"),
-                document_type_requested=(form.cleaned_data["document_type_requested"]),
-                updated_by=request.user,
-            )
-        except ValidationError as error:
-            _add_service_errors_to_form(form, error)
-
-            return render(
-                request,
-                (
-                    "sales/partials/_workspace_header.html"
-                    if request.htmx
-                    else self.template_name
-                ),
-                {
-                    "store": store,
-                    "sale": sale,
-                    "form": form,
-                    "header_form": form,
-                },
-                status=422 if request.htmx else 200,
-            )
+        if form.is_valid():
+            try:
+                update_sale_header(
+                    business=business,
+                    sale=sale,
+                    customer=form.cleaned_data["customer"],
+                    document_type_requested=form.cleaned_data[
+                        "document_type_requested"
+                    ],
+                    updated_by=request.user,
+                )
+            except ValidationError as error:
+                _add_service_errors_to_form(form, error)
 
         if request.htmx:
-            sale = get_sale_detail(business=business, pk=sale.pk)
-            form = SaleHeaderUpdateForm(
-                business=business,
-                store=store,
-                sale=sale,
-                initial={
-                    "customer": sale.customer,
-                    "document_type_requested": sale.document_type_requested,
-                },
-            )
+            # Even on rejection, the controls display persisted values, with the
+            # submitted form used only for accessible error feedback.
+            sale = self.get_sale()
             response = render(
                 request,
                 "sales/partials/_workspace_header.html",
                 {
                     "store": store,
                     "sale": sale,
-                    "header_form": form,
+                    "header_form": self.get_form(business, store, sale),
+                    "header_errors": form.errors,
                 },
+                status=422 if form.errors else 200,
             )
-            return add_hx_trigger(
-                response,
-                {"nx:toast": {"message": "Venta actualizada.", "tone": "success"}},
-            )
+            if form.errors:
+                return add_hx_trigger(
+                    response,
+                    {
+                        "nx:toast": {
+                            "message": "No se ha podido guardar la cabecera.",
+                            "tone": "error",
+                        }
+                    },
+                )
+            return response
 
+        if form.errors:
+            return render(
+                request,
+                self.template_name,
+                {"store": store, "sale": sale, "form": form},
+            )
         messages.success(request, "Cabecera de la venta actualizada correctamente.")
-
-        return redirect(
-            "sales:sale_detail",
-            store_id=store.pk,
-            sale_pk=sale.pk,
-        )
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
 class SaleQuickCustomerCreateView(
-    SaleObjectMixin,
+    SaleHeaderObjectMixin,
     CanSellInStoreMixin,
     BusinessRequiredMixin,
     View,
@@ -810,6 +777,10 @@ class SaleQuickCustomerCreateView(
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    # Preserve the latest persisted document under the same row lock.
+                    sale = Sale.objects.select_for_update().get(
+                        pk=sale.pk, business=business, store=store
+                    )
                     customer, _ = CustomerService.create_customer(
                         business=business,
                         customer_data=form.cleaned_data,
@@ -826,7 +797,11 @@ class SaleQuickCustomerCreateView(
             except ValidationError as error:
                 _add_service_errors_to_form(form, error)
             else:
-                sale = get_sale_detail(business=business, pk=sale.pk)
+                if not request.htmx:
+                    return redirect(
+                        "sales:sale_detail", store_id=store.pk, sale_pk=sale.pk
+                    )
+                sale = self.get_sale()
                 response = render(
                     request,
                     "sales/partials/_workspace_header.html",
