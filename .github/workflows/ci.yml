@@ -141,7 +141,7 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev
 
-      - name: Run Sales locking tests on PostgreSQL
+      - name: Run Sales locking and TPV query regression tests on PostgreSQL
         env:
           DJANGO_SETTINGS_MODULE: config.settings.test
           SECRET_KEY: test-secret-key
@@ -151,6 +151,8 @@ jobs:
         run: >-
           uv run python manage.py test
           apps.sales.tests_postgres_locking
+          tests.performance.test_queries
+          tests.performance.test_metrics
           --verbosity 2
 
   payments-postgres-locking:

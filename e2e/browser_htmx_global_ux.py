@@ -74,10 +74,23 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         main.get_by_role("button", name="Abrir caja").click()
         main.get_by_role("button", name="Nueva venta").click()
         expect(main.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
+        # Prepare one settled interaction at a time. Otherwise the debounced
+        # search can still be pending when the expired-session test clears its
+        # cookie, producing two HX-Redirect navigations that abort each other.
+        page.evaluate(
+            """() => {
+              window.nxPreparedRegions = {};
+              document.addEventListener('htmx:afterSettle', event => {
+                window.nxPreparedRegions[event.detail.target?.id] = true;
+              });
+            }"""
+        )
         main.get_by_label("Buscar producto").fill(self.product.name)
+        page.wait_for_function("window.nxPreparedRegions['product-grid'] === true")
         main.locator("#product-grid").get_by_role(
             "button", name=re.compile(self.product.name)
         ).click()
+        page.wait_for_function("window.nxPreparedRegions['sale-cart-content'] === true")
         expect(main.locator("#sale-cart .cart-line")).to_be_visible()
 
     def test_checkout_processing_422_toast_and_csrf(self):
