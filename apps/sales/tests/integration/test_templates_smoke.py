@@ -136,7 +136,11 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
 
         self.assertEqual(sale_list_response.status_code, 200)
         self.assertEqual(sale_detail_response.status_code, 200)
-        self.assertEqual(sale_open_response.status_code, 200)
+        self.assertRedirects(
+            sale_open_response,
+            reverse("sales:sale_list", args=[self.store.pk]),
+            fetch_redirect_response=False,
+        )
         self.assertEqual(return_list_response.status_code, 200)
         self.assertEqual(return_detail_response.status_code, 200)
 

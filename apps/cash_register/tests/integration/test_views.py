@@ -500,7 +500,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
                 "document_type_requested": RequestedDocumentTypeChoices.TICKET,
             },
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(Sale.objects.exists())
 
     def test_contextual_sale_keeps_session_when_cash_register_not_required(self):

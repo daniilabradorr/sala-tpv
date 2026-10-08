@@ -233,8 +233,43 @@ class SaleFilterForm(forms.Form):
 # ==========================================================
 
 
+class SaleStartForm(forms.Form):
+    """Only explicit customer context is supplied by a start CTA."""
+
+    customer = forms.ModelChoiceField(Customer.objects.none(), required=False)
+
+    def __init__(self, *args, business, cash_context, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cash_context = cash_context
+        self.fields["customer"].queryset = Customer.objects.filter(
+            business=business, is_active=True
+        )
+
+    def clean(self):
+        data = super().clean()
+        # Legacy clients cannot override the server-resolved cash context.
+        for field in ("cash_register", "cash_session"):
+            posted = self.data.get(field)
+            expected = getattr(self.cash_context.get(field), "pk", None)
+            if posted and str(posted) != str(expected):
+                raise ValidationError(
+                    "La caja o sesión no coincide con el contexto de inicio."
+                )
+        return data
+
+
+class SaleCashSessionForm(forms.Form):
+    cash_session = forms.ModelChoiceField(
+        CashSession.objects.none(), label="Sesión de caja"
+    )
+
+    def __init__(self, *args, sessions, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["cash_session"].queryset = sessions
+
+
 class SaleOpenForm(forms.Form):
-    """Formulario para abrir una venta."""
+    """Legacy validation compatibility; start views use SaleStartForm."""
 
     customer = forms.ModelChoiceField(
         label="Cliente",

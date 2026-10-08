@@ -97,14 +97,13 @@ class BrowserTPVTests(StaticLiveServerTestCase):
 
     def _open_sale(self, page):
         page.goto(
-            f"{self.live_server_url}/sales/stores/{self.store_id}/"
-            f"cash-sessions/{self.session_id}/sales/open/"
+            f"{self.live_server_url}/cash-register/stores/{self.store_id}/sessions/{self.session_id}/"
         )
-        expect(page.get_by_role("heading", name="Nueva venta")).to_be_visible()
-        expect(page.get_by_text("Tienda Centro", exact=True).first).to_be_visible()
-        expect(page.get_by_text("Caja principal", exact=True)).to_be_visible()
-        expect(page.get_by_text(f"#{self.session_id}", exact=True)).to_be_visible()
-        page.get_by_role("button", name="Iniciar venta").click()
+        page.locator(".cash-session-header").get_by_role(
+            "button", name="Nueva venta"
+        ).click()
+        expect(page.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
+        expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
 
     def _open_ticket_if_needed(self, page, width):

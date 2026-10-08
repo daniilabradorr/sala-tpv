@@ -145,7 +145,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         expect(
             self.page.locator(".cash-session-header .cash-status--open")
         ).to_contain_text(re.compile("Abierta", re.I))
-        expect(self.page.get_by_role("button", name="Nueva venta")).to_be_visible()
+        expect(
+            self.page.locator(".cash-session-header").get_by_role(
+                "button", name="Nueva venta"
+            )
+        ).to_be_visible()
         expect(self.page.get_by_text("Esperado", exact=True).first).to_be_visible()
         return self._db_value(
             lambda: CashSession.objects.values_list("pk", flat=True).get(
@@ -157,10 +161,24 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
     def _open_sale(self, *, customer, document_type, session_id):
         self.step = f"open {document_type} sale"
         self._goto(f"/cash-register/stores/{self.store.pk}/sessions/{session_id}/")
-        self.page.get_by_role("button", name="Nueva venta").click()
+        self.page.locator(".cash-session-header").get_by_role(
+            "button", name="Nueva venta"
+        ).click()
         expect(
             self.page.get_by_role("heading", name=re.compile(r"Venta #"))
         ).to_be_visible()
+        expect(self.page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
+        expect(self.page.locator("#product-grid")).to_be_visible()
+        self.assertTrue(
+            self.page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            )
+        )
+        sale_id = self._id_from_url(r"/sales/(\d+)/$")
+        self.assertEqual(
+            self._db_value(lambda: Sale.objects.get(pk=sale_id).cash_session_id),
+            session_id,
+        )
         if customer:
             self.page.get_by_role("radio", name="Cliente", exact=True).check()
             self.page.locator("#id_customer").select_option(label=customer)

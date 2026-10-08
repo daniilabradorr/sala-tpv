@@ -9,7 +9,7 @@
     </button>
     {% if shell_capabilities.can_sell %}
         {% for action in shell_quick_actions %}{% if action.id == "new-sale" %}
-            <a class="button button-primary topbar-sale" href="{{ action.url }}">{% include "components/icon.html" with name="plus" %}<span class="sale-label-long">Nueva venta</span><span class="sale-label-short">Venta</span></a>
+            <form method="post" action="{{ action.url }}" data-nx-sale-start>{% csrf_token %}<button type="submit" class="button button-primary topbar-sale">{% include "components/icon.html" with name="plus" %}<span class="sale-label-long">Nueva venta</span><span class="sale-label-short">Venta</span></button></form>
         {% endif %}{% endfor %}
     {% endif %}
     {% include "components/user_menu.html" %}

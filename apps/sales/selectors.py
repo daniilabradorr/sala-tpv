@@ -25,7 +25,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
-from apps.cash_register.models import CashRegister, CashSession
+from apps.cash_register.models import CashSession
 from apps.catalog.models import Category, Product
 from apps.sales.models import (
     PaymentStatusChoices,
@@ -39,33 +39,30 @@ from apps.sales.models import (
 )
 
 
-def get_sale_open_cash_initial(*, business, store):
-    """Return deterministic cash defaults without choosing among alternatives."""
-    active_registers = list(
-        CashRegister.objects.filter(
-            business=business,
-            store=store,
-            is_active=True,
-        ).order_by("pk")[:2]
-    )
-    if len(active_registers) != 1:
-        return {}
-
-    register = active_registers[0]
-    initial = {"cash_register": register}
-    open_sessions = list(
+def get_sale_cash_sessions(*, business, store):
+    """Valid cash pairs for this authorized tenant and Store."""
+    return (
         CashSession.objects.filter(
             business=business,
             store=store,
-            cash_register=register,
+            cash_register__business=business,
+            cash_register__store=store,
             cash_register__is_active=True,
             status=CashSession.Status.OPEN,
             closed_at__isnull=True,
-        ).order_by("pk")[:2]
+        )
+        .select_related("cash_register")
+        .order_by("cash_register__name", "pk")
     )
-    if len(open_sessions) == 1:
-        initial["cash_session"] = open_sessions[0]
-    return initial
+
+
+def get_sale_open_cash_initial(*, business, store):
+    """Choose only a single valid pair, irrespective of unused registers."""
+    sessions = list(get_sale_cash_sessions(business=business, store=store)[:2])
+    if len(sessions) != 1:
+        return {}
+    session = sessions[0]
+    return {"cash_register": session.cash_register, "cash_session": session}
 
 
 def get_sellable_products_for_workspace(*, business, query="", category=None):

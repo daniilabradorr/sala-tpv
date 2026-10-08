@@ -215,7 +215,7 @@ def build_shell_navigation(request, *, active_store):
                 "new-sale",
                 "Nueva venta",
                 "plus",
-                reverse("sales:sale_open", kwargs={"store_id": active_store.pk}),
+                reverse("sales:sale_start", kwargs={"store_id": active_store.pk}),
                 "quick",
                 "venta tpv ticket abrir",
             )

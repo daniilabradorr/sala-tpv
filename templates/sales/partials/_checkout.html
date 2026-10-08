@@ -24,7 +24,7 @@
       </dl>
       {% include "sales/partials/_document_preview.html" %}
       <div class="success-actions">
-        {% if sale.cash_session_id %}<form method="post" action="{% url 'sales:sale_open_for_session' store.pk sale.cash_session_id %}">{% csrf_token %}<input type="hidden" name="document_type_requested" value="ticket"><button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
+        {% if sale.cash_session_id %}<form method="post" action="{% url 'sales:sale_start_for_session' store.pk sale.cash_session_id %}" data-nx-sale-start>{% csrf_token %}<button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
         {% if document.status == 'issued' %}<a class="button button-secondary" href="{% url 'billing:document_print' store.pk document.pk %}?autoprint=1" target="_blank" rel="noopener" hx-boost="false" aria-label="IMPRIMIR (abre una nueva pestaña)">IMPRIMIR</a>{% endif %}
         <div class="success-secondary">
           {% if sale.cash_session_id %}<a href="{% url 'cash_register:session_detail' store.pk sale.cash_session_id %}">Volver a caja</a>{% else %}<a href="{% url 'sales:sale_detail' store.pk sale.pk %}">Volver a venta</a>{% endif %}

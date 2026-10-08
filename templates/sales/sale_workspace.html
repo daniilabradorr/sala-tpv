@@ -12,6 +12,20 @@
     </div>
     {% if sale.cash_session %}<a href="{% url 'cash_register:session_detail' store.pk sale.cash_session.pk %}" class="button button-secondary">Volver a la sesión</a>{% endif %}
   </header>
+  {% if can_sell and not sale.cash_session.is_open %}
+  <section class="tpv-cash-context" aria-label="Caja para el cobro">
+    {% if cash_session_form.fields.cash_session.queryset %}
+    <form method="post" action="{% url 'sales:sale_cash_session_update' store.pk sale.pk %}">
+      {% csrf_token %}{{ cash_session_form.cash_session.label_tag }}{{ cash_session_form.cash_session }}
+      <button type="submit" class="button button-secondary">Usar sesión</button>
+    </form>
+    <p>Selecciona una sesión de caja antes de cobrar. Puedes añadir productos mientras tanto.</p>
+    {% else %}
+    <p>No hay sesiones de caja abiertas. Puedes añadir productos; el cobro necesita una sesión abierta.</p>
+    <a class="button button-secondary" href="{% url 'cash_register:open' store.pk %}">Abrir caja</a>
+    {% endif %}
+  </section>
+  {% endif %}
   {% include "sales/partials/_workspace_header.html" %}
   <div class="tpv-columns">
     <section class="tpv-catalog" aria-labelledby="catalog-title">
