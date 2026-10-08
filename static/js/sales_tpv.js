@@ -32,6 +32,44 @@
     if (revision !== undefined && revision < cartRevision) event.detail.shouldSwap = false;
   });
 
+  // Capture at swap time, not request time: the user can scroll while waiting.
+  // The same shell is replaced by direct quantity/add/delete and editor OOB swaps.
+  let cartScroll = null;
+  function captureCartScroll(status = 200) {
+    const shell = document.querySelector("#sale-cart-content");
+    const region = shell?.querySelector("[data-cart-scroll-region]");
+    cartScroll = region ? { shell, sale: shell.dataset.saleId, top: region.scrollTop, status } : null;
+  }
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    if (event.detail.target?.id === "sale-cart-content" && event.detail.shouldSwap) {
+      captureCartScroll(event.detail.xhr.status);
+    }
+  });
+  document.addEventListener("htmx:oobBeforeSwap", (event) => {
+    if (event.detail.target?.id === "sale-cart-content" && event.detail.shouldSwap) {
+      captureCartScroll();
+    }
+  });
+  function restoreCartScroll() {
+    const saved = cartScroll;
+    const shell = document.querySelector("#sale-cart-content");
+    if (!saved || shell === saved.shell) return;
+    cartScroll = null;
+    const region = shell?.querySelector("[data-cart-scroll-region]");
+    if (!region || shell.dataset.saleId !== saved.sale) return;
+    region.scrollTop = saved.top; // The browser clamps after removal/emptying.
+    const alert = saved.status === 422 && region.querySelector('[role="alert"]');
+    if (alert) {
+      const bounds = region.getBoundingClientRect();
+      const error = alert.getBoundingClientRect();
+      if (error.top < bounds.top || error.bottom > bounds.bottom) {
+        region.scrollTop += error.top - bounds.top;
+      }
+    }
+  }
+  document.addEventListener("htmx:afterSwap", restoreCartScroll);
+  document.addEventListener("htmx:oobAfterSwap", restoreCartScroll);
+
   function saveQuantity(input) {
     const form = input.closest("form");
     // A swap can blur the old input and fire change after Enter already saved it.
