@@ -66,6 +66,8 @@ from apps.sales.checkout import (
     run_checkout,
 )
 from apps.sales.selectors import (
+    get_sale_cart,
+    get_sale_cart_line,
     get_sale_header,
     get_sale_open_cash_initial,
     get_sale_cash_sessions,
@@ -207,7 +209,7 @@ def _ensure_sale_editable(sale):
 
 
 def _workspace_cart_response(request, *, business, store, sale, form=None):
-    sale = get_sale_detail(business=business, pk=sale.pk)
+    sale = get_sale_cart(business=business, store=store, pk=sale.pk)
     pos_settings = POSSettings.objects.filter(business=business).first()
     return render(
         request,
@@ -973,8 +975,14 @@ class SaleLineUpdateView(
 
     template_name = "sales/sale_line_form.html"
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def get_line(self, *, business, sale):
-        return get_sale_line_detail(
+        return get_sale_cart_line(
             business=business,
             pk=self.kwargs["line_pk"],
             sale=sale,
@@ -996,6 +1004,7 @@ class SaleLineUpdateView(
             sale=sale,
             line=line,
             user=request.user,
+            mode=request.GET.get("mode", ""),
             initial={
                 "quantity": line.quantity,
                 "unit_base_price": line.unit_base_price,
@@ -1034,6 +1043,7 @@ class SaleLineUpdateView(
             sale=sale,
             line=line,
             user=request.user,
+            mode=request.GET.get("mode", ""),
         )
 
         if not form.is_valid():
@@ -1060,8 +1070,16 @@ class SaleLineUpdateView(
                 sale=sale,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
-                unit_base_price=form.cleaned_data.get("unit_base_price"),
-                discount_amount=form.cleaned_data.get("discount_amount"),
+                unit_base_price=(
+                    form.cleaned_data.get("unit_base_price")
+                    if form.mode != "discount"
+                    else None
+                ),
+                discount_amount=(
+                    form.cleaned_data.get("discount_amount")
+                    if form.mode != "price"
+                    else None
+                ),
                 user=request.user,
             )
         except ValidationError as error:
@@ -1083,7 +1101,7 @@ class SaleLineUpdateView(
             )
 
         if request.htmx:
-            sale = get_sale_detail(business=business, pk=sale.pk)
+            sale = get_sale_cart(business=business, store=store, pk=sale.pk)
             pos_settings = POSSettings.objects.filter(business=business).first()
             response = render(
                 request,
@@ -1183,11 +1201,17 @@ class SaleLineQuantityUpdateView(
 
     http_method_names = ["post"]
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def post(self, request, store_id, sale_pk, line_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
         _ensure_sale_editable(sale)
-        line = get_sale_line_detail(business=business, pk=line_pk, sale=sale)
+        line = get_sale_cart_line(business=business, pk=line_pk, sale=sale)
         form = SaleLineQuantityUpdateForm(request.POST)
 
         if form.is_valid():
@@ -1197,8 +1221,6 @@ class SaleLineQuantityUpdateView(
                     sale=sale,
                     line=line,
                     quantity=form.cleaned_data["quantity"],
-                    unit_base_price=line.unit_base_price,
-                    discount_amount=line.discount_amount,
                     user=request.user,
                 )
             except ValidationError as error:

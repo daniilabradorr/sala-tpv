@@ -707,9 +707,19 @@ class SaleLineUpdateForm(BaseSaleLineForm):
         sale,
         line,
         user,
+        mode="",
         **kwargs,
     ):
         self.line = line
+        self.mode = mode if mode in {"price", "discount"} else ""
+        kwargs.setdefault(
+            "initial",
+            {
+                "quantity": line.quantity,
+                "unit_base_price": line.unit_base_price,
+                "discount_amount": line.discount_amount,
+            },
+        )
 
         super().__init__(
             *args,
@@ -729,7 +739,47 @@ class SaleLineUpdateForm(BaseSaleLineForm):
 
         if self.pos_settings and not self.pos_settings.allow_manual_discounts:
             self.fields.pop("discount_amount")
+        elif "discount_amount" in self.fields:
+            field = self.fields["discount_amount"]
+            field.label = "Descuento (€)"
+            field.help_text = (
+                (
+                    f"Importe total de la línea. Máximo permitido: "
+                    f"{self.pos_settings.max_manual_discount_percent} %. "
+                    "Introduce 0 para quitar el descuento."
+                )
+                if self.pos_settings
+                else "Introduce 0 para quitar el descuento."
+            )
+
+        if self.mode:
+            editable = (
+                "discount_amount" if self.mode == "discount" else "unit_base_price"
+            )
+            for name, field in self.fields.items():
+                if name != editable:
+                    field.disabled = True
+                    field.widget = forms.HiddenInput()
+                else:
+                    field.widget.attrs["autofocus"] = True
         wire_field_accessibility(self)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.pos_settings and not self.pos_settings.allow_manual_discounts:
+            raw_discount = self.data.get("discount_amount")
+            if raw_discount not in (None, ""):
+                try:
+                    discount = forms.DecimalField().clean(raw_discount)
+                except ValidationError:
+                    self.add_error(None, "El descuento indicado no es válido.")
+                else:
+                    if discount > 0:
+                        self.add_error(
+                            None,
+                            "La configuración del negocio no permite descuentos manuales.",
+                        )
+        return cleaned_data
 
     def get_reference_price(
         self,
