@@ -6,6 +6,19 @@
   let cartRevision = 0;
   const cartRequests = new WeakMap();
   document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (form.matches(".quantity-form")) {
+      const input = form.querySelector('[name="quantity"]');
+      if (!form.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // Swapped forms are visible before HTMX's settle task initializes them.
+      // Install the form's submit listener before this event reaches its target.
+      htmx.process(form);
+      form.dataset.quantitySubmitted = input.value;
+    }
     if (event.target.matches('#sale-cart form, .line-editor form, .product-grid form')) {
       event.cartRevision = ++cartRevision;
     }
@@ -24,25 +37,18 @@
     // A swap can blur the old input and fire change after Enter already saved it.
     // Never submit a form whose HTMX listeners are being removed.
     if (!form?.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) return;
-    form.dataset.quantitySubmitted = input.value;
     form.requestSubmit();
   }
   document.addEventListener("htmx:beforeCleanupElement", (event) => {
     if (event.detail.elt.matches?.(".quantity-form")) event.detail.elt.dataset.quantityRemoving = "true";
   });
   document.addEventListener("htmx:afterRequest", (event) => {
-    if (event.detail.xhr.status === 0 || event.detail.xhr.status >= 500) {
+    if (event.detail.elt.matches?.(".quantity-form") && (event.detail.xhr.status === 0 || event.detail.xhr.status >= 500)) {
       delete event.detail.elt.dataset.quantitySubmitted;
     }
   });
   document.addEventListener("change", (event) => {
     if (event.target.matches('.quantity-form [name="quantity"]')) saveQuantity(event.target);
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && event.target.matches('.quantity-form [name="quantity"]')) {
-      event.preventDefault();
-      saveQuantity(event.target);
-    }
   });
 
   // The sync owner (.tpv) survives header swaps. Keep the submitting form

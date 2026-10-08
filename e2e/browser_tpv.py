@@ -105,6 +105,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         expect(page.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
         expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
+        page.wait_for_load_state("load")
 
     def _save_header(self, page, change):
         page.locator("#workspace-header").evaluate(
@@ -451,16 +452,45 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         expect(page.locator("#sale-cart [data-nx-drawer-close]")).to_be_focused()
 
     def _save_quantity(self, page, action, expected, status=200):
+        requests = []
+        navigations = []
+
+        def record_request(request):
+            if "/quantity/" in request.url and request.method == "POST":
+                requests.append(request)
+
+        def record_navigation(frame):
+            if frame == page.main_frame:
+                navigations.append(frame.url)
+
+        page.on("request", record_request)
+        page.on("framenavigated", record_navigation)
         page.locator("#sale-cart-content").evaluate(
             "el => el.dataset.beforeSave = 'true'"
         )
-        with page.expect_response(
-            lambda r: "/quantity/" in r.url and r.request.method == "POST"
-        ) as response:
-            action()
-        self.assertEqual(response.value.status, status)
-        expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(0)
-        expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(expected)
+        try:
+            with page.expect_response(
+                lambda r: (
+                    "/quantity/" in r.url
+                    and r.request.method == "POST"
+                    and r.request.headers.get("hx-request") == "true"
+                )
+            ) as response:
+                action()
+            self.assertEqual(response.value.status, status)
+            expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(
+                0
+            )
+            expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                expected
+            )
+            expect(page.locator("#sale-cart-content.htmx-settling")).to_have_count(0)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].headers.get("hx-request"), "true")
+            self.assertEqual(navigations, [])
+        finally:
+            page.remove_listener("request", record_request)
+            page.remove_listener("framenavigated", record_navigation)
 
     def test_quantity_autosave_fractions_bounds_and_reload(self):
         with sync_playwright() as playwright:
@@ -778,6 +808,9 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
                         expect(cart.get_by_label("Cantidad")).to_have_value("2")
+                        # Expose the interval where swapped forms are visible but
+                        # HTMX has not yet run its deferred processing task.
+                        page.evaluate("htmx.config.defaultSettleDelay = 1000")
                         with page.expect_response(
                             lambda response: (
                                 "/quantity/" in response.url
@@ -789,14 +822,17 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
                         expect(cart.get_by_label("Cantidad")).to_have_value("1")
+                        cart.evaluate("el => window.quantityDrawer = el")
                         cart.get_by_label("Cantidad").fill("1.500")
-                        with page.expect_response(
-                            lambda response: (
-                                "/quantity/" in response.url
-                                and response.request.method == "POST"
-                            )
-                        ):
-                            cart.get_by_label("Cantidad").press("Enter")
+                        self._save_quantity(
+                            page,
+                            lambda: cart.get_by_label("Cantidad").press("Enter"),
+                            "1.5",
+                        )
+                        self.assertTrue(
+                            cart.evaluate("el => el === window.quantityDrawer")
+                        )
+                        page.evaluate("htmx.config.defaultSettleDelay = 20")
                         if viewport["width"] < 1200:
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
