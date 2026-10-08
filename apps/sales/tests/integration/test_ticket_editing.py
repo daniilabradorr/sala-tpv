@@ -167,7 +167,10 @@ class TicketEditingTests(TestCase):
         self.assertContains(response, "autofocus")
         form = response.context["form"]
         self.assertEqual([f.name for f in form.visible_fields()], ["discount_amount"])
-        self.assertContains(response, "Máximo permitido: 20.00 %")
+        self.assertContains(
+            response,
+            "Importe total del descuento de la línea. Máximo permitido: 20 %.",
+        )
         sql = " ".join(q["sql"] for q in queries.captured_queries)
         for table in (
             '"catalog_product"',

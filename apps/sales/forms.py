@@ -19,6 +19,7 @@ from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
 from apps.core.forms import wire_field_accessibility
+from apps.core.quantities import quantity
 from apps.billing.models import BillingSeries
 from apps.payments.models import PaymentMethod
 from apps.sales.models import (
@@ -744,8 +745,8 @@ class SaleLineUpdateForm(BaseSaleLineForm):
             field.label = "Descuento (€)"
             field.help_text = (
                 (
-                    f"Importe total de la línea. Máximo permitido: "
-                    f"{self.pos_settings.max_manual_discount_percent} %. "
+                    "Importe total del descuento de la línea. Máximo permitido: "
+                    f"{quantity(self.pos_settings.max_manual_discount_percent)} %. "
                     "Introduce 0 para quitar el descuento."
                 )
                 if self.pos_settings
