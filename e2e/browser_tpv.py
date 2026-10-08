@@ -11,6 +11,8 @@ from apps.cash_register.models import CashSession
 from apps.catalog.models import Category
 from apps.onboarding.services import OnboardingService
 from apps.sales.tests.factories import (
+    create_sale,
+    create_sale_line,
     create_sales_customer,
     create_sales_inventory_item,
     create_sales_product,
@@ -909,3 +911,271 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         context.close()
             finally:
                 browser.close()
+
+    def test_long_ticket_fixed_footer_scroll_and_mutations(self):
+        # Twenty real products/lines trigger overflow without artificial CSS heights.
+        products = [
+            create_sales_product(
+                business=self.result.business,
+                name=f"Producto largo {index:02d}",
+                base_price=Decimal("10.00"),
+                track_stock=False,
+            )
+            for index in range(20)
+        ]
+        scenarios = []
+        for viewport in (*self.viewports, {"width": 375, "height": 568}):
+            sale = create_sale(
+                business=self.result.business,
+                store=self.result.store,
+                opened_by=self.result.owner,
+                cash_register=self.result.cash_register,
+                cash_session=self.session,
+            )
+            for product in products:
+                create_sale_line(
+                    business=self.result.business, sale=sale, product=product
+                )
+            scenarios.append((viewport, sale.pk))
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                for viewport, sale_id in scenarios:
+                    with self.subTest(viewport=viewport):
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        self._login(page)
+                        page.goto(
+                            f"{self.live_server_url}/sales/stores/{self.store_id}/sales/{sale_id}/"
+                        )
+                        page.wait_for_load_state("load")
+                        self._open_ticket_if_needed(page, viewport["width"])
+                        cart = page.locator("#sale-cart")
+                        region = cart.locator("[data-cart-scroll-region]")
+                        heading = cart.locator(".cart-heading")
+                        footer = cart.locator("footer")
+                        checkout = footer.get_by_role(
+                            "link", name=re.compile("^COBRAR")
+                        )
+                        expect(cart.locator(".cart-line")).to_have_count(20)
+                        self.assertTrue(
+                            region.evaluate("el => el.scrollHeight > el.clientHeight")
+                        )
+                        self.assertTrue(
+                            cart.evaluate(
+                                "el => el.scrollHeight <= el.clientHeight + 1"
+                            ),
+                            cart.evaluate(
+                                "el => [el, el.firstElementChild].map(e => ({h:e.clientHeight, sh:e.scrollHeight, css:getComputedStyle(e).height, p:getComputedStyle(e).padding, b:e.getBoundingClientRect().toJSON()}))"
+                            ),
+                        )
+                        self.assertEqual(
+                            cart.evaluate("el => getComputedStyle(el).overflowY"),
+                            "hidden",
+                        )
+                        expect(heading).to_be_in_viewport(ratio=1)
+                        expect(checkout).to_be_in_viewport(ratio=1)
+                        expect(
+                            footer.get_by_role("link", name="Cancelar venta")
+                        ).to_be_in_viewport(ratio=1)
+                        initial_heading = heading.bounding_box()
+                        initial_footer = footer.bounding_box()
+                        page_y = page.evaluate("window.scrollY")
+                        region.evaluate("el => el.scrollTop = el.scrollHeight")
+                        # A whole line can exceed the remaining space on a small
+                        # phone; its final actions must still be fully reachable.
+                        expect(cart.locator(".cart-line").last).to_be_in_viewport(
+                            ratio=0.95
+                        )
+                        expect(
+                            cart.locator(".cart-line").last.locator(".line-actions")
+                        ).to_be_in_viewport(ratio=1)
+                        for locator, initial in (
+                            (heading, initial_heading),
+                            (footer, initial_footer),
+                        ):
+                            self.assertAlmostEqual(
+                                locator.bounding_box()["y"], initial["y"], delta=1
+                            )
+                        expect(checkout).to_be_in_viewport(ratio=1)
+                        self.assertEqual(page.evaluate("window.scrollY"), page_y)
+
+                        line = cart.locator(".cart-line", has_text="Producto largo 12")
+                        line.locator(
+                            "[data-quantity-step='1']"
+                        ).scroll_into_view_if_needed()
+                        before = region.evaluate("el => el.scrollTop")
+                        self._save_long_ticket_quantity(page, line, "2", step=True)
+                        self.assertAlmostEqual(
+                            region.evaluate("el => el.scrollTop"), before, delta=4
+                        )
+                        if viewport["width"] < 1200:
+                            expect(cart).to_have_attribute("open", "")
+                        line.get_by_label("Cantidad").fill("2.5")
+                        self._save_long_ticket_quantity(page, line, "2.5")
+                        self.assertAlmostEqual(
+                            region.evaluate("el => el.scrollTop"), before, delta=4
+                        )
+                        expect(checkout).to_be_in_viewport(ratio=1)
+
+                        line.get_by_role("link", name="Descuento", exact=True).click()
+                        editor = page.locator("#line-editor-dialog")
+                        expect(editor).to_have_attribute("open", "")
+                        discount = editor.get_by_label("Descuento (€)")
+                        expect(discount).to_be_focused()
+                        discount.fill("1.00")
+                        before = region.evaluate("el => el.scrollTop")
+                        editor.get_by_role("button", name="Guardar cambios").click()
+                        expect(editor).not_to_be_visible()
+                        expect(line.get_by_text("Descuento: −1,00 €")).to_be_visible()
+                        self.assertAlmostEqual(
+                            region.evaluate("el => el.scrollTop"), before, delta=4
+                        )
+                        expect(
+                            footer.locator("dt", has_text="Descuento")
+                        ).to_be_in_viewport(ratio=1)
+                        expect(checkout).to_be_in_viewport(ratio=1)
+                        line.get_by_role("link", name="Editar precio").click()
+                        expect(editor).to_have_attribute("open", "")
+                        expect(
+                            editor.get_by_label("Precio unitario sin IVA")
+                        ).to_be_visible()
+                        # close is dispatched in a later browser task. Wait for
+                        # its focus restoration before editing another field.
+                        editor.evaluate("""el => {
+                            el.dataset.closed = 'false';
+                            el.addEventListener('close', () => el.dataset.closed = 'true', {once: true});
+                        }""")
+                        editor.get_by_role("button", name="Cerrar editor").click()
+                        expect(editor).to_have_attribute("data-closed", "true")
+                        expect(
+                            line.get_by_role("link", name="Editar precio")
+                        ).to_be_focused()
+                        expect(
+                            page.locator("#sale-cart-content.htmx-settling")
+                        ).to_have_count(0)
+                        expect(
+                            page.locator(".quantity-form.htmx-request")
+                        ).to_have_count(0)
+
+                        # A 422 from an intermediate line must reveal the top alert,
+                        # while retaining the drawer, footer and authoritative value.
+                        line.get_by_label("Cantidad").fill("0")
+                        self._save_long_ticket_quantity(page, line, "2.5", status=422)
+                        expect(region.locator("[role=alert]")).to_be_in_viewport(
+                            ratio=1
+                        )
+                        expect(checkout).to_be_in_viewport(ratio=1)
+                        checkout.click()
+                        checkout_dialog = page.locator("#checkout-dialog")
+                        expect(checkout_dialog).to_have_attribute("open", "")
+                        expect(
+                            checkout_dialog.locator("#checkout-title")
+                        ).to_be_visible()
+                        page.keyboard.press("Escape")
+                        expect(checkout_dialog).not_to_be_visible()
+
+                        # Add/delete also replace the same shell. Exercise them at
+                        # desktop's current scroll position; mobile drawer stays modal.
+                        if viewport["width"] >= 1200:
+                            line.get_by_label("Cantidad").scroll_into_view_if_needed()
+                            before = region.evaluate("el => el.scrollTop")
+                            line.get_by_role("button", name="Eliminar").click()
+                            expect(cart.locator(".cart-line")).to_have_count(19)
+                            self.assertAlmostEqual(
+                                region.evaluate("el => el.scrollTop"), before, delta=4
+                            )
+                            page.get_by_role(
+                                "button", name=re.compile("Café especial")
+                            ).click()
+                            expect(cart.locator(".cart-line")).to_have_count(20)
+                            self.assertAlmostEqual(
+                                region.evaluate("el => el.scrollTop"), before, delta=4
+                            )
+                            # The catalog page can scroll independently; the sticky
+                            # ticket remains under the global topbar, CTA in viewport.
+                            page.evaluate(
+                                "window.scrollTo(0, document.body.scrollHeight)"
+                            )
+                            expect(checkout).to_be_in_viewport(ratio=1)
+                            expect(heading).to_be_in_viewport(ratio=1)
+                            self.assertGreaterEqual(
+                                heading.bounding_box()["y"],
+                                page.locator(".topbar").bounding_box()["height"],
+                            )
+                            self._scroll_ticket_with_keyboard(page, region, checkout)
+                        else:
+                            trigger = page.locator(
+                                '[data-nx-drawer-trigger="sale-cart"]'
+                            )
+                            cart.get_by_role("button", name="Cerrar ticket").click()
+                            expect(cart).not_to_be_visible()
+                            expect(trigger).to_be_focused()
+                            trigger.click()
+                            expect(cart).to_have_attribute("open", "")
+                            expect(checkout).to_be_in_viewport(ratio=1)
+                            self._scroll_ticket_with_keyboard(page, region, checkout)
+                            page.keyboard.press("Escape")
+                            expect(cart).not_to_be_visible()
+                            expect(trigger).to_be_focused()
+                        self.assertTrue(
+                            page.evaluate(
+                                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                            )
+                        )
+                        self.assertEqual(errors, [])
+                        context.close()
+            finally:
+                browser.close()
+
+    def _scroll_ticket_with_keyboard(self, page, region, checkout):
+        region.evaluate("el => el.scrollTop = 0")
+        region.focus()
+        region.press("PageDown")
+        page.wait_for_function(
+            "document.querySelector('[data-cart-scroll-region]').scrollTop > 0"
+        )
+        expect(checkout).to_be_in_viewport(ratio=1)
+
+    def _save_long_ticket_quantity(
+        self, page, line, expected, *, step=False, status=200
+    ):
+        requests = []
+        navigations = []
+
+        def record(request):
+            if "/quantity/" in request.url and request.method == "POST":
+                requests.append(request)
+
+        def navigation(frame):
+            if frame == page.main_frame:
+                navigations.append(frame.url)
+
+        page.on("request", record)
+        page.on("framenavigated", navigation)
+        page.locator("#sale-cart-content").evaluate(
+            "el => el.dataset.beforeSave = 'true'"
+        )
+        try:
+            with page.expect_response(
+                lambda r: "/quantity/" in r.url and r.request.method == "POST"
+            ) as response:
+                if step:
+                    line.locator("[data-quantity-step='1']").click()
+                else:
+                    line.get_by_label("Cantidad").press("Enter")
+            self.assertEqual(response.value.status, status)
+            expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(
+                0
+            )
+            expect(line.get_by_label("Cantidad")).to_have_value(expected)
+            expect(page.locator("#sale-cart-content.htmx-settling")).to_have_count(0)
+            self.assertEqual(len(requests), 1, [r.post_data for r in requests])
+            self.assertEqual(requests[0].headers.get("hx-request"), "true")
+            self.assertEqual(navigations, [])
+        finally:
+            page.remove_listener("request", record)
+            page.remove_listener("framenavigated", navigation)
