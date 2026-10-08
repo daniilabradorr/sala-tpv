@@ -79,6 +79,18 @@ class SaleModelTests(TestCase):
             document_type_requested="invoice",
         )
         self.assertIsNone(sale.customer_id)
+        for status in (
+            SaleStatusChoices.DRAFT,
+            SaleStatusChoices.OPEN,
+            SaleStatusChoices.CANCELLED,
+        ):
+            with self.subTest(status=status):
+                sale.status = status
+                sale.full_clean()
+                sale.save()
+                sale.refresh_from_db()
+                self.assertEqual(sale.status, status)
+                self.assertIsNone(sale.customer_id)
         for status in (SaleStatusChoices.COMPLETED, SaleStatusChoices.RETURNED):
             sale.status = status
             with (
@@ -87,11 +99,6 @@ class SaleModelTests(TestCase):
             ):
                 sale.full_clean()
             self.assertIn("customer", error.exception.message_dict)
-        sale.status = SaleStatusChoices.CANCELLED
-        sale.save()
-        sale.refresh_from_db()
-        self.assertEqual(sale.status, SaleStatusChoices.CANCELLED)
-        self.assertIsNone(sale.customer_id)
 
     def test_sale_line_keeps_historical_snapshot_after_product_changes(self):
         sale = create_sale(

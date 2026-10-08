@@ -238,6 +238,97 @@ class BrowserTPVTests(StaticLiveServerTestCase):
             finally:
                 browser.close()
 
+    def test_reopening_quick_customer_waits_for_new_form_with_slow_get(self):
+        """A second GET must never leave the previous form editable underneath it."""
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                for viewport in self.viewports:
+                    with self.subTest(viewport=viewport):
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        self._login(page)
+                        self._open_sale(page)
+                        sale_url = page.url
+                        held = {}
+                        requests = []
+
+                        def hold_second_get(route):
+                            requests.append(route.request.method)
+                            if (
+                                route.request.method == "GET"
+                                and requests.count("GET") == 2
+                            ):
+                                held["route"] = route
+                                held["response"] = route.fetch()
+                                page.evaluate("window.quickCustomerGetHeld = true")
+                            else:
+                                route.continue_()
+
+                        page.route("**/quick-create/", hold_second_get)
+                        panel = page.locator("#quick-customer-panel")
+                        for index, document in enumerate(
+                            ("Factura", "Ticket", "Factura")
+                        ):
+                            self._save_header(
+                                page,
+                                lambda: page.get_by_role(
+                                    "radio", name=document, exact=True
+                                ).check(),
+                            )
+                            page.get_by_role(
+                                "button", name="+ Nuevo cliente", exact=True
+                            ).click()
+                            if index == 1:
+                                page.wait_for_function(
+                                    "window.quickCustomerGetHeld === true"
+                                )
+                                expect(panel.locator("form")).to_have_count(0)
+                                expect(panel.get_by_role("status")).to_have_text(
+                                    "Cargando formulario de cliente…"
+                                )
+                                held["route"].fulfill(response=held["response"])
+                            expect(panel.locator('input[name="name"]')).to_be_visible()
+                            expect(panel.locator('input[name="name"]')).to_have_value(
+                                ""
+                            )
+                            name = f"Cliente lento {viewport['width']} {index}"
+                            panel.locator('input[name="name"]').fill(name)
+                            with page.expect_response(
+                                lambda r: (
+                                    "/quick-create/" in r.url
+                                    and r.request.method == "POST"
+                                )
+                            ) as response:
+                                panel.get_by_role(
+                                    "button", name="Crear y seleccionar"
+                                ).click()
+                            self.assertEqual(response.value.status, 200)
+                            expect(
+                                page.locator("#quick-customer-dialog")
+                            ).not_to_be_visible()
+                            expect(
+                                page.locator("#workspace-header option:checked")
+                            ).to_have_text(name)
+                            expect(
+                                page.get_by_role("radio", name=document, exact=True)
+                            ).to_be_checked()
+                            expect(
+                                page.locator("#workspace-header.htmx-settling")
+                            ).to_have_count(0)
+                            self.assertEqual(page.url, sale_url)
+                        self.assertEqual(requests.count("POST"), 3)
+                        page.reload()
+                        expect(
+                            page.locator("#workspace-header option:checked")
+                        ).to_have_text(name)
+                        expect(
+                            page.get_by_role("radio", name="Factura", exact=True)
+                        ).to_be_checked()
+                        context.close()
+            finally:
+                browser.close()
+
     def test_rapid_changes_keep_last_server_state_after_older_response(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)

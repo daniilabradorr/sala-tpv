@@ -381,7 +381,12 @@ class Sale(TimeStampedModel):
         if (
             self.document_type_requested == RequestedDocumentTypeChoices.INVOICE
             and not self.customer_id
-            and self.status not in {SaleStatusChoices.OPEN, SaleStatusChoices.CANCELLED}
+            and self.status
+            not in {
+                SaleStatusChoices.DRAFT,
+                SaleStatusChoices.OPEN,
+                SaleStatusChoices.CANCELLED,
+            }
         ):
             errors["customer"] = (
                 "Una venta que solicita factura debe tener un cliente asociado."

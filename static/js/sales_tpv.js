@@ -11,6 +11,16 @@
   }, true);
   document.addEventListener("htmx:beforeRequest", (event) => {
     const form = event.detail.elt;
+    if (form?.id === "quick-customer-trigger") {
+      // Reopening must not expose the previous form while its replacement GET
+      // is in flight: edits/submits on that form would be lost on the swap.
+      const panel = event.detail.target;
+      const loading = document.createElement("p");
+      loading.id = "quick-customer-title";
+      loading.setAttribute("role", "status");
+      loading.textContent = "Cargando formulario de cliente…";
+      panel.replaceChildren(loading);
+    }
     if (form?.matches("[data-header-autosave]")) {
       headerRequests.set(event.detail.xhr, { form, revision: headerRevisions.get(form) || 0 });
     }
