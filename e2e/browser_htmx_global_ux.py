@@ -94,10 +94,13 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
             )
             try:
                 self._open_sale_with_product(page)
-                page.get_by_role("button", name="Actualizar cabecera").click()
-                expect(page.locator("#nx-toast-region .nx-toast")).to_have_text(
-                    "Venta actualizada."
-                )
+                with page.expect_response(lambda r: "/header/" in r.url):
+                    page.get_by_role("radio", name="Factura", exact=True).check()
+                expect(page.locator(".header-help")).to_be_visible()
+                expect(page.locator("#nx-toast-region .nx-toast")).to_have_count(0)
+                with page.expect_response(lambda r: "/header/" in r.url):
+                    page.get_by_role("radio", name="Ticket", exact=True).check()
+                expect(page.locator(".header-help")).to_have_count(0)
 
                 trigger = page.get_by_role("link", name=re.compile(r"^COBRAR"))
                 trigger.click()

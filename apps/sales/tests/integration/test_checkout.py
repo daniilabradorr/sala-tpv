@@ -21,6 +21,7 @@ from apps.sales.checkout import (
     checkout_state,
     run_checkout,
 )
+from apps.sales.services import complete_sale, update_sale_header
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -154,6 +155,57 @@ class CheckoutIntegrationTests(TestCase):
         self.assertEqual(sale.status, SaleStatusChoices.OPEN)
         self.assertFalse(Payment.objects.filter(sale=sale).exists())
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
+
+    def test_invoice_draft_without_customer_cannot_complete_or_checkout(self):
+        sale = self.sale()
+        update_sale_header(
+            business=self.business,
+            sale=sale,
+            customer=None,
+            document_type_requested="invoice",
+            updated_by=self.user,
+        )
+        sale.refresh_from_db()
+        self.assertEqual(sale.document_type_requested, "invoice")
+        self.assertTrue(sale.lines.exists())
+        with self.assertRaisesMessage(ValidationError, "necesita cliente"):
+            complete_sale(business=self.business, sale=sale, closed_by=self.user)
+        with self.assertRaisesMessage(ValidationError, "requiere un cliente"):
+            self._run_checkout(sale, [self.intent()], self.series("F1"))
+        self.assert_pristine(sale)
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(BillingDocument.objects.count(), 0)
+
+    def test_invoice_with_incomplete_customer_cannot_complete_or_checkout(self):
+        incomplete = create_sales_customer(
+            business=self.business, legal_name="", tax_identifier=""
+        )
+        sale = self.sale()
+        update_sale_header(
+            business=self.business,
+            sale=sale,
+            customer=incomplete,
+            document_type_requested="invoice",
+            updated_by=self.user,
+        )
+        sale.refresh_from_db()
+        self.assertFalse(incomplete.has_complete_fiscal_identity)
+        with self.assertRaisesMessage(ValidationError, "identidad fiscal completa"):
+            complete_sale(business=self.business, sale=sale, closed_by=self.user)
+        with self.assertRaisesMessage(ValidationError, "identidad fiscal completa"):
+            self._run_checkout(sale, [self.intent()], self.series("F1"))
+        self.assert_pristine(sale)
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(BillingDocument.objects.count(), 0)
+
+    def test_ticket_with_customer_still_issues_f2(self):
+        sale = self.sale(customer=self.customer)
+        state = self._run_checkout(sale, [self.intent()], self.series("F2"))
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["document"].document_type, "F2")
+        sale.refresh_from_db()
+        self.assertEqual(sale.customer, self.customer)
+        self.assertEqual(sale.document_type_requested, "ticket")
 
     def test_preflight_rejects_missing_lines_none_and_invoice_without_customer(self):
         valid_series = self.series()

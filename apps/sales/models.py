@@ -376,9 +376,17 @@ class Sale(TimeStampedModel):
                     "Una venta completada debe tener fecha de finalización."
                 )
 
+        # An unfinished invoice can be prepared or abandoned without a customer.
+        # Finalised sales retain the mandatory recipient invariant.
         if (
             self.document_type_requested == RequestedDocumentTypeChoices.INVOICE
             and not self.customer_id
+            and self.status
+            not in {
+                SaleStatusChoices.DRAFT,
+                SaleStatusChoices.OPEN,
+                SaleStatusChoices.CANCELLED,
+            }
         ):
             errors["customer"] = (
                 "Una venta que solicita factura debe tener un cliente asociado."

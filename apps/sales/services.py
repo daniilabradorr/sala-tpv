@@ -228,6 +228,7 @@ def _validate_customer(
     business,
     customer,
     document_type_requested,
+    require_customer_for_invoice=True,
     require_fiscal_identity=False,
 ):
     if document_type_requested not in RequestedDocumentTypeChoices.values:
@@ -252,7 +253,8 @@ def _validate_customer(
             )
 
     if (
-        document_type_requested == RequestedDocumentTypeChoices.INVOICE
+        (require_customer_for_invoice or require_fiscal_identity)
+        and document_type_requested == RequestedDocumentTypeChoices.INVOICE
         and customer is None
     ):
         raise ValidationError(
@@ -657,6 +659,7 @@ def update_sale_header(
         business=business,
         customer=customer,
         document_type_requested=document_type_requested,
+        require_customer_for_invoice=False,
     )
 
     locked_sale.customer = customer
@@ -986,6 +989,7 @@ def complete_sale(*, business, sale, closed_by):
         business=business,
         customer=locked_sale.customer,
         document_type_requested=locked_sale.document_type_requested,
+        require_customer_for_invoice=True,
         require_fiscal_identity=True,
     )
 

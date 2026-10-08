@@ -250,6 +250,14 @@ def get_sales_for_business(*, business, filters=None):
     )
 
 
+def get_sale_header(*, business, store, pk):
+    """Read authoritative header state without loading lines, returns or checkout."""
+    return get_object_or_404(
+        Sale.objects.select_related("customer").filter(business=business, store=store),
+        pk=pk,
+    )
+
+
 def get_sale_detail(*, business, pk):
     """
     Devuelve una venta concreta con sus líneas y devoluciones.

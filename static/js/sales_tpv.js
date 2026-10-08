@@ -1,15 +1,36 @@
 (() => {
   const workspace = () => document.querySelector(".tpv");
 
-  function syncCustomer(root = document) {
-    const header = root.querySelector("#workspace-header");
-    if (!header) return;
-    const mode = header.querySelector('[name="customer_mode"]:checked')?.value;
-    const field = header.querySelector(".customer-field");
-    if (!field) return;
-    field.hidden = mode !== "customer";
-    if (mode !== "customer") field.querySelector("select").value = "";
-  }
+  // The sync owner (.tpv) survives header swaps. Keep the submitting form
+  // connected while HTMX has a newer change queued, or HTMX would discard it.
+  const headerRevisions = new WeakMap();
+  const headerRequests = new WeakMap();
+  document.addEventListener("change", (event) => {
+    const form = event.target.closest("[data-header-autosave]");
+    if (form) headerRevisions.set(form, (headerRevisions.get(form) || 0) + 1);
+  }, true);
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const form = event.detail.elt;
+    if (form?.id === "quick-customer-trigger") {
+      // Reopening must not expose the previous form while its replacement GET
+      // is in flight: edits/submits on that form would be lost on the swap.
+      const panel = event.detail.target;
+      const loading = document.createElement("p");
+      loading.id = "quick-customer-title";
+      loading.setAttribute("role", "status");
+      loading.textContent = "Cargando formulario de cliente…";
+      panel.replaceChildren(loading);
+    }
+    if (form?.matches("[data-header-autosave]")) {
+      headerRequests.set(event.detail.xhr, { form, revision: headerRevisions.get(form) || 0 });
+    }
+  });
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    const request = headerRequests.get(event.detail.xhr);
+    if (request && (headerRevisions.get(request.form) || 0) !== request.revision) {
+      event.detail.shouldSwap = false;
+    }
+  });
 
   function syncCartSummary() {
     const root = workspace();
@@ -121,7 +142,6 @@
   }
 
   document.addEventListener("change", (event) => {
-    if (event.target.name === "customer_mode") syncCustomer();
     const checkout = event.target.closest(".checkout");
     if (!checkout) return;
     syncCheckoutMode(checkout);
@@ -185,7 +205,6 @@
   });
 
   document.addEventListener("htmx:afterSwap", () => {
-    syncCustomer();
     syncCartSummary();
     normalizeResponsiveTicket();
     document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
@@ -199,7 +218,6 @@
   if (matchMedia("(min-width: 768px)").matches) {
     document.querySelector("[data-tpv-search]")?.focus();
   }
-  syncCustomer();
   syncCartSummary();
   normalizeResponsiveTicket();
   document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
