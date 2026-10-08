@@ -21,7 +21,7 @@ from apps.sales.checkout import (
     checkout_state,
     run_checkout,
 )
-from apps.sales.services import complete_sale, update_sale_header
+from apps.sales.services import complete_sale, update_sale_header, update_sale_line
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -155,6 +155,36 @@ class CheckoutIntegrationTests(TestCase):
         self.assertEqual(sale.status, SaleStatusChoices.OPEN)
         self.assertFalse(Payment.objects.filter(sale=sale).exists())
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
+
+    def test_discounted_checkout_freezes_line_and_document_amounts(self):
+        sale = self.sale()
+        line = sale.lines.get()
+        update_sale_line(
+            business=self.business,
+            sale=sale,
+            line=line,
+            user=self.user,
+            quantity=Decimal("1.500"),
+            discount_amount=Decimal("12.00"),
+        )
+        state = self._run_checkout(
+            sale, [self.intent(amount=Decimal("48.00"))], self.series()
+        )
+        document = state["document"]
+        snapshot = document.lines.get()
+        self.assertEqual(snapshot.quantity, Decimal("1.500"))
+        self.assertEqual(snapshot.unit_base_price, Decimal("40.00"))
+        self.assertEqual(snapshot.discount_amount, Decimal("12.00"))
+        self.assertEqual(snapshot.tax_amount, Decimal("0.00"))
+        self.assertEqual(snapshot.line_total, Decimal("48.00"))
+        self.assertEqual(document.subtotal_amount, Decimal("60.00"))
+        self.assertEqual(document.discount_amount, Decimal("12.00"))
+        self.assertEqual(document.total_amount, Decimal("48.00"))
+        self.product.base_price = Decimal("99.00")
+        self.product.save()
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.unit_base_price, Decimal("40.00"))
+        self.assertEqual(snapshot.discount_amount, Decimal("12.00"))
 
     def test_invoice_draft_without_customer_cannot_complete_or_checkout(self):
         sale = self.sale()

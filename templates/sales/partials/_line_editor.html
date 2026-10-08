@@ -1,16 +1,13 @@
 <section class="line-editor" aria-labelledby="line-editor-title">
   <header class="line-editor__header">
-    <div><span class="eyebrow">Ticket</span><h2 id="line-editor-title">Editar {{ line.product_name }}</h2></div>
+    <div><span class="eyebrow">Ticket</span><h2 id="line-editor-title">{% if form.mode == "discount" %}Descuento de{% elif form.mode == "price" %}Precio de{% else %}Editar{% endif %} {{ line.product_name }}</h2></div>
     <button type="button" class="button button-secondary" data-nx-modal-close aria-label="Cerrar editor">×</button>
   </header>
-  <form method="post" action="{% url 'sales:sale_line_update' store.pk sale.pk line.pk %}"
-        hx-post="{% url 'sales:sale_line_update' store.pk sale.pk line.pk %}"
-        hx-target="#line-editor-panel" hx-swap="innerHTML" hx-disabled-elt="button">
+  <form method="post" action="{% url 'sales:sale_line_update' store.pk sale.pk line.pk %}{% if form.mode %}?mode={{ form.mode }}{% endif %}"
+        hx-post="{% url 'sales:sale_line_update' store.pk sale.pk line.pk %}{% if form.mode %}?mode={{ form.mode }}{% endif %}"
+        hx-sync="#sale-cart:queue all" hx-target="#line-editor-panel" hx-swap="innerHTML" hx-disabled-elt="button">
     {% csrf_token %}
-    {% include "sales/partials/_field_errors.html" with form=form %}
-    {% for field in form %}
-      <div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>
-    {% endfor %}
+    {% include "includes/erp_form_fields.html" %}
     <button type="submit" class="button">Guardar cambios</button>
   </form>
 </section>

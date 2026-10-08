@@ -292,9 +292,16 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
             try:
                 self._open_sale_with_product(page)
                 context.clear_cookies(name=settings.SESSION_COOKIE_NAME)
-                page.locator("#sale-cart .quantity-form").get_by_role(
-                    "button", name="Actualizar"
-                ).click()
+                quantity = page.locator('#sale-cart .quantity-form [name="quantity"]')
+                quantity.fill("2")
+                with page.expect_request(
+                    lambda request: (
+                        request.method == "POST"
+                        and "/quantity/" in request.url
+                        and request.headers.get("hx-request") == "true"
+                    )
+                ):
+                    quantity.press("Enter")
                 page.wait_for_url(
                     re.compile(r"/users/login/\?(?=.*next=)(?=.*expired=1)")
                 )

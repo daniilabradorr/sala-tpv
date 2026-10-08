@@ -206,9 +206,6 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         expect(cart_line).to_be_visible()
         quantity_input = cart_line.get_by_label("Cantidad")
         quantity_input.fill(str(quantity))
-        update_button = quantity_input.locator("xpath=ancestor::form").get_by_role(
-            "button", name="Actualizar"
-        )
         self.page.locator("#sale-cart-content").evaluate(
             "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
         )
@@ -217,7 +214,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
                 response.request.method == "POST" and "/quantity/" in response.url
             )
         ) as response_info:
-            update_button.click()
+            quantity_input.press("Enter")
         self.assertLess(response_info.value.status, 400)
         updated_cart = self.page.locator(
             "#sale-cart-content:not([data-e2e-before-quantity-swap])"

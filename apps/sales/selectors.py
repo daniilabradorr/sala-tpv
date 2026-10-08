@@ -258,6 +258,21 @@ def get_sale_header(*, business, store, pk):
     )
 
 
+def get_sale_cart(*, business, store, pk):
+    """Read only the authoritative sale and its ticket lines."""
+    return get_object_or_404(
+        Sale.objects.filter(business=business, store=store).prefetch_related(
+            Prefetch("lines", queryset=SaleLine.objects.order_by("created_at", "pk"))
+        ),
+        pk=pk,
+    )
+
+
+def get_sale_cart_line(*, business, sale, pk):
+    """Read a ticket snapshot without loading catalogue or return relations."""
+    return get_object_or_404(SaleLine, business=business, sale=sale, pk=pk)
+
+
 def get_sale_detail(*, business, pk):
     """
     Devuelve una venta concreta con sus líneas y devoluciones.

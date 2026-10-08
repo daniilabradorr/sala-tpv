@@ -105,6 +105,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         expect(page.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
         expect(page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         expect(page).to_have_url(re.compile(r"/sales/stores/\d+/sales/\d+/$"))
+        page.wait_for_load_state("load")
 
     def _save_header(self, page, change):
         page.locator("#workspace-header").evaluate(
@@ -450,6 +451,296 @@ class BrowserTPVTests(StaticLiveServerTestCase):
         expect(page.locator("#sale-cart")).to_have_attribute("open", "")
         expect(page.locator("#sale-cart [data-nx-drawer-close]")).to_be_focused()
 
+    def _save_quantity(self, page, action, expected, status=200):
+        requests = []
+        navigations = []
+
+        def record_request(request):
+            if "/quantity/" in request.url and request.method == "POST":
+                requests.append(request)
+
+        def record_navigation(frame):
+            if frame == page.main_frame:
+                navigations.append(frame.url)
+
+        page.on("request", record_request)
+        page.on("framenavigated", record_navigation)
+        page.locator("#sale-cart-content").evaluate(
+            "el => el.dataset.beforeSave = 'true'"
+        )
+        try:
+            with page.expect_response(
+                lambda r: (
+                    "/quantity/" in r.url
+                    and r.request.method == "POST"
+                    and r.request.headers.get("hx-request") == "true"
+                )
+            ) as response:
+                action()
+            self.assertEqual(response.value.status, status)
+            expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(
+                0
+            )
+            expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                expected
+            )
+            expect(page.locator("#sale-cart-content.htmx-settling")).to_have_count(0)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].headers.get("hx-request"), "true")
+            self.assertEqual(navigations, [])
+        finally:
+            page.remove_listener("request", record_request)
+            page.remove_listener("framenavigated", record_navigation)
+
+    def test_quantity_autosave_fractions_bounds_and_reload(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                quantity = page.locator('.quantity-form [name="quantity"]')
+                expect(quantity).to_have_value("1")
+                expect(page.get_by_role("button", name="Actualizar")).to_have_count(0)
+                self._save_quantity(
+                    page,
+                    lambda: page.get_by_label("Aumentar Café especial").click(),
+                    "2",
+                )
+                page.reload()
+                expect(quantity).to_have_value("2")
+                self._save_quantity(
+                    page,
+                    lambda: page.get_by_label("Reducir Café especial").click(),
+                    "1",
+                )
+                page.reload()
+                expect(quantity).to_have_value("1")
+                for value in ("1.5", "0.125", "0.001"):
+                    quantity.fill(value)
+                    self._save_quantity(page, lambda: quantity.press("Enter"), value)
+                    page.reload()
+                    expect(quantity).to_have_value(value)
+                quantity.fill("1.5")
+                self._save_quantity(page, lambda: quantity.blur(), "1.5")
+                self._save_quantity(
+                    page,
+                    lambda: page.get_by_label("Aumentar Café especial").click(),
+                    "2.5",
+                )
+                self._save_quantity(
+                    page,
+                    lambda: page.get_by_label("Reducir Café especial").click(),
+                    "1.5",
+                )
+                self._save_quantity(
+                    page,
+                    lambda: page.get_by_label("Reducir Café especial").click(),
+                    "0.5",
+                )
+                page.get_by_label("Reducir Café especial").click()
+                expect(quantity).to_have_value("0.5")
+                page.reload()
+                expect(quantity).to_have_value("0.5")
+                for value in ("0", "-1", "1.2345", ""):
+                    quantity.fill(value)
+                    self._save_quantity(
+                        page, lambda: quantity.press("Enter"), "0.5", status=422
+                    )
+                    expect(
+                        page.locator("#sale-cart-content [role=alert]")
+                    ).to_be_visible()
+            finally:
+                browser.close()
+
+    def test_rapid_quantity_clicks_survive_older_response(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                    "1"
+                )
+                requests = []
+                held = {}
+
+                def hold_first_response(route):
+                    requests.append(route.request.post_data)
+                    if len(requests) == 1:
+                        held["route"] = route
+                        held["response"] = route.fetch()
+                        page.evaluate("window.quantityResponseHeld = true")
+                    else:
+                        route.continue_()
+
+                page.route("**/quantity/", hold_first_response)
+                page.get_by_label("Aumentar Café especial").click()
+                page.wait_for_function("window.quantityResponseHeld === true")
+                # A single browser task ensures all clicks precede the held response.
+                page.evaluate("""() => {
+                    const plus = document.querySelector('[data-quantity-step="1"]');
+                    plus.click(); plus.click(); plus.click();
+                }""")
+                expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                    "5"
+                )
+                held["route"].fulfill(response=held["response"])
+                expect(page.locator(".quantity-form.htmx-request")).to_have_count(0)
+                expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                    "5"
+                )
+                self.assertIn("quantity=2", requests[0])
+                self.assertIn("quantity=5", requests[-1])
+                self.assertEqual(len(requests), 4)
+                page.reload()
+                expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
+                    "5"
+                )
+            finally:
+                browser.close()
+
+    def test_rapid_quantity_changes_on_two_lines_keep_both_intents(self):
+        create_sales_product(
+            business=self.result.business,
+            name="Agua TPV",
+            base_price=Decimal("1.00"),
+            track_stock=False,
+        )
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                for name in ("Café especial", "Agua TPV"):
+                    page.get_by_role("button", name=re.compile(name)).click()
+                    expect(
+                        page.locator("#sale-cart .cart-line", has_text=name)
+                    ).to_be_visible()
+                held = {}
+                requests = []
+
+                def hold_first_response(route):
+                    requests.append(route.request.post_data)
+                    if len(requests) == 1:
+                        held["route"] = route
+                        held["response"] = route.fetch()
+                        page.evaluate("window.quantityResponseHeld = true")
+                    else:
+                        route.continue_()
+
+                page.route("**/quantity/", hold_first_response)
+                page.get_by_label("Aumentar Café especial").click()
+                page.wait_for_function("window.quantityResponseHeld === true")
+                page.evaluate("""() => {
+                    document.querySelector('[aria-label="Aumentar Agua TPV"]').click();
+                    document.querySelector('[aria-label="Aumentar Café especial"]').click();
+                }""")
+                held["route"].fulfill(response=held["response"])
+                expect(page.locator(".quantity-form.htmx-request")).to_have_count(0)
+                self.assertEqual(len(requests), 3)
+                page.reload()
+                expect(
+                    page.locator(".cart-line", has_text="Café especial").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("3")
+                expect(
+                    page.locator(".cart-line", has_text="Agua TPV").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("2")
+            finally:
+                browser.close()
+
+    def test_discount_editor_totals_errors_and_responsive(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                for viewport in self.viewports:
+                    with self.subTest(viewport=viewport):
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        self._login(page)
+                        self._open_sale(page)
+                        page.get_by_role(
+                            "button", name=re.compile("Café especial")
+                        ).click()
+                        self._open_ticket_if_needed(page, viewport["width"])
+                        cart = page.locator("#sale-cart")
+                        expect(
+                            cart.locator(".cart-totals dt", has_text="Descuento")
+                        ).to_have_count(0)
+                        cart.get_by_role("link", name="Descuento", exact=True).click()
+                        editor = page.locator("#line-editor-dialog")
+                        discount = editor.get_by_label("Descuento (€)")
+                        expect(discount).to_be_focused()
+                        discount.fill("0.40")
+                        editor.get_by_role("button", name="Guardar cambios").click()
+                        expect(editor).not_to_be_visible()
+                        expect(cart.get_by_text("Descuento: −0,40 €")).to_be_visible()
+                        expect(cart.locator(".grand-total dd")).to_have_text("1,94 €")
+                        expect(
+                            cart.locator(".cart-totals dt", has_text="Descuento")
+                        ).to_be_visible()
+                        cart.get_by_role("link", name="Editar descuento").click()
+                        discount.fill("0.41")
+                        with page.expect_response(
+                            lambda r: "/edit/" in r.url and r.request.method == "POST"
+                        ) as response:
+                            editor.get_by_role("button", name="Guardar cambios").click()
+                        self.assertEqual(response.value.status, 422)
+                        expect(editor).to_be_visible()
+                        expect(
+                            editor.locator("#id_discount_amount-errors")
+                        ).to_be_visible()
+                        expect(cart.get_by_text("Descuento: −0,40 €")).to_be_visible()
+                        discount.fill("0")
+                        editor.get_by_role("button", name="Guardar cambios").click()
+                        expect(editor).not_to_be_visible()
+                        expect(
+                            cart.get_by_text("Descuento:", exact=False)
+                        ).to_have_count(0)
+                        expect(
+                            cart.locator(".cart-totals dt", has_text="Descuento")
+                        ).to_have_count(0)
+                        expect(cart.locator(".grand-total dd")).to_have_text("2,42 €")
+                        self.assertTrue(
+                            page.evaluate(
+                                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                            )
+                        )
+                        self.assertTrue(
+                            cart.evaluate("el => el.scrollWidth <= el.clientWidth")
+                        )
+                        context.close()
+            finally:
+                browser.close()
+
+    def test_quantity_without_javascript_uses_normal_post(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                java_script_enabled=False, viewport={"width": 1440, "height": 900}
+            )
+            page = context.new_page()
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                quantity = page.locator('.quantity-form [name="quantity"]')
+                quantity.fill("0.125")
+                page.get_by_role("button", name="Actualizar").click()
+                expect(quantity).to_have_value("0.125")
+                page.reload()
+                expect(quantity).to_have_value("0.125")
+            finally:
+                browser.close()
+
     def test_catalogue_ticket_and_responsive_surfaces(self):
         # IDs and all other ORM-derived data are materialised before sync_playwright.
         scenarios = tuple(dict(viewport) for viewport in self.viewports)
@@ -505,7 +796,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         cart = page.locator("#sale-cart")
                         expect(cart.get_by_text("Café especial")).to_be_visible()
                         quantity = cart.get_by_label("Cantidad")
-                        expect(quantity).to_have_value("1.000")
+                        expect(quantity).to_have_value("1")
                         with page.expect_response(
                             lambda response: (
                                 "/quantity/" in response.url
@@ -516,7 +807,10 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         if viewport["width"] < 1200:
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
-                        expect(cart.get_by_label("Cantidad")).to_have_value("2.000")
+                        expect(cart.get_by_label("Cantidad")).to_have_value("2")
+                        # Expose the interval where swapped forms are visible but
+                        # HTMX has not yet run its deferred processing task.
+                        page.evaluate("htmx.config.defaultSettleDelay = 1000")
                         with page.expect_response(
                             lambda response: (
                                 "/quantity/" in response.url
@@ -527,27 +821,30 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         if viewport["width"] < 1200:
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
-                        expect(cart.get_by_label("Cantidad")).to_have_value("1.000")
+                        expect(cart.get_by_label("Cantidad")).to_have_value("1")
+                        cart.evaluate("el => window.quantityDrawer = el")
                         cart.get_by_label("Cantidad").fill("1.500")
-                        with page.expect_response(
-                            lambda response: (
-                                "/quantity/" in response.url
-                                and response.request.method == "POST"
-                            )
-                        ):
-                            cart.get_by_role("button", name="Actualizar").click()
+                        self._save_quantity(
+                            page,
+                            lambda: cart.get_by_label("Cantidad").press("Enter"),
+                            "1.5",
+                        )
+                        self.assertTrue(
+                            cart.evaluate("el => el === window.quantityDrawer")
+                        )
+                        page.evaluate("htmx.config.defaultSettleDelay = 20")
                         if viewport["width"] < 1200:
                             expect(cart).to_have_attribute("open", "")
                             expect(cart.get_by_label("Cantidad")).to_be_visible()
-                        expect(cart.get_by_label("Cantidad")).to_have_value("1.500")
+                        expect(cart.get_by_label("Cantidad")).to_have_value("1.5")
 
-                        cart.get_by_role("link", name="Editar").click()
+                        cart.get_by_role("link", name="Editar precio").click()
                         editor = page.locator("#line-editor-dialog")
                         expect(editor).to_have_attribute("open", "")
                         page.get_by_role("button", name="Guardar cambios").click()
                         expect(editor).not_to_have_attribute("open", "")
                         expect(page.locator("#line-editor-panel")).to_have_count(1)
-                        cart.get_by_role("link", name="Editar").click()
+                        cart.get_by_role("link", name="Editar precio").click()
                         expect(editor).to_have_attribute("open", "")
                         page.get_by_role("button", name="Cerrar editor").click()
 

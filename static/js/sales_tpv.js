@@ -1,6 +1,56 @@
 (() => {
   const workspace = () => document.querySelector(".tpv");
 
+  // Absolute quantities share one queue owner that survives cart-content swaps.
+  // Keep the old forms connected until the final queued intent is answered.
+  let cartRevision = 0;
+  const cartRequests = new WeakMap();
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (form.matches(".quantity-form")) {
+      const input = form.querySelector('[name="quantity"]');
+      if (!form.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // Swapped forms are visible before HTMX's settle task initializes them.
+      // Install the form's submit listener before this event reaches its target.
+      htmx.process(form);
+      form.dataset.quantitySubmitted = input.value;
+    }
+    if (event.target.matches('#sale-cart form, .line-editor form, .product-grid form')) {
+      event.cartRevision = ++cartRevision;
+    }
+  }, true);
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const revision = event.detail.requestConfig?.triggeringEvent?.cartRevision;
+    if (revision !== undefined) cartRequests.set(event.detail.xhr, revision);
+  });
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    const revision = cartRequests.get(event.detail.xhr);
+    if (revision !== undefined && revision < cartRevision) event.detail.shouldSwap = false;
+  });
+
+  function saveQuantity(input) {
+    const form = input.closest("form");
+    // A swap can blur the old input and fire change after Enter already saved it.
+    // Never submit a form whose HTMX listeners are being removed.
+    if (!form?.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) return;
+    form.requestSubmit();
+  }
+  document.addEventListener("htmx:beforeCleanupElement", (event) => {
+    if (event.detail.elt.matches?.(".quantity-form")) event.detail.elt.dataset.quantityRemoving = "true";
+  });
+  document.addEventListener("htmx:afterRequest", (event) => {
+    if (event.detail.elt.matches?.(".quantity-form") && (event.detail.xhr.status === 0 || event.detail.xhr.status >= 500)) {
+      delete event.detail.elt.dataset.quantitySubmitted;
+    }
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.matches('.quantity-form [name="quantity"]')) saveQuantity(event.target);
+  });
+
   // The sync owner (.tpv) survives header swaps. Keep the submitting form
   // connected while HTMX has a newer change queued, or HTMX would discard it.
   const headerRevisions = new WeakMap();
@@ -198,16 +248,22 @@
     if (!button) return;
     const form = button.closest("form");
     const input = form.querySelector('[name="quantity"]');
-    const next = Number(input.value) + Number(button.dataset.quantityStep);
-    if (next <= 0) return;
-    input.value = next.toFixed(3);
-    form.requestSubmit();
+    // Only UI quantities: integer thousandths preserve all three decimal places.
+    const match = /^(\d+)(?:\.(\d{1,3}))?$/.exec(input.value);
+    if (!match) return;
+    const current = BigInt(match[1]) * 1000n + BigInt((match[2] || "").padEnd(3, "0"));
+    const next = current + BigInt(button.dataset.quantityStep) * 1000n;
+    if (next <= 0n) return;
+    const fraction = String(next % 1000n).padStart(3, "0").replace(/0+$/, "");
+    input.value = `${next / 1000n}${fraction ? `.${fraction}` : ""}`;
+    saveQuantity(input);
   });
 
   document.addEventListener("htmx:afterSwap", () => {
     syncCartSummary();
     normalizeResponsiveTicket();
     document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
+    document.querySelector('#line-editor-dialog[open] [autofocus]')?.focus();
   });
 
   document.addEventListener("htmx:oobAfterSwap", () => {
