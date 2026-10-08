@@ -981,23 +981,18 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         expect(
                             footer.get_by_role("link", name="Cancelar venta")
                         ).to_be_in_viewport(ratio=1)
-                        region.focus()
-                        before_keyboard = region.evaluate("el => el.scrollTop")
-                        region.press("PageDown")
-                        page.wait_for_function(
-                            "document.querySelector('[data-cart-scroll-region]').scrollTop > 0"
-                        )
-                        self.assertGreater(
-                            region.evaluate("el => el.scrollTop"), before_keyboard
-                        )
-                        expect(checkout).to_be_in_viewport(ratio=1)
                         initial_heading = heading.bounding_box()
                         initial_footer = footer.bounding_box()
                         page_y = page.evaluate("window.scrollY")
                         region.evaluate("el => el.scrollTop = el.scrollHeight")
+                        # A whole line can exceed the remaining space on a small
+                        # phone; its final actions must still be fully reachable.
                         expect(cart.locator(".cart-line").last).to_be_in_viewport(
-                            ratio=1
+                            ratio=0.95
                         )
+                        expect(
+                            cart.locator(".cart-line").last.locator(".line-actions")
+                        ).to_be_in_viewport(ratio=1)
                         for locator, initial in (
                             (heading, initial_heading),
                             (footer, initial_footer),
@@ -1048,7 +1043,14 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         expect(
                             editor.get_by_label("Precio unitario sin IVA")
                         ).to_be_visible()
+                        # close is dispatched in a later browser task. Wait for
+                        # its focus restoration before editing another field.
+                        editor.evaluate("""el => {
+                            el.dataset.closed = 'false';
+                            el.addEventListener('close', () => el.dataset.closed = 'true', {once: true});
+                        }""")
                         editor.get_by_role("button", name="Cerrar editor").click()
+                        expect(editor).to_have_attribute("data-closed", "true")
                         expect(
                             line.get_by_role("link", name="Editar precio")
                         ).to_be_focused()
@@ -1104,6 +1106,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                                 heading.bounding_box()["y"],
                                 page.locator(".topbar").bounding_box()["height"],
                             )
+                            self._scroll_ticket_with_keyboard(page, region, checkout)
                         else:
                             trigger = page.locator(
                                 '[data-nx-drawer-trigger="sale-cart"]'
@@ -1114,6 +1117,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                             trigger.click()
                             expect(cart).to_have_attribute("open", "")
                             expect(checkout).to_be_in_viewport(ratio=1)
+                            self._scroll_ticket_with_keyboard(page, region, checkout)
                             page.keyboard.press("Escape")
                             expect(cart).not_to_be_visible()
                             expect(trigger).to_be_focused()
@@ -1126,6 +1130,15 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         context.close()
             finally:
                 browser.close()
+
+    def _scroll_ticket_with_keyboard(self, page, region, checkout):
+        region.evaluate("el => el.scrollTop = 0")
+        region.focus()
+        region.press("PageDown")
+        page.wait_for_function(
+            "document.querySelector('[data-cart-scroll-region]').scrollTop > 0"
+        )
+        expect(checkout).to_be_in_viewport(ratio=1)
 
     def _save_long_ticket_quantity(
         self, page, line, expected, *, step=False, status=200
