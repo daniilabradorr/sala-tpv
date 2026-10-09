@@ -74,6 +74,11 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         main.get_by_role("button", name="Abrir caja").click()
         main.get_by_role("button", name="Nueva venta").click()
         expect(main.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
+        # Navigation can expose HTML before deferred TPV listeners initialize.
+        # Begin user input only after the real page scripts finish loading.
+        page.wait_for_function(
+            "document.readyState === 'complete' && window.htmx !== undefined"
+        )
         # Prepare one settled interaction at a time. Otherwise the debounced
         # search can still be pending when the expired-session test clears its
         # cookie, producing two HX-Redirect navigations that abort each other.
