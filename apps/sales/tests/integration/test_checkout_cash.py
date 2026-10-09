@@ -69,6 +69,7 @@ class CheckoutCashTests(TestCase):
                         self.checkout_url(sale), data, HTTP_HX_REQUEST="true"
                     )
                     self.assertEqual(repeated.status_code, 200)
+                    self.assertEqual(repeated.context["cash_change"], Decimal(change))
                     self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
                     self.assertEqual(
                         CashMovement.objects.filter(payment=payment).count(), 1
@@ -204,10 +205,65 @@ class CheckoutCashTests(TestCase):
         self.assertContains(response, "El cobro se ha registrado correctamente")
         self.assertContains(response, "REINTENTAR EMISIÓN")
         self.assertEqual(response.context["cash_change"], Decimal("10.00"))
+        self.assertEqual(response.context["cash_received"], Decimal("50.00"))
         response = self.client.post(
             self.checkout_url(sale), data, HTTP_HX_REQUEST="true"
         )
         self.assertContains(response, "VENTA COMPLETADA")
+        self.assertEqual(response.context["cash_change"], Decimal("10.00"))
+        self.assertEqual(response.context["cash_received"], Decimal("50.00"))
+        self.assertEqual(
+            response["X-Netxodo-Confirmed-Operation"],
+            str(data["payment_idempotency_key"]),
+        )
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
         self.assertEqual(CashMovement.objects.filter(sale=sale).count(), 1)
         self.assertEqual(BillingDocument.objects.filter(sale=sale).count(), 1)
+
+    def test_new_sale_success_cta_posts_existing_flow_with_and_without_session(self):
+        from django.urls import reverse
+        from apps.sales.models import Sale
+
+        POSSettings.objects.filter(business=self.business).update(
+            require_open_cash_register=False
+        )
+        self.series()
+        for with_session in (True, False):
+            with self.subTest(with_session=with_session):
+                sale = self.sale()
+                if not with_session:
+                    sale.cash_register = sale.cash_session = None
+                    sale.save()
+                response = self.client.post(
+                    self.checkout_url(sale),
+                    self.post_data(self.card),
+                    HTTP_HX_REQUEST="true",
+                )
+                self.assertContains(response, "NUEVA VENTA")
+                url = (
+                    reverse(
+                        "sales:sale_start_for_session",
+                        args=[self.store.pk, self.session.pk],
+                    )
+                    if with_session
+                    else reverse("sales:sale_start", args=[self.store.pk])
+                )
+                self.assertContains(response, f'action="{url}"')
+                before = Sale.objects.count()
+                created = self.client.post(url)
+                self.assertEqual(created.status_code, 302)
+                self.assertEqual(Sale.objects.count(), before + 1)
+                next_sale = Sale.objects.latest("pk")
+                self.assertEqual(next_sale.status, "open")
+                if with_session:
+                    self.assertEqual(next_sale.cash_session_id, self.session.pk)
+
+    def test_retry_never_invents_tender_for_a_different_payment_key(self):
+        sale = self.sale()
+        self.series()
+        data = self.post_data(self.cash, cash_received="50.00")
+        self.client.post(self.checkout_url(sale), data)
+        data["payment_idempotency_key"] = uuid.uuid4()
+        response = self.client.post(self.checkout_url(sale), data)
+        self.assertIsNone(response.context["cash_change"])
+        self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)

@@ -20,6 +20,18 @@
     }
   });
   const cartRequests = new WeakMap();
+  const activeCartRequests = new Set();
+  let answeredRevision = 0;
+  let needsStructure = false;
+  let reconciling = false;
+  function reconcileStructure() {
+    if (!needsStructure || reconciling || activeCartRequests.size
+        || answeredRevision !== cartRevision) return;
+    reconciling = true;
+    htmx.ajax("GET", `${location.pathname}?region=cart`, {
+      source: "#sale-cart", target: "#sale-cart-content", swap: "outerHTML",
+    }).finally(() => { reconciling = false; });
+  }
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (form.id === "catalog-filters") clearTimeout(searchTimer);
@@ -43,11 +55,31 @@
   }, true);
   document.addEventListener("htmx:beforeRequest", (event) => {
     const revision = event.detail.requestConfig?.triggeringEvent?.cartRevision;
-    if (revision !== undefined) cartRequests.set(event.detail.xhr, revision);
+    const reconcile = reconciling && event.detail.elt?.id === "sale-cart";
+    if (revision !== undefined || reconcile) {
+      cartRequests.set(event.detail.xhr, {
+        revision: reconcile ? cartRevision : revision,
+        structural: event.detail.target?.id === "sale-cart-content", reconcile,
+      });
+      activeCartRequests.add(event.detail.xhr);
+    }
   });
   document.addEventListener("htmx:beforeSwap", (event) => {
-    const revision = cartRequests.get(event.detail.xhr);
-    if (revision !== undefined && revision < cartRevision) event.detail.shouldSwap = false;
+    const request = cartRequests.get(event.detail.xhr);
+    if (request && request.revision < cartRevision) {
+      event.detail.shouldSwap = false;
+      if (request.structural && event.detail.xhr.status === 200) needsStructure = true;
+    }
+  });
+
+  document.addEventListener("htmx:afterRequest", (event) => {
+    const request = cartRequests.get(event.detail.xhr);
+    if (!request) return;
+    activeCartRequests.delete(event.detail.xhr);
+    if (!request.reconcile) answeredRevision = Math.max(answeredRevision, request.revision);
+    // HTMX starts queued requests when its synchronous completion stack exits.
+    // A microtask observes that queue, rather than guessing a delay.
+    queueMicrotask(reconcileStructure);
   });
 
   // Capture at swap time, not request time: the user can scroll while waiting.
@@ -356,8 +388,11 @@
   });
 
   document.addEventListener("htmx:afterSwap", (event) => {
-    const revision = cartRequests.get(event.detail.xhr);
-    if (revision !== undefined && revision === cartRevision) dirtyLines.clear();
+    const request = cartRequests.get(event.detail.xhr);
+    if (request && request.revision === cartRevision) {
+      dirtyLines.clear();
+      if (request.structural) needsStructure = false;
+    }
     syncCartSummary();
     normalizeResponsiveTicket();
     document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);

@@ -554,6 +554,131 @@ class BrowserTPVTests(StaticLiveServerTestCase):
             finally:
                 browser.close()
 
+    def _structural_then_quantity(self, *, delete, partial_first=False):
+        from apps.sales.models import Sale, SaleLine
+
+        second = create_sales_product(
+            business=self.result.business,
+            name="Agua TPV",
+            base_price=Decimal("1.00"),
+            track_stock=False,
+        )
+        trace = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                expect(
+                    page.locator(".cart-line", has_text="Café especial")
+                ).to_be_visible()
+                if delete:
+                    page.get_by_role("button", name=re.compile("Agua TPV")).click()
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_be_visible()
+                sale_id = int(page.url.rstrip("/").split("/")[-1])
+                held = {}
+                page.evaluate("""() => {
+                    window.cartTrace = [];
+                    document.addEventListener('submit', e => {
+                        if (e.cartRevision) window.cartTrace.push({kind: 'intent', revision: e.cartRevision});
+                    });
+                    document.addEventListener('htmx:beforeSwap', e => {
+                        window.cartTrace.push({kind: 'swap', url: e.detail.xhr.responseURL,
+                            swap: e.detail.shouldSwap, target: e.detail.target.id});
+                    });
+                }""")
+
+                def hold(route):
+                    trace.append(
+                        {"request": route.request.url, "method": route.request.method}
+                    )
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.structuralHeld = true")
+
+                pattern = (
+                    "**/quantity/"
+                    if partial_first
+                    else ("**/delete/" if delete else "**/lines/add/")
+                )
+                page.route(pattern, hold)
+                refreshes = []
+                page.on(
+                    "request",
+                    lambda r: (
+                        refreshes.append(r.url) if "region=cart" in r.url else None
+                    ),
+                )
+                if partial_first:
+                    page.get_by_label("Aumentar Café especial").click()
+                    page.wait_for_function("window.structuralHeld === true")
+                if delete:
+                    page.locator(".cart-line", has_text="Agua TPV").get_by_role(
+                        "button", name="Eliminar"
+                    ).click()
+                else:
+                    page.get_by_role("button", name=re.compile("Agua TPV")).click()
+                page.wait_for_function("window.structuralHeld === true")
+                if not partial_first:
+                    expect(page.get_by_label("Aumentar Café especial")).to_be_enabled()
+                    page.get_by_label("Aumentar Café especial").click()
+                with page.expect_response(
+                    lambda r: (
+                        ("/delete/" in r.url if delete else "/lines/add/" in r.url)
+                        and r.request.method == "POST"
+                        if partial_first
+                        else "/quantity/" in r.url and r.request.method == "POST"
+                    )
+                ) as response:
+                    held["route"].fulfill(response=held["response"])
+                self.assertEqual(response.value.status, 200)
+                expect(
+                    page.locator(".cart-line", has_text="Café especial").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("2")
+                trace.extend(page.evaluate("window.cartTrace"))
+                print(
+                    "STRUCTURAL TRACE", {"delete": delete, "events": trace}, flush=True
+                )
+                if delete:
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_have_count(0)
+                else:
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_be_visible()
+                total = page.locator(".grand-total dd").inner_text()
+                self.assertEqual(len(refreshes), 0 if partial_first else 1)
+            finally:
+                browser.close()
+        sale = Sale.objects.get(pk=sale_id)
+        self.assertEqual(
+            SaleLine.objects.get(sale=sale, product=self.product).quantity,
+            Decimal("2.000"),
+        )
+        self.assertEqual(
+            SaleLine.objects.filter(sale=sale, product=second).exists(), not delete
+        )
+        self.assertEqual(total, f"{sale.total_amount:.2f}".replace(".", ",") + " €")
+
+    def test_structural_add_then_quantity_reconciles_cart(self):
+        self._structural_then_quantity(delete=False)
+
+    def test_structural_delete_then_quantity_reconciles_cart(self):
+        self._structural_then_quantity(delete=True)
+
+    def test_quantity_then_structural_add_keeps_latest_cart(self):
+        self._structural_then_quantity(delete=False, partial_first=True)
+
+    def test_quantity_then_structural_delete_keeps_latest_cart(self):
+        self._structural_then_quantity(delete=True, partial_first=True)
+
     def test_rapid_quantity_clicks_survive_older_response(self):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)

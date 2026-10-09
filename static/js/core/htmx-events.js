@@ -31,7 +31,7 @@ const setProcessing = (detail, processing) => {
 };
 const resolvedRequestSurface = (detail) =>
   requestSurface(detail) || (detail.xhr ? requestSurfaces.get(detail.xhr) : null);
-const feedback = (message, action = "", surface = null) => {
+const feedback = (message, action = "", surface = null, operation = "") => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
   const host = document.querySelector("[data-nx-feedback-host]");
   if (surface?.isConnected) {
@@ -43,6 +43,8 @@ const feedback = (message, action = "", surface = null) => {
   }
   region.querySelector("[data-nx-feedback-message]").textContent = message;
   region.querySelector("[data-nx-feedback-action]").textContent = action;
+  region.dataset.operation = operation;
+  region.dataset.surface = surface?.id || "";
   region.hidden = false;
 };
 const restoreFeedbackHost = ({ hide = false } = {}) => {
@@ -74,11 +76,19 @@ export const initHtmxEvents = () => {
   });
   document.body.addEventListener("htmx:beforeRequest", (event) => { setBusy(event.detail, true); setProcessing(event.detail, true); });
   document.body.addEventListener("htmx:afterRequest", (event) => finishRequest(event.detail));
+  document.body.addEventListener("htmx:afterSwap", (event) => {
+    const confirmed = event.detail.xhr?.getResponseHeader("X-Netxodo-Confirmed-Operation");
+    const region = document.getElementById("nx-feedback");
+    const surface = resolvedRequestSurface(event.detail);
+    if (confirmed && region?.dataset.operation === confirmed
+        && region.dataset.surface === surface?.id) restoreFeedbackHost({ hide: true });
+  });
   document.body.addEventListener("htmx:sendError", (event) => {
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
     const surface = resolvedRequestSurface(event.detail);
     finishRequest(event.detail);
-    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface);
+    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface,
+      String(event.detail.requestConfig?.parameters?.payment_idempotency_key || ""));
     else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.", surface);
   });
   document.body.addEventListener("htmx:beforeSwap", (event) => {
@@ -93,7 +103,8 @@ export const initHtmxEvents = () => {
       event.detail.shouldSwap = false;
       const uncertain = status >= 500 && mutating.has(requestVerb(event.detail));
       feedback(uncertain ? "No podemos confirmar el resultado de la operación." : message,
-        uncertain ? "Comprueba el estado antes de repetir." : "", resolvedRequestSurface(event.detail));
+        uncertain ? "Comprueba el estado antes de repetir." : "", resolvedRequestSurface(event.detail),
+        uncertain ? String(event.detail.requestConfig?.parameters?.payment_idempotency_key || "") : "");
     }
   });
   document.body.addEventListener("htmx:responseError", (event) => finishRequest(event.detail));

@@ -474,6 +474,11 @@ class SaleDetailView(
     def get(self, request, store_id, sale_pk):
         is_partial_request = request.htmx and not request.htmx.history_restore_request
         business, store = self.get_business_and_store()
+        if is_partial_request and request.GET.get("region") == "cart":
+            sale = get_sale_header(business=business, store=store, pk=sale_pk)
+            return _workspace_cart_response(
+                request, business=business, store=store, sale=sale
+            )
         sale = (
             get_sale_grid(business=business, store=store, pk=sale_pk)
             if is_partial_request
@@ -1442,6 +1447,7 @@ class SaleCheckoutView(
         *,
         error=None,
         cash_change=None,
+        cash_received=None,
         forms_bundle=None,
     ):
         state = checkout_state(
@@ -1470,6 +1476,8 @@ class SaleCheckoutView(
             ),
             "checkout_errors": self._error_messages(error),
             "cash_change": cash_change,
+            "cash_received": cash_received,
+            "can_sell": can_sell_in_store(request.user, store),
             "selected_method_is_cash": bool(
                 selected_method and selected_method.affects_cash_register
             ),
@@ -1502,7 +1510,7 @@ class SaleCheckoutView(
             return response
         pos_settings = POSSettings.objects.filter(business=business).first()
         intents = []
-        if sale.pending_amount > 0:
+        if sale.pending_amount > 0 or sale.payment_status == "paid":
             if mode == "split":
                 intents = [
                     PaymentIntent(
@@ -1524,15 +1532,25 @@ class SaleCheckoutView(
                     if part and not part.get("DELETE")
                 ]
             elif form.cleaned_data.get("method"):
+                amount = sale.pending_amount
+                if amount == 0:
+                    confirmed = Payment.objects.filter(
+                        business=business,
+                        sale=sale,
+                        method=form.cleaned_data["method"],
+                        idempotency_key=form.cleaned_data["payment_idempotency_key"],
+                        status="completed",
+                    ).first()
+                    amount = confirmed.amount if confirmed else Decimal("0.00")
                 intents = [
                     PaymentIntent(
                         method_id=form.cleaned_data["method"].pk,
-                        amount=sale.pending_amount,
+                        amount=amount,
                         cash_received=(
                             (
                                 form.cleaned_data.get("cash_received")
                                 if form.cleaned_data.get("cash_received") is not None
-                                else sale.pending_amount
+                                else amount
                             )
                             if form.cleaned_data["method"].affects_cash_register
                             else None
@@ -1543,15 +1561,36 @@ class SaleCheckoutView(
                         idempotency_key=form.cleaned_data["payment_idempotency_key"],
                     )
                 ]
-        cash_change = next(
-            (
-                intent.cash_received - intent.amount
-                for intent in intents
-                if intent.cash_received is not None
-                and intent.cash_received >= intent.amount
-            ),
-            None,
-        )
+
+        def confirmed_cash_presentation():
+            payments = {
+                str(payment.idempotency_key): payment
+                for payment in Payment.objects.select_related("method").filter(
+                    business=business,
+                    sale=sale,
+                    status="completed",
+                    idempotency_key__in=[intent.idempotency_key for intent in intents],
+                )
+            }
+            changes = []
+            tenders = []
+            for intent in intents:
+                payment = payments.get(str(intent.idempotency_key))
+                if (
+                    payment
+                    and payment.method.affects_cash_register
+                    and payment.method_id == intent.method_id
+                    and payment.amount == intent.amount
+                    and intent.cash_received is not None
+                    and intent.cash_received >= payment.amount
+                ):
+                    changes.append(intent.cash_received - payment.amount)
+                    tenders.append(intent.cash_received)
+            return {
+                "cash_change": sum(changes, Decimal("0.00")) if changes else None,
+                "cash_received": sum(tenders, Decimal("0.00")) if tenders else None,
+            }
+
         try:
             run_checkout(
                 business=business,
@@ -1570,14 +1609,7 @@ class SaleCheckoutView(
                 store,
                 sale,
                 error=error,
-                cash_change=cash_change
-                if Payment.objects.filter(
-                    business=business,
-                    sale=sale,
-                    idempotency_key__in=[intent.idempotency_key for intent in intents],
-                    status="completed",
-                ).exists()
-                else None,
+                **confirmed_cash_presentation(),
                 forms_bundle=forms_bundle,
             )
             state = checkout_state(business=business, sale=sale)
@@ -1587,7 +1619,14 @@ class SaleCheckoutView(
             elif request.htmx and state["sale"].payment_status != "paid":
                 response.status_code = 422
             return response
-        return self._render(request, business, store, sale, cash_change=cash_change)
+        response = self._render(
+            request, business, store, sale, **confirmed_cash_presentation()
+        )
+        if checkout_state(business=business, sale=sale)["complete"]:
+            response["X-Netxodo-Confirmed-Operation"] = str(
+                form.cleaned_data["payment_idempotency_key"]
+            )
+        return response
 
 
 # ==========================================================

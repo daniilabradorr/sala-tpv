@@ -87,6 +87,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
         batches = {}
         for label in (
             "search",
+            "barcode_enter",
             "add",
             "quantity_plus",
             "quantity_enter",
@@ -145,9 +146,9 @@ class BrowserBaseline(StaticLiveServerTestCase):
                     expect(page.locator("#product-grid .product-card")).to_have_count(
                         24
                     )
-                    if label == "search":
+                    if label in ("search", "barcode_enter"):
                         observer = {
-                            "event": "input",
+                            "event": "keydown" if label == "barcode_enter" else "input",
                             "trigger": "#product-search",
                             "target": "product-grid",
                             "expected": {
@@ -156,8 +157,17 @@ class BrowserBaseline(StaticLiveServerTestCase):
                             },
                         }
 
-                        def action():
-                            return page.locator("#product-search").fill("BASE-0020")
+                        if label == "barcode_enter":
+                            page.locator("#product-search").fill(
+                                dataset.products[20].barcode
+                            )
+
+                            def action():
+                                return page.locator("#product-search").press("Enter")
+                        else:
+
+                            def action():
+                                return page.locator("#product-search").fill("BASE-0020")
                     elif label == "add":
                         observer = {
                             "event": "click",
@@ -279,7 +289,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
                     timing = page.evaluate("window.tpvMeasure")
                     self.assertEqual(timing["status"], 200)
                     self.assertFalse(errors, errors)
-                    if label == "search":
+                    if label in ("search", "barcode_enter"):
                         expect(
                             page.locator("#product-grid .product-card")
                         ).to_have_count(1)

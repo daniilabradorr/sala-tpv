@@ -136,6 +136,33 @@ class TPVQueryGrowthTests(TestCase):
             counts.append(len(queries))
         self.assertEqual(counts[0], counts[1])
 
+    def test_structural_reconcile_uses_scoped_existing_detail_endpoint(self):
+        sale, lines = self.dataset.sale(3)
+        foreign = Dataset(1, label="reconcile-foreign")
+        foreign_sale, foreign_lines = foreign.sale(1)
+        path = reverse("sales:sale_detail", args=[self.dataset.store.pk, sale.pk])
+        response = self.client.get(
+            path,
+            {"region": "cart"},
+            HTTP_HX_REQUEST="true",
+            HTTP_X_TPV_CHANGED_LINES=str(foreign_lines[0].pk),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
+        self.assertEqual(response.content.count(b'<article class="cart-line"'), 3)
+        for line in lines:
+            self.assertContains(response, f'id="cart-line-{line.pk}"')
+        self.assertNotContains(response, f'id="cart-line-{foreign_lines[0].pk}"')
+        forged = reverse(
+            "sales:sale_detail", args=[self.dataset.store.pk, foreign_sale.pk]
+        )
+        self.assertEqual(
+            self.client.get(
+                forged, {"region": "cart"}, HTTP_HX_REQUEST="true"
+            ).status_code,
+            404,
+        )
+
     def test_fifty_line_quantity_payload_only_contains_changed_line_and_footer(self):
         sale, lines = self.dataset.sale(50)
         response, _ = self.measure(
