@@ -38,6 +38,7 @@ def metadata():
 
 def scenarios(dataset):
     from django.urls import reverse
+    from decimal import Decimal
 
     from apps.sales.selectors import get_sale_cart
     from django.template.loader import render_to_string
@@ -161,6 +162,74 @@ def scenarios(dataset):
 
         yield f"editor_{mode}_post", editor
 
+    # Additional phase 7 payload sizes, using the same fresh-sale method.
+    for mode in ("quantity", "discount", "price"):
+
+        def large_edit(kind=mode):
+            sale, lines = dataset.sale(50)
+            if kind == "quantity":
+                return (
+                    "POST",
+                    url("sale_line_quantity_update", sale, lines[24]),
+                    {"quantity": "1.5"},
+                    True,
+                )
+            data = (
+                {"discount_amount": "1.00"}
+                if kind == "discount"
+                else {"unit_base_price": "11.00"}
+            )
+            return (
+                "POST",
+                url("sale_line_update", sale, lines[24]) + "?mode=" + kind,
+                data,
+                True,
+            )
+
+        yield f"{mode}_50_lines", large_edit
+
+    import uuid
+
+    cash = next(m for m in dataset.methods if m.affects_cash_register)
+    card = next(m for m in dataset.methods if not m.affects_cash_register)
+    for name in ("card", "cash_exact", "cash_change", "split"):
+
+        def checkout(kind=name):
+            sale, _ = dataset.sale(1)
+            data = {
+                "mode": "single",
+                "payment_idempotency_key": str(uuid.uuid4()),
+                "billing_idempotency_key": str(uuid.uuid4()),
+                "method": card.pk if kind == "card" else cash.pk,
+                "cash_received": "" if kind != "cash_change" else "20.00",
+            }
+            if kind == "split":
+                data.update(
+                    {
+                        "mode": "split",
+                        "payments-TOTAL_FORMS": "2",
+                        "payments-INITIAL_FORMS": "0",
+                        "payments-MIN_NUM_FORMS": "2",
+                        "payments-MAX_NUM_FORMS": "2",
+                    }
+                )
+                for index, method in enumerate((cash, card)):
+                    data.update(
+                        {
+                            f"payments-{index}-method": method.pk,
+                            f"payments-{index}-amount": "5.00"
+                            if index == 0
+                            else str(sale.pending_amount - Decimal("5.00")),
+                            f"payments-{index}-cash_received": "20.00"
+                            if index == 0
+                            else "",
+                            f"payments-{index}-idempotency_key": str(uuid.uuid4()),
+                        }
+                    )
+            return ("POST", url("sale_checkout", sale), data, True)
+
+        yield f"checkout_post_{name}", checkout
+
 
 def grid_scenarios(dataset):
     from django.urls import reverse
@@ -273,6 +342,29 @@ def operation_verifier(prepared):
         elif endpoint == "sale_line_delete":
             assert len(lines) == before_count - 1
             assert all(line.pk != match.kwargs["line_pk"] for line in lines)
+        elif endpoint == "sale_checkout":
+            from apps.payments.models import Payment
+            from apps.billing.models import BillingDocument
+            from apps.cash_register.models import CashMovement
+
+            payments = list(Payment.objects.filter(sale=sale).select_related("method"))
+            assert sale.status == "completed" and sale.pending_amount == Decimal("0.00")
+            assert len(payments) == (2 if data["mode"] == "split" else 1)
+            assert (
+                sum((p.amount for p in payments), Decimal("0.00")) == sale.total_amount
+            )
+            assert (
+                BillingDocument.objects.filter(sale=sale, status="issued").count() == 1
+            )
+            assert CashMovement.objects.filter(sale=sale).count() == sum(
+                p.method.affects_cash_register for p in payments
+            )
+            for payment in payments:
+                if payment.method.affects_cash_register:
+                    assert (
+                        CashMovement.objects.get(payment=payment).amount
+                        == payment.amount
+                    )
         else:
             line = next(line for line in lines if line.pk == match.kwargs["line_pk"])
             for field, value in data.items():
@@ -284,7 +376,9 @@ def operation_verifier(prepared):
         assert sale.discount_amount == discount
         assert sale.tax_amount == tax
         assert sale.total_amount == subtotal - discount + tax
-        assert sale.pending_amount == sale.total_amount
+        assert sale.pending_amount == (
+            Decimal("0.00") if endpoint == "sale_checkout" else sale.total_amount
+        )
 
     return verify
 

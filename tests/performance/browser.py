@@ -2,6 +2,7 @@
 
 import json
 import time
+from decimal import Decimal
 from pathlib import Path
 
 from django.conf import settings
@@ -20,7 +21,12 @@ from tests.performance.metrics import distribution
 # A visible-state predicate is checked on animation frames after settle.
 _OBSERVER = r"""
 ({event, trigger, target, expected}) => {
-  window.tpvMeasure = {start: null, request: null, response: null, settle: null, end: null, status: null};
+  window.tpvMeasure = {start: null, request: null, response: null, settle: null, end: null, status: null, dialog: null};
+  const dialog = document.querySelector('#checkout-dialog');
+  const modalObserver = dialog && new MutationObserver(() => {
+    if (dialog.open && window.tpvMeasure.start !== null && window.tpvMeasure.dialog === null) window.tpvMeasure.dialog = performance.now();
+  });
+  if (modalObserver) modalObserver.observe(dialog, {attributes: true, attributeFilter: ['open']});
   let xhr;
   const triggerListener = e => {
     if (!e.target.closest(trigger) || (event === 'keydown' && e.key !== 'Enter')) return;
@@ -87,6 +93,10 @@ class BrowserBaseline(StaticLiveServerTestCase):
             "header",
             "checkout_1",
             "checkout_20",
+            "checkout_post_card",
+            "checkout_post_cash_exact",
+            "checkout_post_cash_change",
+            "checkout_post_split",
         ):
             count = 20 if label == "checkout_20" else 1 if label == "checkout_1" else 5
             batches[label] = [
@@ -98,7 +108,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
             iterations=self.iterations,
             catalog_size=250,
             viewport={"width": 1440, "height": 900},
-            search_debounce_ms=275,
+            search_debounce_ms=175,
             scenarios={},
         )
         start = time.perf_counter()
@@ -172,7 +182,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
                             "trigger": '.cart-line:first-child [data-quantity-step="1"]'
                             if label == "quantity_plus"
                             else input_selector,
-                            "target": "sale-cart-content",
+                            "target": f"cart-line-{lines[0].pk}",
                             "expected": {
                                 "selector": input_selector,
                                 "value": "2" if label == "quantity_plus" else "1.5",
@@ -202,6 +212,51 @@ class BrowserBaseline(StaticLiveServerTestCase):
 
                         def action():
                             return page.locator("#header-document-invoice").check()
+                    elif label.startswith("checkout_post_"):
+                        page.locator("[data-checkout-open]").click()
+                        form = page.locator("[data-checkout-form]")
+                        expect(form).to_be_visible()
+                        cash = next(
+                            m for m in dataset.methods if m.affects_cash_register
+                        )
+                        card = next(
+                            m for m in dataset.methods if not m.affects_cash_register
+                        )
+                        if label == "checkout_post_split":
+                            form.locator('[name="mode"][value="split"]').check()
+                            parts = form.locator("[data-split-part]")
+                            parts.nth(0).locator("[data-split-method]").select_option(
+                                str(cash.pk)
+                            )
+                            parts.nth(0).locator('[name$="-amount"]').fill("5.00")
+                            parts.nth(0).locator('[name$="-cash_received"]').fill(
+                                "20.00"
+                            )
+                            parts.nth(1).locator("[data-split-method]").select_option(
+                                str(card.pk)
+                            )
+                            parts.nth(1).locator('[name$="-amount"]').fill(
+                                str(sale.pending_amount - Decimal("5.00"))
+                            )
+                        else:
+                            method = card if label == "checkout_post_card" else cash
+                            form.locator(
+                                f'[name="method"][value="{method.pk}"]'
+                            ).check()
+                            if label == "checkout_post_cash_change":
+                                form.locator('[name="cash_received"]').fill("100.00")
+                        observer = {
+                            "event": "click",
+                            "trigger": ".checkout-confirm",
+                            "target": "checkout-panel",
+                            "expected": {
+                                "selector": ".checkout-success h3",
+                                "text": "VENTA COMPLETADA",
+                            },
+                        }
+
+                        def action():
+                            return page.locator(".checkout-confirm").click()
                     else:
                         observer = {
                             "event": "click",
@@ -238,6 +293,14 @@ class BrowserBaseline(StaticLiveServerTestCase):
                             - timing["response"],
                             "settle_to_visible_ms": timing["end"] - timing["settle"],
                             "status": timing["status"],
+                            **(
+                                {
+                                    "click_to_dialog_ms": timing["dialog"]
+                                    - timing["start"]
+                                }
+                                if timing["dialog"] is not None
+                                else {}
+                            ),
                         }
                     )
                     page.close()
@@ -256,6 +319,41 @@ class BrowserBaseline(StaticLiveServerTestCase):
                 )
             context.close()
             browser.close()
+        # Persisted economic assertions are outside all measured browser intervals
+        # and outside Playwright's async context. Every sample had its own Sale.
+        from apps.payments.models import Payment
+        from apps.billing.models import BillingDocument
+        from apps.cash_register.models import CashMovement
+
+        for label, fixtures in batches.items():
+            if not label.startswith("checkout_post_"):
+                continue
+            for sale, _ in fixtures:
+                sale.refresh_from_db()
+                self.assertEqual(sale.status, "completed")
+                self.assertEqual(sale.pending_amount, Decimal("0.00"))
+                payments = list(
+                    Payment.objects.filter(sale=sale).select_related("method")
+                )
+                self.assertEqual(len(payments), 2 if label.endswith("split") else 1)
+                self.assertEqual(
+                    sum((p.amount for p in payments), Decimal("0.00")),
+                    sale.total_amount,
+                )
+                self.assertEqual(
+                    BillingDocument.objects.filter(sale=sale, status="issued").count(),
+                    1,
+                )
+                self.assertEqual(
+                    CashMovement.objects.filter(sale=sale).count(),
+                    sum(p.method.affects_cash_register for p in payments),
+                )
+                for payment in payments:
+                    if payment.method.affects_cash_register:
+                        self.assertEqual(
+                            CashMovement.objects.get(payment=payment).amount,
+                            payment.amount,
+                        )
         result["profiling_seconds"] = round(time.perf_counter() - start, 3)
         result["scenario_count"] = len(result["scenarios"])
         self.output.parent.mkdir(parents=True, exist_ok=True)

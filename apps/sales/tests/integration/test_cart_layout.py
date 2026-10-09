@@ -125,4 +125,4 @@ class CartLayoutTests(TestCase):
         long_queries, html = measured()
         self.assertEqual(short_queries, long_queries)
         self.assertEqual(long_queries, 2)
-        self.assertEqual(html.count('<article class="cart-line">'), 20)
+        self.assertEqual(html.count('<article class="cart-line"'), 20)

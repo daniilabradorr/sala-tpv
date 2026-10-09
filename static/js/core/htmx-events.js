@@ -13,6 +13,7 @@ const setBusy = (detail, busy) => {
   if (busy) target.setAttribute("aria-busy", "true"); else target.removeAttribute("aria-busy");
 };
 const setProcessing = (detail, processing) => {
+  if (!mutating.has(requestVerb(detail))) return;
   const form = criticalForm(detail);
   const xhr = detail.xhr;
   let surface = requestSurface(detail);
@@ -55,6 +56,12 @@ const restoreFeedbackHost = ({ hide = false } = {}) => {
 const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail, false); };
 export const initHtmxEvents = () => {
   if (initialized) return;
+  document.addEventListener("submit", (event) => {
+    if (event.target.matches("[data-nx-critical-form]") && event.target.dataset.nxProcessing === "true") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
   document.body.addEventListener("htmx:configRequest", (event) => {
     // UX hint only: the server never uses this header as authentication authority.
     if (document.querySelector("[data-app-shell]")) {
@@ -82,7 +89,12 @@ export const initHtmxEvents = () => {
     }
     const messages = {403: "No tienes permiso para realizar esta acción.", 404: "Este recurso ya no está disponible.", 409: "La información ha cambiado. Actualiza los datos antes de continuar."};
     const message = messages[status] || (status >= 500 ? "Se ha producido un error inesperado." : null);
-    if (message) { event.detail.shouldSwap = false; feedback(message, "", resolvedRequestSurface(event.detail)); }
+    if (message) {
+      event.detail.shouldSwap = false;
+      const uncertain = status >= 500 && mutating.has(requestVerb(event.detail));
+      feedback(uncertain ? "No podemos confirmar el resultado de la operación." : message,
+        uncertain ? "Comprueba el estado antes de repetir." : "", resolvedRequestSurface(event.detail));
+    }
   });
   document.body.addEventListener("htmx:responseError", (event) => finishRequest(event.detail));
   document.addEventListener("nx:refresh-region", (event) => {

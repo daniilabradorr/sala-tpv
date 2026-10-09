@@ -49,7 +49,9 @@ class CheckoutForm(forms.Form):
     billing_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
     series = forms.ModelChoiceField(BillingSeries.objects.none(), required=False)
 
-    def __init__(self, *args, methods, series, **kwargs):
+    def __init__(
+        self, *args, methods, series, method_choices=None, series_choices=None, **kwargs
+    ):
         kwargs.setdefault("initial", {})
         kwargs["initial"].setdefault("mode", "single")
         kwargs["initial"].setdefault("payment_idempotency_key", uuid.uuid4())
@@ -57,6 +59,10 @@ class CheckoutForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["method"].queryset = methods
         self.fields["series"].queryset = series
+        if method_choices is not None:
+            self.fields["method"].choices = method_choices
+        if series_choices is not None:
+            self.fields["series"].choices = series_choices
 
 
 class CheckoutPaymentPartForm(forms.Form):
@@ -70,10 +76,12 @@ class CheckoutPaymentPartForm(forms.Form):
     external_reference = forms.CharField(required=False, max_length=150)
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
-    def __init__(self, *args, methods, **kwargs):
+    def __init__(self, *args, methods, method_choices=None, **kwargs):
         kwargs.setdefault("initial", {}).setdefault("idempotency_key", uuid.uuid4())
         super().__init__(*args, **kwargs)
         self.fields["method"].queryset = methods
+        if method_choices is not None:
+            self.fields["method"].choices = method_choices
 
 
 CheckoutPaymentFormSet = forms.formset_factory(

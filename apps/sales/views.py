@@ -38,6 +38,7 @@ from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import get_cash_session_detail
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
+from apps.payments.models import Payment
 from apps.payments.selectors import get_sale_payments, get_sale_return_refund_summary
 from apps.sales.forms import (
     CheckoutForm,
@@ -61,12 +62,16 @@ from apps.sales.forms import (
 from apps.sales.models import Sale
 from apps.sales.checkout import (
     PaymentIntent,
+    CheckoutConflict,
     checkout_options,
     checkout_state,
     run_checkout,
 )
 from apps.sales.selectors import (
     get_sale_cart,
+    get_sale_checkout,
+    get_sale_grid,
+    get_sale_changed_lines,
     get_sale_cart_line,
     get_sale_header,
     get_sale_open_cash_initial,
@@ -208,9 +213,12 @@ def _ensure_sale_editable(sale):
         raise PermissionDenied("Esta venta ya no puede modificarse.")
 
 
-def _workspace_cart_response(request, *, business, store, sale, form=None):
+def _workspace_cart_response(
+    request, *, business, store, sale, form=None, pos_settings=None
+):
     sale = get_sale_cart(business=business, store=store, pk=sale.pk)
-    pos_settings = POSSettings.objects.filter(business=business).first()
+    if pos_settings is None:
+        pos_settings = POSSettings.objects.filter(business=business).first()
     return render(
         request,
         "sales/partials/_cart_content.html",
@@ -221,6 +229,41 @@ def _workspace_cart_response(request, *, business, store, sale, form=None):
             "cart_form": form,
             "pos_settings": pos_settings,
         },
+    )
+
+
+def _workspace_line_response(
+    request, *, business, store, sale, line, form=None, editor=False, pos_settings=None
+):
+    # IDs are only rendering hints; the selector independently scopes every row.
+    dirty = {line.pk}
+    for value in request.headers.get("X-TPV-Changed-Lines", "").split(",")[:50]:
+        if value.isdecimal() and len(value) <= 18:
+            dirty.add(int(value))
+    current_sale = get_sale_header(business=business, store=store, pk=sale.pk)
+    changed_lines = list(
+        get_sale_changed_lines(
+            business=business, store=store, sale=current_sale, line_ids=dirty
+        )
+    )
+    if pos_settings is None:
+        pos_settings = POSSettings.objects.filter(business=business).first()
+    return render(
+        request,
+        "sales/partials/_line_update_success.html"
+        if editor
+        else "sales/partials/_line_mutation.html",
+        {
+            "store": store,
+            "sale": current_sale,
+            "lines": changed_lines,
+            "primary_line_id": line.pk,
+            "cart_form": form,
+            "pos_settings": pos_settings,
+            "line_oob": editor,
+            "footer_oob": True,
+        },
+        status=422 if form is not None and form.errors else 200,
     )
 
 
@@ -429,7 +472,13 @@ class SaleDetailView(
     template_name = "sales/sale_detail.html"
 
     def get(self, request, store_id, sale_pk):
-        sale = self.get_sale()
+        is_partial_request = request.htmx and not request.htmx.history_restore_request
+        business, store = self.get_business_and_store()
+        sale = (
+            get_sale_grid(business=business, store=store, pk=sale_pk)
+            if is_partial_request
+            else self.get_sale()
+        )
 
         if sale.is_editable:
             business = _get_business(request)
@@ -463,33 +512,35 @@ class SaleDetailView(
             context = {
                 "store": self.store,
                 "sale": sale,
-                "lines": sale.lines.all(),
                 "products": products,
                 "product_page": page,
                 "categories": get_workspace_categories(business=business),
                 "selected_category": category,
                 "query": query,
-                "cash_session_form": SaleCashSessionForm(
-                    sessions=get_sale_cash_sessions(
-                        business=business, store=self.store
-                    ),
-                    initial={"cash_session": sale.cash_session_id},
-                ),
                 "can_sell": can_sell_in_store(request.user, self.store),
-                "header_form": SaleHeaderUpdateForm(
-                    business=business,
-                    store=self.store,
-                    sale=sale,
-                    initial={
-                        "customer": sale.customer,
-                        "document_type_requested": sale.document_type_requested,
-                    },
-                ),
                 "pos_settings": pos_settings,
             }
-            is_partial_request = (
-                request.htmx and not request.htmx.history_restore_request
-            )
+            if not is_partial_request:
+                context.update(
+                    {
+                        "lines": sale.lines.all(),
+                        "cash_session_form": SaleCashSessionForm(
+                            sessions=get_sale_cash_sessions(
+                                business=business, store=self.store
+                            ),
+                            initial={"cash_session": sale.cash_session_id},
+                        ),
+                        "header_form": SaleHeaderUpdateForm(
+                            business=business,
+                            store=self.store,
+                            sale=sale,
+                            initial={
+                                "customer": sale.customer,
+                                "document_type_requested": sale.document_type_requested,
+                            },
+                        ),
+                    }
+                )
             template = (
                 "sales/partials/_product_grid.html"
                 if is_partial_request
@@ -856,6 +907,12 @@ class SaleLineAddView(
 
     template_name = "sales/sale_line_form.html"
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def get(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
@@ -916,7 +973,7 @@ class SaleLineAddView(
             )
 
         try:
-            add_sale_line(
+            added_line = add_sale_line(
                 business=business,
                 sale=sale,
                 product=form.cleaned_data["product"],
@@ -948,7 +1005,11 @@ class SaleLineAddView(
 
         if request.htmx:
             return _workspace_cart_response(
-                request, business=business, store=store, sale=sale
+                request,
+                business=business,
+                store=store,
+                sale=sale,
+                pos_settings=added_line._tpv_pos_settings,
             )
 
         messages.success(request, "Producto añadido a la venta.")
@@ -1065,7 +1126,7 @@ class SaleLineUpdateView(
             )
 
         try:
-            update_sale_line(
+            updated_line = update_sale_line(
                 business=business,
                 sale=sale,
                 line=line,
@@ -1101,18 +1162,14 @@ class SaleLineUpdateView(
             )
 
         if request.htmx:
-            sale = get_sale_cart(business=business, store=store, pk=sale.pk)
-            pos_settings = POSSettings.objects.filter(business=business).first()
-            response = render(
+            response = _workspace_line_response(
                 request,
-                "sales/partials/_line_update_success.html",
-                {
-                    "store": store,
-                    "sale": sale,
-                    "lines": sale.lines.all(),
-                    "pos_settings": pos_settings,
-                    "cart_oob": True,
-                },
+                business=business,
+                store=store,
+                sale=sale,
+                line=updated_line,
+                editor=True,
+                pos_settings=updated_line._tpv_pos_settings,
             )
             return add_hx_trigger(
                 response,
@@ -1149,17 +1206,19 @@ class SaleLineDeleteView(
 
     http_method_names = ["post"]
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def post(self, request, store_id, sale_pk, line_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
 
         _ensure_sale_editable(sale)
 
-        line = get_sale_line_detail(
-            business=business,
-            pk=line_pk,
-            sale=sale,
-        )
+        line = get_sale_cart_line(business=business, pk=line_pk, sale=sale)
 
         try:
             delete_sale_line(
@@ -1214,9 +1273,10 @@ class SaleLineQuantityUpdateView(
         line = get_sale_cart_line(business=business, pk=line_pk, sale=sale)
         form = SaleLineQuantityUpdateForm(request.POST)
 
+        updated_line = None
         if form.is_valid():
             try:
-                update_sale_line(
+                updated_line = update_sale_line(
                     business=business,
                     sale=sale,
                     line=line,
@@ -1229,8 +1289,14 @@ class SaleLineQuantityUpdateView(
         if form.errors and not request.htmx:
             _add_invalid_form_messages(request, form)
         if request.htmx:
-            response = _workspace_cart_response(
-                request, business=business, store=store, sale=sale, form=form
+            response = _workspace_line_response(
+                request,
+                business=business,
+                store=store,
+                sale=sale,
+                line=line,
+                form=form,
+                pos_settings=getattr(updated_line, "_tpv_pos_settings", None),
             )
             if form.errors:
                 response.status_code = 422
@@ -1303,13 +1369,22 @@ class SaleCheckoutView(
     template_name = "sales/checkout.html"
     partial_name = "sales/partials/_checkout.html"
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_checkout(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def _forms(self, request, business, sale):
         options = checkout_options(business=business, sale=sale)
         methods = options["methods"]
-        method_count = methods.count()
+        available_methods = list(methods)
+        method_count = len(available_methods)
         data = request.POST if request.method == "POST" else None
         initial = {}
         candidates = list(options["series"])
+        if method_count == 1:
+            initial["method"] = available_methods[0]
         if len(candidates) == 1:
             initial["series"] = candidates[0]
         form = CheckoutForm(
@@ -1317,6 +1392,9 @@ class SaleCheckoutView(
             methods=methods,
             series=options["series"],
             initial=initial,
+            method_choices=[("", "---------")]
+            + [(m.pk, str(m)) for m in available_methods],
+            series_choices=[("", "---------")] + [(c.pk, str(c)) for c in candidates],
         )
         formset = CheckoutPaymentFormSet(
             data,
@@ -1329,10 +1407,16 @@ class SaleCheckoutView(
                     for index in range(method_count)
                 ]
             ),
-            form_kwargs={"methods": methods},
+            form_kwargs={
+                "methods": methods,
+                "method_choices": [("", "---------")]
+                + [(m.pk, str(m)) for m in available_methods],
+            },
         )
         # There can never be more useful parts than active, unique methods.
         formset.max_num = method_count
+        options["methods"] = available_methods
+        options["series"] = candidates
         return options, form, formset, method_count
 
     @staticmethod
@@ -1349,9 +1433,23 @@ class SaleCheckoutView(
             return [str(message) for message in error.messages]
         return [str(error)]
 
-    def _render(self, request, business, store, sale, *, error=None, cash_change=None):
-        options, form, formset, method_count = self._forms(request, business, sale)
-        state = checkout_state(business=business, sale=sale)
+    def _render(
+        self,
+        request,
+        business,
+        store,
+        sale,
+        *,
+        error=None,
+        cash_change=None,
+        forms_bundle=None,
+    ):
+        state = checkout_state(
+            business=business, sale=sale, refresh=request.method == "POST"
+        )
+        options, form, formset, method_count = forms_bundle or self._forms(
+            request, business, sale
+        )
         pos_settings = POSSettings.objects.filter(business=business).first()
         selected_method = next(
             (
@@ -1372,7 +1470,9 @@ class SaleCheckoutView(
             ),
             "checkout_errors": self._error_messages(error),
             "cash_change": cash_change,
-            "selected_method_code": getattr(selected_method, "code", None),
+            "selected_method_is_cash": bool(
+                selected_method and selected_method.affects_cash_register
+            ),
         }
         response = render(
             request,
@@ -1389,11 +1489,14 @@ class SaleCheckoutView(
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
-        options, form, formset, _method_count = self._forms(request, business, sale)
+        forms_bundle = self._forms(request, business, sale)
+        options, form, formset, _method_count = forms_bundle
         mode = request.POST.get("mode", "single")
         valid = form.is_valid() and (mode != "split" or formset.is_valid())
         if not valid:
-            response = self._render(request, business, store, sale)
+            response = self._render(
+                request, business, store, sale, forms_bundle=forms_bundle
+            )
             if request.htmx:
                 response.status_code = 422
             return response
@@ -1406,8 +1509,12 @@ class SaleCheckoutView(
                         method_id=part["method"].pk,
                         amount=part["amount"],
                         cash_received=(
-                            part.get("cash_received")
-                            if part["method"].code == "cash"
+                            (
+                                part.get("cash_received")
+                                if part.get("cash_received") is not None
+                                else part["amount"]
+                            )
+                            if part["method"].affects_cash_register
                             else None
                         ),
                         external_reference=part.get("external_reference", ""),
@@ -1422,8 +1529,12 @@ class SaleCheckoutView(
                         method_id=form.cleaned_data["method"].pk,
                         amount=sale.pending_amount,
                         cash_received=(
-                            form.cleaned_data.get("cash_received")
-                            if form.cleaned_data["method"].code == "cash"
+                            (
+                                form.cleaned_data.get("cash_received")
+                                if form.cleaned_data.get("cash_received") is not None
+                                else sale.pending_amount
+                            )
+                            if form.cleaned_data["method"].affects_cash_register
                             else None
                         ),
                         external_reference=form.cleaned_data.get(
@@ -1432,6 +1543,15 @@ class SaleCheckoutView(
                         idempotency_key=form.cleaned_data["payment_idempotency_key"],
                     )
                 ]
+        cash_change = next(
+            (
+                intent.cash_received - intent.amount
+                for intent in intents
+                if intent.cash_received is not None
+                and intent.cash_received >= intent.amount
+            ),
+            None,
+        )
         try:
             run_checkout(
                 business=business,
@@ -1444,20 +1564,29 @@ class SaleCheckoutView(
             )
         except (ValidationError, ValueError) as error:
             # Re-read persisted state so partial success is represented truthfully.
-            response = self._render(request, business, store, sale, error=error)
+            response = self._render(
+                request,
+                business,
+                store,
+                sale,
+                error=error,
+                cash_change=cash_change
+                if Payment.objects.filter(
+                    business=business,
+                    sale=sale,
+                    idempotency_key__in=[intent.idempotency_key for intent in intents],
+                    status="completed",
+                ).exists()
+                else None,
+                forms_bundle=forms_bundle,
+            )
             state = checkout_state(business=business, sale=sale)
-            if request.htmx and state["sale"].payment_status != "paid":
+            if isinstance(error, CheckoutConflict):
+                response.status_code = 409
+                response["X-Netxodo-Allow-Error-Swap"] = "true"
+            elif request.htmx and state["sale"].payment_status != "paid":
                 response.status_code = 422
             return response
-        cash_change = next(
-            (
-                intent.cash_received - intent.amount
-                for intent in intents
-                if intent.cash_received is not None
-                and intent.cash_received >= intent.amount
-            ),
-            None,
-        )
         return self._render(request, business, store, sale, cash_change=cash_change)
 
 

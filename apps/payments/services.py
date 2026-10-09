@@ -116,9 +116,11 @@ def _method(*, business, method_id, refund=False):
 
 
 def _cash_context(*, business, store, method, settings, cash_session_id):
-    if not cash_session_id:
+    # Sale completion has its own require_open_cash_register policy. Payments
+    # require a physical session only when the method actually moves cash.
+    if not cash_session_id and method.affects_cash_register:
         raise ValidationError(
-            {"cash_session": "Todo pago completado requiere una sesión de caja."}
+            {"cash_session": "El efectivo requiere una sesión de caja abierta."}
         )
     session = None
     if cash_session_id:

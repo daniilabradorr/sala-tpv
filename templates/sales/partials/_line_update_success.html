@@ -1,1 +1,2 @@
-{% include "sales/partials/_cart_content.html" %}
+{% for line in lines %}{% include "sales/partials/_cart_line.html" with line_oob=True %}{% endfor %}
+{% include "sales/partials/_cart_footer.html" %}

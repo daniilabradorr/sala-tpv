@@ -4,9 +4,25 @@
   // Absolute quantities share one queue owner that survives cart-content swaps.
   // Keep the old forms connected until the final queued intent is answered.
   let cartRevision = 0;
+  const dirtyLines = new Set();
+  let searchTimer;
+  let searchValue = document.querySelector("[data-tpv-search]")?.value || "";
+  document.addEventListener("input", (event) => {
+    if (!event.target.matches("[data-tpv-search]")) return;
+    clearTimeout(searchTimer);
+    if (event.target.value === searchValue) return;
+    searchValue = event.target.value;
+    searchTimer = setTimeout(() => event.target.form.dispatchEvent(new CustomEvent("tpv:search", { bubbles: true })), 175);
+  });
+  document.addEventListener("htmx:configRequest", (event) => {
+    if (dirtyLines.size && event.detail.elt.closest?.("#sale-cart, .line-editor")) {
+      event.detail.headers["X-TPV-Changed-Lines"] = [...dirtyLines].join(",");
+    }
+  });
   const cartRequests = new WeakMap();
   document.addEventListener("submit", (event) => {
     const form = event.target;
+    if (form.id === "catalog-filters") clearTimeout(searchTimer);
     if (form.matches(".quantity-form")) {
       const input = form.querySelector('[name="quantity"]');
       if (!form.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) {
@@ -21,6 +37,8 @@
     }
     if (event.target.matches('#sale-cart form, .line-editor form, .product-grid form')) {
       event.cartRevision = ++cartRevision;
+      const lineId = form.dataset.cartLineId;
+      if (lineId) dirtyLines.add(lineId);
     }
   }, true);
   document.addEventListener("htmx:beforeRequest", (event) => {
@@ -69,6 +87,15 @@
   }
   document.addEventListener("htmx:afterSwap", restoreCartScroll);
   document.addEventListener("htmx:oobAfterSwap", restoreCartScroll);
+  document.addEventListener("htmx:afterSettle", (event) => {
+    if (event.detail.xhr?.status !== 422 || !event.detail.target?.id?.startsWith("cart-line-")) return;
+    const region = document.querySelector("[data-cart-scroll-region]");
+    const alert = document.getElementById(event.detail.target.id)?.querySelector('[role="alert"]');
+    if (!region || !alert) return;
+    const bounds = region.getBoundingClientRect();
+    const error = alert.getBoundingClientRect();
+    if (error.top < bounds.top || error.bottom > bounds.bottom) region.scrollTop += Math.floor(error.top - bounds.top) - 2;
+  });
 
   function saveQuantity(input) {
     const form = input.closest("form");
@@ -99,6 +126,11 @@
   }, true);
   document.addEventListener("htmx:beforeRequest", (event) => {
     const form = event.detail.elt;
+    if (form?.matches("[data-checkout-open], [data-checkout-reload]")) {
+      const panel = event.detail.target;
+      const shell = document.querySelector("#checkout-loading-template")?.content.cloneNode(true);
+      if (shell) panel.replaceChildren(shell);
+    }
     if (form?.id === "quick-customer-trigger") {
       // Reopening must not expose the previous form while its replacement GET
       // is in flight: edits/submits on that form would be lost on the swap.
@@ -142,10 +174,19 @@
     }
   }
 
-  const money = (value) => `${value.toFixed(2).replace(".", ",")} €`;
-
+  // Visual feedback only. Decimal strings become integer cents without binary
+  // floating point; the server still validates and confirms every amount.
+  function cents(value) {
+    const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(String(value).trim());
+    return match ? BigInt(match[1]) * 100n + BigInt((match[2] || "").padEnd(2, "0")) : null;
+  }
+  function decimalMoney(value) {
+    const amount = value < 0n ? -value : value;
+    return `${value < 0n ? "-" : ""}${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
+  }
+  const money = (value) => `${decimalMoney(value).replace(".", ",")} €`;
   function pendingAmount(checkout) {
-    return Number(String(checkout.dataset.pending || "0").replace(",", ".")) || 0;
+    return cents(checkout.dataset.pending || "0") ?? 0n;
   }
 
   function syncCheckoutMode(checkout) {
@@ -160,14 +201,14 @@
     return new Map(
       [...checkout.querySelectorAll('[name="method"][data-method-code]')].map((input) => [
         input.value,
-        input.dataset.methodCode,
+        input.dataset.methodCash === "true",
       ]),
     );
   }
 
   function syncPaymentMethodFields(checkout) {
     const selected = checkout.querySelector('[name="method"]:checked');
-    const cash = selected?.dataset.methodCode === "cash";
+    const cash = selected?.dataset.methodCash === "true";
     const cashFields = checkout.querySelector("[data-cash-fields]");
     if (cashFields) cashFields.hidden = !cash;
     const reference = checkout.querySelector("[data-single-reference]");
@@ -175,31 +216,48 @@
 
     const codes = methodCodes(checkout);
     checkout.querySelectorAll("[data-split-part]:not([hidden])").forEach((part) => {
-      const code = codes.get(part.querySelector("[data-split-method]")?.value);
-      const partCash = part.querySelector("[data-part-cash]");
+      const selectedId = part.querySelector("[data-split-method]")?.value;
+      const cash = codes.get(selectedId);
+      const partCash = part.querySelectorAll("[data-part-cash]");
       const partReference = part.querySelector("[data-part-reference]");
-      if (partCash) partCash.hidden = code !== "cash";
-      if (partReference) partReference.hidden = !code || code === "cash";
+      partCash.forEach(node => { node.hidden = cash !== true; });
+      if (partReference) partReference.hidden = !selectedId || cash === true;
     });
   }
 
-  function updateCashChange(checkout) {
-    const received = Number(checkout.querySelector('[name="cash_received"]')?.value || 0);
-    const output = checkout.querySelector("[data-cash-change]");
-    if (output) output.textContent = money(Math.max(received - pendingAmount(checkout), 0));
+  function cashFeedback(input, amount, label, output) {
+    if (!input || !output) return;
+    const received = input.value.trim() === "" ? amount : cents(input.value);
+    if (received === null || amount === null) {
+      if (label) label.textContent = "Importe inválido";
+      output.textContent = "—";
+      return;
+    }
+    const difference = received - amount;
+    if (label) label.textContent = difference < 0n ? "Faltan" : "Cambio";
+    output.textContent = money(difference < 0n ? -difference : difference);
   }
-
+  function updateCashChange(checkout) {
+    cashFeedback(checkout.querySelector('[name="cash_received"]'), pendingAmount(checkout),
+      checkout.querySelector("[data-cash-label]"), checkout.querySelector("[data-cash-change]"));
+    checkout.querySelectorAll("[data-split-part]:not([hidden])").forEach((part) => {
+      cashFeedback(part.querySelector('[name$="-cash_received"]'), cents(part.querySelector('[name$="-amount"]')?.value || "0"),
+        part.querySelector("[data-part-cash-label]"), part.querySelector("[data-part-cash-change]"));
+    });
+  }
   function updateSplitSummary(checkout) {
-    const assigned = [...checkout.querySelectorAll('[data-split-part]:not([hidden]) [name$="-amount"]')]
-      .reduce((sum, input) => sum + Number(input.value || 0), 0);
+    const amounts = [...checkout.querySelectorAll('[data-split-part]:not([hidden]) [name$="-amount"]')].map(input => cents(input.value || "0"));
+    const valid = amounts.every(amount => amount !== null);
+    const assigned = amounts.reduce((sum, amount) => sum + (amount ?? 0n), 0n);
     const remaining = pendingAmount(checkout) - assigned;
     const assignedOutput = checkout.querySelector("[data-split-assigned]");
     const remainingOutput = checkout.querySelector("[data-split-remaining]");
-    if (assignedOutput) assignedOutput.textContent = money(assigned);
+    if (assignedOutput) assignedOutput.textContent = valid ? money(assigned) : "—";
     if (remainingOutput) {
-      remainingOutput.textContent = money(remaining);
-      remainingOutput.classList.toggle("is-negative", remaining < 0);
+      remainingOutput.textContent = valid ? money(remaining) : "—";
+      remainingOutput.classList.toggle("is-negative", remaining < 0n);
     }
+    updateCashChange(checkout);
   }
 
   function syncSplitParts(checkout) {
@@ -251,7 +309,7 @@
     if (cashQuick) {
       const checkout = cashQuick.closest(".checkout");
       const input = checkout.querySelector('[name="cash_received"]');
-      input.value = cashQuick.dataset.cashQuick === "exact" ? pendingAmount(checkout).toFixed(2) : cashQuick.dataset.cashQuick;
+      input.value = cashQuick.dataset.cashQuick === "exact" ? decimalMoney(pendingAmount(checkout)) : cashQuick.dataset.cashQuick;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
       return;
@@ -297,11 +355,23 @@
     saveQuantity(input);
   });
 
-  document.addEventListener("htmx:afterSwap", () => {
+  document.addEventListener("htmx:afterSwap", (event) => {
+    const revision = cartRequests.get(event.detail.xhr);
+    if (revision !== undefined && revision === cartRevision) dirtyLines.clear();
     syncCartSummary();
     normalizeResponsiveTicket();
     document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
     document.querySelector('#line-editor-dialog[open] [autofocus]')?.focus();
+  });
+
+  document.addEventListener("htmx:afterSettle", (event) => {
+    if (event.detail.target?.id !== "checkout-panel") return;
+    const checkout = document.querySelector("#checkout-dialog[open] [data-checkout]");
+    if (checkout) {
+      const cash = checkout.querySelector('[name="method"]:checked')?.dataset.methodCash === "true";
+      const focus = cash ? checkout.querySelector('[name="cash_received"]') : checkout.querySelector('[name="method"]:checked, [name="method"], [type="submit"]');
+      focus?.focus();
+    }
   });
 
   document.addEventListener("htmx:oobAfterSwap", () => {

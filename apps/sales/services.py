@@ -827,6 +827,7 @@ def add_sale_line(
     )
     line.save()
     _recalculate_locked_sale(locked_sale)
+    line._tpv_pos_settings = pos_settings
     return line
 
 
@@ -890,6 +891,7 @@ def update_sale_line(
         tax_rate=locked_line.tax_rate,
     )
 
+    locked_line.sale = locked_sale  # Reuse the authoritative, already locked relation.
     locked_line.quantity = calculated["quantity"]
     locked_line.unit_base_price = calculated["unit_base_price"]
     locked_line.discount_amount = calculated["discount_amount"]
@@ -907,6 +909,7 @@ def update_sale_line(
     )
 
     _recalculate_locked_sale(locked_sale)
+    locked_line._tpv_pos_settings = pos_settings
     return locked_line
 
 
@@ -992,6 +995,17 @@ def complete_sale(*, business, sale, closed_by):
         require_customer_for_invoice=True,
         require_fiscal_identity=True,
     )
+
+    # Lock the session before stock writes/FK checks. Closing holds this same
+    # row; taking it later can deadlock at commit against inventory's FK locks.
+    if locked_sale.cash_session_id:
+        locked_sale.cash_session = CashSession.objects.select_for_update(
+            of=("self",)
+        ).get(
+            pk=locked_sale.cash_session_id,
+            business=business,
+            store=locked_sale.store,
+        )
 
     _validate_cash_context(
         business=business,

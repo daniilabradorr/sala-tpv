@@ -13,8 +13,8 @@
     </form>
   {% empty %}<p class="empty-state">No hay productos que coincidan con la búsqueda.</p>{% endfor %}
   {% if product_page.has_other_pages %}<nav class="pagination" aria-label="Paginación de productos">
-    {% if product_page.has_previous %}<a hx-get="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.previous_page_number }}" hx-target="#product-grid" hx-swap="outerHTML" href="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.previous_page_number }}">Anterior</a>{% endif %}
+    {% if product_page.has_previous %}<a hx-sync="#catalog-filters:replace" hx-get="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.previous_page_number }}" hx-target="#product-grid" hx-swap="outerHTML" href="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.previous_page_number }}">Anterior</a>{% endif %}
     <span>Página {{ product_page.number }} de {{ product_page.paginator.num_pages }}</span>
-    {% if product_page.has_next %}<a hx-get="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.next_page_number }}" hx-target="#product-grid" hx-swap="outerHTML" href="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.next_page_number }}">Siguiente</a>{% endif %}
+    {% if product_page.has_next %}<a hx-sync="#catalog-filters:replace" hx-get="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.next_page_number }}" hx-target="#product-grid" hx-swap="outerHTML" href="?q={{ query|urlencode }}&category={{ selected_category.pk|default:'' }}&page={{ product_page.next_page_number }}">Siguiente</a>{% endif %}
   </nav>{% endif %}
 </div>
