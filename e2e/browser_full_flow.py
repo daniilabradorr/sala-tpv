@@ -206,7 +206,7 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         expect(cart_line).to_be_visible()
         quantity_input = cart_line.get_by_label("Cantidad")
         quantity_input.fill(str(quantity))
-        self.page.locator("#sale-cart-content").evaluate(
+        cart_line.evaluate(
             "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
         )
         with self.page.expect_response(
@@ -216,15 +216,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         ) as response_info:
             quantity_input.press("Enter")
         self.assertLess(response_info.value.status, 400)
-        updated_cart = self.page.locator(
-            "#sale-cart-content:not([data-e2e-before-quantity-swap])"
-        )
-        expect(updated_cart).to_be_visible()
-        updated_quantity = (
-            updated_cart.locator(".cart-line")
-            .filter(has_text=product_name)
-            .get_by_label("Cantidad")
-        )
+        updated_line = self.page.locator(
+            "#sale-cart .cart-line:not([data-e2e-before-quantity-swap])"
+        ).filter(has_text=product_name)
+        expect(updated_line).to_be_visible()
+        updated_quantity = updated_line.get_by_label("Cantidad")
         expect(updated_quantity).to_have_value(
             re.compile(rf"^{re.escape(str(quantity))}(?:[.,]0+)?$")
         )
