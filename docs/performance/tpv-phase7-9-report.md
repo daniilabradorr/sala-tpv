@@ -289,4 +289,3 @@ Migración única necesaria: RemoveConstraint chk_payment_completed_session, pue
 ## 60. Cierre de fases
 
 Fase 7 cerrada: SÍ. Fase 8 cerrada: SÍ. Fase 9 cerrada: SÍ. Benchmark completo y todas las verificaciones de implementación publicadas; los diez jobs del SHA de entrega documental se verifican igualmente antes de marcar ready y se enlazan en el body de #227. No implica merge, ni ampliación a Fase 13.
-

@@ -2,18 +2,9 @@ diff --git a/tests/performance/baseline.py b/tests/performance/baseline.py
 index 749b0a9..a9c98b3 100644
 --- a/tests/performance/baseline.py
 +++ b/tests/performance/baseline.py
-@@ -26,6 +26,7 @@ def metadata():
-             version = cursor.fetchone()[0]
-     return {
-         "schema_version": 1,
+@@ -28,0 +29 @@ def metadata():
 +        "harness_extension": "50-line server mutations and barcode/Enter UI scenario; application code unchanged from base",
-         "commit": subprocess.check_output(
-             ["git", "rev-parse", "HEAD"], text=True
-         ).strip(),
-@@ -162,6 +163,33 @@ def scenarios(dataset):
-         yield f"editor_{mode}_post", editor
- 
- 
+@@ -164,0 +166,27 @@ def scenarios(dataset):
 +    # Additional phase 7 payload sizes, using the same fresh-sale method.
 +    for mode in ("quantity", "discount", "price"):
 +
@@ -41,37 +32,19 @@ index 749b0a9..a9c98b3 100644
 +        yield f"{mode}_50_lines", large_edit
 +
 +
- def grid_scenarios(dataset):
-     from django.urls import reverse
- 
 diff --git a/tests/performance/browser.py b/tests/performance/browser.py
 index e1f3a15..ff502da 100644
 --- a/tests/performance/browser.py
 +++ b/tests/performance/browser.py
-@@ -81,6 +81,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
-         batches = {}
-         for label in (
-             "search",
+@@ -83,0 +84 @@ class BrowserBaseline(StaticLiveServerTestCase):
 +            "barcode_enter",
-             "add",
-             "quantity_plus",
-             "quantity_enter",
-@@ -135,9 +136,9 @@ class BrowserBaseline(StaticLiveServerTestCase):
-                     expect(page.locator("#product-grid .product-card")).to_have_count(
-                         24
-                     )
+@@ -138 +139 @@ class BrowserBaseline(StaticLiveServerTestCase):
 -                    if label == "search":
 +                    if label in ("search", "barcode_enter"):
-                         observer = {
+@@ -140 +141 @@ class BrowserBaseline(StaticLiveServerTestCase):
 -                            "event": "input",
 +                            "event": "keydown" if label == "barcode_enter" else "input",
-                             "trigger": "#product-search",
-                             "target": "product-grid",
-                             "expected": {
-@@ -146,8 +147,13 @@ class BrowserBaseline(StaticLiveServerTestCase):
-                             },
-                         }
- 
+@@ -149,2 +150,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
 -                        def action():
 -                            return page.locator("#product-search").fill("BASE-0020")
 +                        if label == "barcode_enter":
@@ -81,15 +54,6 @@ index e1f3a15..ff502da 100644
 +                        else:
 +                            def action():
 +                                return page.locator("#product-search").fill("BASE-0020")
-                     elif label == "add":
-                         observer = {
-                             "event": "click",
-@@ -224,7 +230,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
-                     timing = page.evaluate("window.tpvMeasure")
-                     self.assertEqual(timing["status"], 200)
-                     self.assertFalse(errors, errors)
+@@ -227 +233 @@ class BrowserBaseline(StaticLiveServerTestCase):
 -                    if label == "search":
 +                    if label in ("search", "barcode_enter"):
-                         expect(
-                             page.locator("#product-grid .product-card")
-                         ).to_have_count(1)

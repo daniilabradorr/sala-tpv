@@ -185,4 +185,3 @@ SÍ: exact/insuficiente/cambio/split, Payment.amount, balance físico, sesión c
 ## 46. Deuda restante
 
 Sin campos nuevos por tender: una recarga sin POST original no inventa efectivo entregado/cambio. Para revertir payments.0004 deben resolverse Payments noncash con sesión nula. Latencias limitadas al entorno documentado. No se hace merge ni se amplía el scope a otras fases.
-
