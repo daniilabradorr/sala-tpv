@@ -2,9 +2,11 @@
 
 import re
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
+from django.core.exceptions import ValidationError
 from playwright.sync_api import expect, sync_playwright
 
 from apps.billing.models import BillingDocument
@@ -14,6 +16,7 @@ from apps.onboarding.services import OnboardingService
 from apps.payments.models import Payment, PaymentStatusChoices
 from apps.sales.models import PaymentStatusChoices as SalePaymentStatus
 from apps.sales.models import Sale
+from apps.inventory.models import InventoryItem
 from apps.sales.tests.factories import create_sales_inventory_item, create_sales_product
 
 
@@ -648,3 +651,59 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                 browser.close()
         self.assertEqual(Payment.objects.count(), 1)
         self.assertEqual(BillingDocument.objects.count(), 1)
+
+    def test_paid_sale_recovers_billing_failure_without_second_charge(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 375, "height": 812})
+            try:
+                self._login_and_sale(page)
+                dialog = self._open_checkout(page, 375)
+                dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+                dialog.locator('[name="cash_received"]').fill("20.00")
+                payment_key = dialog.locator(
+                    '[name="payment_idempotency_key"]'
+                ).input_value()
+                billing_key = dialog.locator(
+                    '[name="billing_idempotency_key"]'
+                ).input_value()
+                # Inject an emission failure only: Sale, stock and Payment are
+                # real durable services. The retry runs the real Billing service.
+                with patch(
+                    "apps.sales.checkout.issue_sale_document",
+                    side_effect=ValidationError("Emisión temporalmente indisponible"),
+                ):
+                    dialog.locator(".checkout-confirm").click()
+                    expect(dialog).to_be_visible()
+                    expect(dialog.locator(".recovery-note")).to_contain_text(
+                        "El cobro se ha registrado correctamente"
+                    )
+                    expect(
+                        dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                    ).to_have_count(0)
+                    expect(
+                        dialog.get_by_role("button", name="REINTENTAR EMISIÓN")
+                    ).to_be_visible()
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(payment_key)
+                expect(
+                    dialog.locator('[name="billing_idempotency_key"]')
+                ).to_have_value(billing_key)
+                dialog.get_by_role("button", name="REINTENTAR EMISIÓN").click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+            finally:
+                browser.close()
+        sale = Sale.objects.get()
+        self.assertEqual(sale.pending_amount, Decimal("0.00"))
+        payment = Payment.objects.get(sale=sale)
+        self.assertEqual(
+            CashMovement.objects.get(payment=payment).amount, payment.amount
+        )
+        self.assertEqual(BillingDocument.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(
+            InventoryItem.objects.get(product__sku="CHECKOUT-1").current_stock,
+            Decimal("49.000"),
+        )
