@@ -227,22 +227,18 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
 
     def _checkout_sale(self, method, expected_type):
         self.step = f"checkout sale by {method} as {expected_type}"
-        amount = self._decimal_from_text(
-            self.page.get_by_text(re.compile(r"^COBRAR")).inner_text()
-        )
-        self.page.get_by_role("link", name=re.compile(r"^COBRAR")).click()
-        expect(
-            self.page.get_by_role("heading", name=re.compile(r"Venta #"))
-        ).to_be_visible()
+        trigger = self.page.locator("[data-checkout-open]")
+        amount = self._decimal_from_text(trigger.inner_text())
+        trigger.click()
+        dialog = self.page.locator("#checkout-dialog")
+        expect(dialog.locator("[data-checkout]")).to_be_visible()
         self._select_or_verify_single_series()
-        self.page.get_by_role("radio", name=method, exact=True).check()
+        dialog.get_by_role("radio", name=method, exact=True).check()
         if method == "Efectivo":
-            self.page.locator('input[name="cash_received"]').fill(str(amount))
-        self.page.get_by_role("button", name="Confirmar cobro").click()
-        expect(
-            self.page.get_by_role("heading", name="Venta completada")
-        ).to_be_visible()
-        self.page.get_by_role("link", name="VER DOCUMENTO").click()
+            dialog.locator('input[name="cash_received"]').fill(str(amount))
+        dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+        expect(dialog.get_by_role("heading", name="VENTA COMPLETADA")).to_be_visible()
+        dialog.get_by_role("link", name="VER DOCUMENTO").click()
         expect(self.page.locator(".billing-detail-header .status-issued")).to_have_text(
             "Emitido"
         )
