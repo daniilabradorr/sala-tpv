@@ -88,7 +88,10 @@
   function captureCartScroll(status = 200) {
     const shell = document.querySelector("#sale-cart-content");
     const region = shell?.querySelector("[data-cart-scroll-region]");
-    cartScroll = region ? { shell, sale: shell.dataset.saleId, top: region.scrollTop, status } : null;
+    const active = document.activeElement;
+    const focus = shell?.closest("#sale-cart")?.matches(":modal") && shell.contains(active)
+      ? { id: active.id, label: active.getAttribute("aria-label") } : null;
+    cartScroll = region ? { shell, sale: shell.dataset.saleId, top: region.scrollTop, status, focus } : null;
   }
   document.addEventListener("htmx:beforeSwap", (event) => {
     if (event.detail.target?.id === "sale-cart-content" && event.detail.shouldSwap) {
@@ -108,6 +111,13 @@
     const region = shell?.querySelector("[data-cart-scroll-region]");
     if (!region || shell.dataset.saleId !== saved.sale) return;
     region.scrollTop = saved.top; // The browser clamps after removal/emptying.
+    if (saved.focus && shell.closest("#sale-cart")?.matches(":modal")) {
+      const control = (saved.focus.id && document.getElementById(saved.focus.id))
+        || [...shell.querySelectorAll("[aria-label]")].find(node =>
+          node.getAttribute("aria-label") === saved.focus.label)
+        || shell.querySelector("[data-nx-drawer-close]");
+      control?.focus({ preventScroll: true });
+    }
     const alert = saved.status === 422 && region.querySelector('[role="alert"]');
     if (alert) {
       const bounds = region.getBoundingClientRect();

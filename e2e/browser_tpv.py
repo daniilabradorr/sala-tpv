@@ -554,6 +554,36 @@ class BrowserTPVTests(StaticLiveServerTestCase):
             finally:
                 browser.close()
 
+    def test_open_mobile_ticket_keeps_focus_after_held_structural_response(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 375, "height": 812})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                held = {}
+
+                def hold(route):
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.mobileAddHeld = true")
+
+                page.route("**/lines/add/", hold)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                page.wait_for_function("window.mobileAddHeld === true")
+                self._open_ticket_if_needed(page, 375)
+                with page.expect_response(
+                    lambda r: r.request.method == "POST" and "/lines/add/" in r.url
+                ):
+                    held["route"].fulfill(response=held["response"])
+                expect(page.locator("#sale-cart .cart-line")).to_be_visible()
+                expect(
+                    page.locator("#sale-cart [data-nx-drawer-close]")
+                ).to_be_focused()
+                expect(page.locator("#sale-cart")).to_have_attribute("open", "")
+            finally:
+                browser.close()
+
     def _structural_then_quantity(self, *, delete, partial_first=False):
         from apps.sales.models import Sale, SaleLine
 
