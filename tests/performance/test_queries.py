@@ -2,7 +2,7 @@
 
 from django.db import connection
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
@@ -136,6 +136,13 @@ class TPVQueryGrowthTests(TestCase):
             counts.append(len(queries))
         self.assertEqual(counts[0], counts[1])
 
+    @override_settings(
+        STORAGES={
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+            }
+        }
+    )
     def test_structural_reconcile_uses_scoped_existing_detail_endpoint(self):
         sale, lines = self.dataset.sale(3)
         foreign = Dataset(1, label="reconcile-foreign")
