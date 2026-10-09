@@ -258,6 +258,28 @@ def get_sale_header(*, business, store, pk):
     )
 
 
+def get_sale_checkout(*, business, store, pk):
+    """Checkout needs header relations, never return/cart prefetches."""
+    return get_object_or_404(
+        Sale.objects.select_related(
+            "store", "cash_register", "cash_session__cash_register", "customer"
+        ).filter(business=business, store=store),
+        pk=pk,
+    )
+
+
+def get_sale_grid(*, business, store, pk):
+    """Authoritative editability and isolation for a catalogue-only request."""
+    return get_object_or_404(Sale, business=business, store=store, pk=pk)
+
+
+def get_sale_changed_lines(*, business, store, sale, line_ids):
+    """Reconcile pending UI intents using only this sale's persisted snapshots."""
+    return SaleLine.objects.filter(
+        business=business, sale=sale, sale__store=store, pk__in=line_ids
+    ).order_by("created_at", "pk")
+
+
 def get_sale_cart(*, business, store, pk):
     """Read only the authoritative sale and its ticket lines."""
     return get_object_or_404(

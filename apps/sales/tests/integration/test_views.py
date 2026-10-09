@@ -72,6 +72,9 @@ TEST_TEMPLATES = [
                             "<div id='sale-cart-content'>cart {{ sale.total_amount }} "
                             "{{ cart_form.errors }}</div>"
                         ),
+                        "sales/partials/_line_mutation.html": (
+                            "line {{ sale.total_amount }} {{ cart_form.errors }}"
+                        ),
                         "sales/partials/_workspace_header.html": (
                             "header {{ sale.customer }} {{ header_form.errors }}"
                         ),
@@ -440,7 +443,7 @@ class SaleViewsIntegrationTests(TestCase):
         response = self.client.post(url, {"quantity": "2.500"}, HTTP_HX_REQUEST="true")
         line.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
+        self.assertTemplateUsed(response, "sales/partials/_line_mutation.html")
         self.assertEqual(line.quantity, Decimal("2.500"))
         self.assertEqual(line.unit_base_price, original_price)
         self.assertEqual(line.discount_amount, original_discount)
@@ -470,7 +473,7 @@ class SaleViewsIntegrationTests(TestCase):
 
         response = self.client.post(url, {"quantity": "0"}, HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 422)
-        self.assertTemplateUsed(response, "sales/partials/_cart_content.html")
+        self.assertTemplateUsed(response, "sales/partials/_line_mutation.html")
         self.assertContains(response, "quantity", status_code=422)
         line.refresh_from_db()
         self.assertEqual(line.quantity, original_quantity)

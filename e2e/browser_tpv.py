@@ -467,7 +467,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
 
         page.on("request", record_request)
         page.on("framenavigated", record_navigation)
-        page.locator("#sale-cart-content").evaluate(
+        page.locator(".cart-line").first.evaluate(
             "el => el.dataset.beforeSave = 'true'"
         )
         try:
@@ -480,13 +480,11 @@ class BrowserTPVTests(StaticLiveServerTestCase):
             ) as response:
                 action()
             self.assertEqual(response.value.status, status)
-            expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(
-                0
-            )
+            expect(page.locator(".cart-line[data-before-save]")).to_have_count(0)
             expect(page.locator('.quantity-form [name="quantity"]')).to_have_value(
                 expected
             )
-            expect(page.locator("#sale-cart-content.htmx-settling")).to_have_count(0)
+            expect(page.locator(".cart-line.htmx-settling")).to_have_count(0)
             self.assertEqual(len(requests), 1)
             self.assertEqual(requests[0].headers.get("hx-request"), "true")
             self.assertEqual(navigations, [])
@@ -555,6 +553,161 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                     ).to_be_visible()
             finally:
                 browser.close()
+
+    def test_open_mobile_ticket_keeps_focus_after_held_structural_response(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 375, "height": 812})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                held = {}
+
+                def hold(route):
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.mobileAddHeld = true")
+
+                page.route("**/lines/add/", hold)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                page.wait_for_function("window.mobileAddHeld === true")
+                self._open_ticket_if_needed(page, 375)
+                with page.expect_response(
+                    lambda r: r.request.method == "POST" and "/lines/add/" in r.url
+                ):
+                    held["route"].fulfill(response=held["response"])
+                expect(page.locator("#sale-cart .cart-line")).to_be_visible()
+                expect(
+                    page.locator("#sale-cart [data-nx-drawer-close]")
+                ).to_be_focused()
+                expect(page.locator("#sale-cart")).to_have_attribute("open", "")
+            finally:
+                browser.close()
+
+    def _structural_then_quantity(self, *, delete, partial_first=False):
+        from apps.sales.models import Sale, SaleLine
+
+        second = create_sales_product(
+            business=self.result.business,
+            name="Agua TPV",
+            base_price=Decimal("1.00"),
+            track_stock=False,
+        )
+        trace = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                self._open_sale(page)
+                page.get_by_role("button", name=re.compile("Café especial")).click()
+                expect(
+                    page.locator(".cart-line", has_text="Café especial")
+                ).to_be_visible()
+                if delete:
+                    page.get_by_role("button", name=re.compile("Agua TPV")).click()
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_be_visible()
+                sale_id = int(page.url.rstrip("/").split("/")[-1])
+                held = {}
+                page.evaluate("""() => {
+                    window.cartTrace = [];
+                    document.addEventListener('submit', e => {
+                        if (e.cartRevision) window.cartTrace.push({kind: 'intent', revision: e.cartRevision});
+                    });
+                    document.addEventListener('htmx:beforeSwap', e => {
+                        window.cartTrace.push({kind: 'swap', url: e.detail.xhr.responseURL,
+                            swap: e.detail.shouldSwap, target: e.detail.target.id});
+                    });
+                }""")
+
+                def hold(route):
+                    trace.append(
+                        {"request": route.request.url, "method": route.request.method}
+                    )
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.structuralHeld = true")
+
+                pattern = (
+                    "**/quantity/"
+                    if partial_first
+                    else ("**/delete/" if delete else "**/lines/add/")
+                )
+                page.route(pattern, hold)
+                refreshes = []
+                page.on(
+                    "request",
+                    lambda r: (
+                        refreshes.append(r.url) if "region=cart" in r.url else None
+                    ),
+                )
+                if partial_first:
+                    page.get_by_label("Aumentar Café especial").click()
+                    page.wait_for_function("window.structuralHeld === true")
+                if delete:
+                    page.locator(".cart-line", has_text="Agua TPV").get_by_role(
+                        "button", name="Eliminar"
+                    ).click()
+                else:
+                    page.get_by_role("button", name=re.compile("Agua TPV")).click()
+                page.wait_for_function("window.structuralHeld === true")
+                if not partial_first:
+                    expect(page.get_by_label("Aumentar Café especial")).to_be_enabled()
+                    page.get_by_label("Aumentar Café especial").click()
+                with page.expect_response(
+                    lambda r: (
+                        ("/delete/" in r.url if delete else "/lines/add/" in r.url)
+                        and r.request.method == "POST"
+                        if partial_first
+                        else "/quantity/" in r.url and r.request.method == "POST"
+                    )
+                ) as response:
+                    held["route"].fulfill(response=held["response"])
+                self.assertEqual(response.value.status, 200)
+                expect(
+                    page.locator(".cart-line", has_text="Café especial").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("2")
+                trace.extend(page.evaluate("window.cartTrace"))
+                print(
+                    "STRUCTURAL TRACE", {"delete": delete, "events": trace}, flush=True
+                )
+                if delete:
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_have_count(0)
+                else:
+                    expect(
+                        page.locator(".cart-line", has_text="Agua TPV")
+                    ).to_be_visible()
+                total = page.locator(".grand-total dd").inner_text()
+                self.assertEqual(len(refreshes), 0 if partial_first else 1)
+            finally:
+                browser.close()
+        sale = Sale.objects.get(pk=sale_id)
+        self.assertEqual(
+            SaleLine.objects.get(sale=sale, product=self.product).quantity,
+            Decimal("2.000"),
+        )
+        self.assertEqual(
+            SaleLine.objects.filter(sale=sale, product=second).exists(), not delete
+        )
+        self.assertEqual(total, f"{sale.total_amount:.2f}".replace(".", ",") + " €")
+
+    def test_structural_add_then_quantity_reconciles_cart(self):
+        self._structural_then_quantity(delete=False)
+
+    def test_structural_delete_then_quantity_reconciles_cart(self):
+        self._structural_then_quantity(delete=True)
+
+    def test_quantity_then_structural_add_keeps_latest_cart(self):
+        self._structural_then_quantity(delete=False, partial_first=True)
+
+    def test_quantity_then_structural_delete_keeps_latest_cart(self):
+        self._structural_then_quantity(delete=True, partial_first=True)
 
     def test_rapid_quantity_clicks_survive_older_response(self):
         with sync_playwright() as playwright:
@@ -645,6 +798,16 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                 held["route"].fulfill(response=held["response"])
                 expect(page.locator(".quantity-form.htmx-request")).to_have_count(0)
                 self.assertEqual(len(requests), 3)
+                expect(
+                    page.locator(".cart-line", has_text="Café especial").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("3")
+                expect(
+                    page.locator(".cart-line", has_text="Agua TPV").get_by_label(
+                        "Cantidad"
+                    )
+                ).to_have_value("2")
                 page.reload()
                 expect(
                     page.locator(".cart-line", has_text="Café especial").get_by_label(
@@ -1073,7 +1236,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         checkout_dialog = page.locator("#checkout-dialog")
                         expect(checkout_dialog).to_have_attribute("open", "")
                         expect(
-                            checkout_dialog.locator("#checkout-title")
+                            checkout_dialog.locator("[data-checkout]")
                         ).to_be_visible()
                         page.keyboard.press("Escape")
                         expect(checkout_dialog).not_to_be_visible()
@@ -1081,7 +1244,9 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                         # Add/delete also replace the same shell. Exercise them at
                         # desktop's current scroll position; mobile drawer stays modal.
                         if viewport["width"] >= 1200:
-                            line.get_by_label("Cantidad").scroll_into_view_if_needed()
+                            line.get_by_role(
+                                "button", name="Eliminar"
+                            ).scroll_into_view_if_needed()
                             before = region.evaluate("el => el.scrollTop")
                             line.get_by_role("button", name="Eliminar").click()
                             expect(cart.locator(".cart-line")).to_have_count(19)
@@ -1156,9 +1321,7 @@ class BrowserTPVTests(StaticLiveServerTestCase):
 
         page.on("request", record)
         page.on("framenavigated", navigation)
-        page.locator("#sale-cart-content").evaluate(
-            "el => el.dataset.beforeSave = 'true'"
-        )
+        line.evaluate("el => el.dataset.beforeSave = 'true'")
         try:
             with page.expect_response(
                 lambda r: "/quantity/" in r.url and r.request.method == "POST"
@@ -1168,14 +1331,71 @@ class BrowserTPVTests(StaticLiveServerTestCase):
                 else:
                     line.get_by_label("Cantidad").press("Enter")
             self.assertEqual(response.value.status, status)
-            expect(page.locator("#sale-cart-content[data-before-save]")).to_have_count(
-                0
-            )
+            expect(page.locator(".cart-line[data-before-save]")).to_have_count(0)
             expect(line.get_by_label("Cantidad")).to_have_value(expected)
-            expect(page.locator("#sale-cart-content.htmx-settling")).to_have_count(0)
+            expect(page.locator(".cart-line.htmx-settling")).to_have_count(0)
             self.assertEqual(len(requests), 1, [r.post_data for r in requests])
             self.assertEqual(requests[0].headers.get("hx-request"), "true")
             self.assertEqual(navigations, [])
         finally:
             page.remove_listener("request", record)
             page.remove_listener("framenavigated", navigation)
+
+    def test_barcode_enter_cancels_pending_debounce_and_older_results(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                self._login(page)
+                self._open_sale(page)
+                requests = []
+                page.on(
+                    "request",
+                    lambda r: (
+                        requests.append(r.url)
+                        if "q=" in r.url and r.resource_type == "xhr"
+                        else None
+                    ),
+                )
+                # Both input and submit happen in the same browser task: the
+                # semantic submit must beat (and cancel) the delayed text intent.
+                page.evaluate("""() => {
+                    window.searchOrder=[];
+                    const form=document.querySelector('#catalog-filters');
+                    form.addEventListener('htmx:beforeRequest',()=>window.searchOrder.push('request'));
+                    const input=form.querySelector('[name=q]');
+                    input.value='8410000000010';
+                    input.dispatchEvent(new Event('input',{bubbles:true}));
+                    form.requestSubmit();
+                    window.searchOrder.push('submit-returned');
+                }""")
+                expect(page.locator("#product-grid .product-card")).to_have_count(1)
+                self.assertEqual(
+                    page.evaluate("window.searchOrder"), ["request", "submit-returned"]
+                )
+                # A later debounced human search gives the cancelled timer a
+                # complete turn without sleeps or ignoring duplicate requests.
+                page.locator("#product-search").fill("missing-product")
+                expect(page.locator("#product-grid .product-card")).to_have_count(0)
+                self.assertEqual(len(requests), 2, requests)
+                held = {}
+
+                def hold(route):
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.olderSearchReady = true")
+
+                page.route("**/*q=missing-older*", hold)
+                page.locator("#product-search").fill("missing-older")
+                page.wait_for_function(
+                    "document.querySelector('#catalog-filters').classList.contains('htmx-request')"
+                )
+                page.wait_for_function("window.olderSearchReady === true")
+                page.locator("#product-search").fill("CAFE-10")
+                page.locator("#product-search").press("Enter")
+                expect(page.locator("#product-grid .product-card")).to_have_count(1)
+                if "response" in held:
+                    held["route"].fulfill(response=held["response"])
+                expect(page.locator("#product-grid .product-card")).to_have_count(1)
+            finally:
+                browser.close()

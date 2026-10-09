@@ -2,19 +2,26 @@
 
 import re
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
+from django.core.exceptions import ValidationError
 from playwright.sync_api import expect, sync_playwright
 
 from apps.billing.models import BillingDocument
-from apps.cash_register.models import CashSession
+from apps.cash_register.models import CashSession, CashMovement
 from apps.catalog.models import Category
 from apps.onboarding.services import OnboardingService
 from apps.payments.models import Payment, PaymentStatusChoices
 from apps.sales.models import PaymentStatusChoices as SalePaymentStatus
 from apps.sales.models import Sale
-from apps.sales.tests.factories import create_sales_inventory_item, create_sales_product
+from apps.inventory.models import InventoryItem
+from apps.sales.tests.factories import (
+    create_sales_inventory_item,
+    create_sales_product,
+    create_sales_tax,
+)
 
 
 @override_settings(
@@ -190,6 +197,7 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         dialog = page.locator("#checkout-dialog")
         expect(dialog).to_have_attribute("open", "")
         expect(dialog.get_by_role("heading", name="COBRAR")).to_be_visible()
+        expect(dialog.locator("[data-checkout]")).to_be_visible()
         return dialog
 
     def _pending_amount(self, dialog):
@@ -319,16 +327,20 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
             pending = self._pending_amount(dialog)
-            first_amount = Decimal("5.00")
+            first_amount = Decimal("10.10")
             second_amount = pending - first_amount
             dialog.get_by_role("radio", name="Pago dividido").check()
             parts = dialog.locator("[data-split-part]:visible")
             expect(parts).to_have_count(2)
             parts.nth(0).get_by_label("Método").select_option(label="Efectivo")
             parts.nth(0).get_by_label("Importe").fill(f"{first_amount:.2f}")
-            parts.nth(0).get_by_label("Entregado (efectivo)").fill("10.00")
+            parts.nth(0).get_by_label("Entregado (efectivo)").fill("20.00")
             parts.nth(1).get_by_label("Método").select_option(label="Tarjeta")
             parts.nth(1).get_by_label("Importe").fill(f"{second_amount:.2f}")
+            expect(parts.nth(0).locator("[data-part-cash-change]")).to_have_text(
+                "9,90 €"
+            )
+            expect(parts.nth(1).locator("[data-part-cash]").first).to_be_hidden()
             expect(dialog.locator("[data-split-assigned]")).to_have_text(
                 self._money(pending)
             )
@@ -350,6 +362,8 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
             payments.exclude(status=PaymentStatusChoices.COMPLETED).exists()
         )
         self.assertTrue(BillingDocument.objects.filter(sale=sale).exists())
+
+        self.assertEqual(CashMovement.objects.get(sale=sale).amount, Decimal("10.10"))
 
     def test_invalid_split_stays_open_and_preserves_idempotency_keys(self):
         with sync_playwright() as playwright:
@@ -424,3 +438,422 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                     ).to_be_focused()
                     page.close()
             browser.close()
+
+    def test_checkout_shell_precedes_held_get_and_processing_precedes_response(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login_and_sale(page)
+                expect(page.locator(".cart-line")).to_have_count(1)
+                held = {}
+                requests = []
+
+                def hold(route):
+                    requests.append(route.request.method)
+                    held["route"] = route
+                    held["response"] = route.fetch()
+                    page.evaluate("window.checkoutHeldReady = true")
+
+                page.route("**/checkout/", hold)
+                page.locator("[data-checkout-open]").click()
+                dialog = page.locator("#checkout-dialog")
+                expect(dialog).to_be_visible()
+                expect(dialog.get_by_role("status")).to_have_text("Preparando cobro…")
+                expect(
+                    dialog.locator(".checkout-loading[aria-busy=true]")
+                ).to_be_visible()
+                self.assertEqual(requests, ["GET"])
+                page.wait_for_function("window.checkoutHeldReady === true")
+                page.evaluate("window.checkoutHeldReady = false")
+                held["route"].fulfill(response=held["response"])
+                expect(
+                    dialog.get_by_role("radio", name=re.compile("Tarjeta"))
+                ).to_be_visible()
+                dialog.get_by_role("radio", name=re.compile("Tarjeta")).check()
+                button = dialog.locator(".checkout-confirm")
+                button.click()
+                expect(button).to_be_disabled()
+                expect(button).to_have_text("Procesando…")
+                expect(dialog).to_be_visible()
+                page.keyboard.press("Escape")
+                expect(dialog).to_be_visible()
+                dialog.locator("[data-checkout-form]").evaluate(
+                    "form => { form.requestSubmit(); form.requestSubmit(); }"
+                )
+                self.assertEqual(requests, ["GET", "POST"])
+                page.wait_for_function("window.checkoutHeldReady === true")
+                page.evaluate("window.checkoutHeldReady = false")
+                held["route"].fulfill(response=held["response"])
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+            finally:
+                browser.close()
+        sale = Sale.objects.get()
+        self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(BillingDocument.objects.filter(sale=sale).count(), 1)
+        self.assertFalse(CashMovement.objects.filter(sale=sale).exists())
+
+    def test_cash_blank_insufficient_change_and_small_viewports(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                for viewport, tender in (
+                    ({"width": 1440, "height": 900}, ""),
+                    ({"width": 900, "height": 900}, "20"),
+                    ({"width": 375, "height": 812}, ""),
+                    ({"width": 375, "height": 568}, "20"),
+                ):
+                    with self.subTest(viewport=viewport, tender=tender):
+                        page = browser.new_page(viewport=viewport)
+                        self._login_and_sale(page)
+                        dialog = self._open_checkout(page, viewport["width"])
+                        pending = self._pending_amount(dialog)
+                        dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+                        field = dialog.get_by_label("Entregado por el cliente")
+                        field.fill("10.00")
+                        expect(dialog.locator("[data-cash-label]")).to_have_text(
+                            "Faltan"
+                        )
+                        expect(dialog.locator("[data-cash-change]")).to_have_text(
+                            self._money(pending - Decimal("10.00"))
+                        )
+                        keys = dialog.locator(
+                            '[name="payment_idempotency_key"]'
+                        ).input_value()
+                        with page.expect_response(
+                            lambda r: (
+                                "/checkout/" in r.url and r.request.method == "POST"
+                            )
+                        ) as failed:
+                            dialog.get_by_role(
+                                "button", name=re.compile("CONFIRMAR COBRO")
+                            ).click()
+                        self.assertEqual(failed.value.status, 422)
+                        expect(dialog).to_be_visible()
+                        expect(
+                            dialog.locator('[name="payment_idempotency_key"]')
+                        ).to_have_value(keys)
+                        expect(
+                            dialog.get_by_role("alert").filter(
+                                has_text="efectivo entregado"
+                            )
+                        ).to_be_visible()
+                        field.fill(tender)
+                        expected = (
+                            Decimal("0.00") if not tender else Decimal(tender) - pending
+                        )
+                        expect(dialog.locator("[data-cash-label]")).to_have_text(
+                            "Cambio"
+                        )
+                        expect(dialog.locator("[data-cash-change]")).to_have_text(
+                            self._money(expected)
+                        )
+                        self.assertTrue(
+                            dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+                        )
+                        dialog.get_by_role(
+                            "button", name=re.compile("CONFIRMAR COBRO")
+                        ).click()
+                        expect(
+                            dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                        ).to_be_visible()
+                        expect(dialog.locator(".success-summary")).to_contain_text(
+                            self._money(expected)
+                        )
+                        page.close()
+            finally:
+                browser.close()
+        self.assertEqual(Payment.objects.count(), 4)
+        self.assertEqual(CashMovement.objects.count(), 4)
+        for payment in Payment.objects.all():
+            self.assertEqual(
+                CashMovement.objects.get(payment=payment).amount, payment.amount
+            )
+
+    def test_uncertain_post_keeps_modal_and_same_keys_for_safe_retry(self):
+        product = self.result.business.products.get(sku="CHECKOUT-1")
+        product.base_price = Decimal("40.00")
+        product.save()
+        product.tax = create_sales_tax(
+            business=self.result.business, rate=Decimal("0.00")
+        )
+        product.save()
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login_and_sale(page)
+                dialog = self._open_checkout(page, 1440)
+                dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+                dialog.locator('[name="cash_received"]').fill("50.00")
+                key = dialog.locator('[name="payment_idempotency_key"]').input_value()
+                requests = []
+                all_posts = []
+                page.on(
+                    "request",
+                    lambda r: (
+                        all_posts.append(r.post_data)
+                        if r.method == "POST" and "/checkout/" in r.url
+                        else None
+                    ),
+                )
+
+                def uncertain(route):
+                    requests.append(route.request.post_data)
+                    # Let the real backend commit; lose only the browser response.
+                    route.fetch()
+                    route.abort("failed")
+
+                page.route("**/checkout/", uncertain)
+                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                expect(dialog.locator("#nx-feedback")).to_contain_text(
+                    "No podemos confirmar el resultado"
+                )
+                expect(dialog).to_be_visible()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_have_count(0)
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(key)
+                page.unroute("**/checkout/", uncertain)
+                # A successful cart read cannot confirm this payment attempt.
+                page.evaluate("""async () => {
+                    await htmx.ajax('GET', location.pathname + '?region=cart', {
+                        source: '#sale-cart', target: '#sale-cart-content', swap: 'outerHTML'
+                    });
+                }""")
+                expect(page.locator("#nx-feedback")).to_be_visible()
+                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+                expect(dialog.locator(".success-summary")).to_contain_text("10,00 €")
+                expect(page.locator("#nx-feedback")).not_to_be_visible()
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(len(all_posts), 2)
+                self.assertTrue(
+                    all(f"payment_idempotency_key={key}" in body for body in all_posts)
+                )
+            finally:
+                browser.close()
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(BillingDocument.objects.count(), 1)
+        self.assertEqual(Payment.objects.get().amount, Decimal("40.00"))
+        self.assertEqual(CashMovement.objects.get().amount, Decimal("40.00"))
+
+    def test_server_500_keeps_modal_and_same_keys_for_safe_retry(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login_and_sale(page)
+                dialog = self._open_checkout(page, 1440)
+                dialog.get_by_role("radio", name=re.compile("Tarjeta")).check()
+                key = dialog.locator('[name="payment_idempotency_key"]').input_value()
+                requests = []
+
+                def uncertain(route):
+                    requests.append(route.request.post_data)
+                    # Let the real backend commit; lose only the browser response.
+                    route.fetch()
+                    route.fulfill(
+                        status=500,
+                        content_type="text/html",
+                        body="Temporary server failure",
+                    )
+
+                page.route("**/checkout/", uncertain)
+                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                expect(dialog.locator("#nx-feedback")).to_contain_text(
+                    "No podemos confirmar el resultado"
+                )
+                expect(dialog).to_be_visible()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_have_count(0)
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(key)
+                page.unroute("**/checkout/", uncertain)
+                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+                self.assertEqual(len(requests), 1)
+            finally:
+                browser.close()
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(BillingDocument.objects.count(), 1)
+
+    def test_paid_sale_recovers_billing_failure_without_second_charge(self):
+        product = self.result.business.products.get(sku="CHECKOUT-1")
+        product.base_price = Decimal("40.00")
+        product.save()
+        product.tax = create_sales_tax(
+            business=self.result.business, rate=Decimal("0.00")
+        )
+        product.save()
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 375, "height": 812})
+            try:
+                self._login_and_sale(page)
+                dialog = self._open_checkout(page, 375)
+                dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+                dialog.locator('[name="cash_received"]').fill("50.00")
+                payment_key = dialog.locator(
+                    '[name="payment_idempotency_key"]'
+                ).input_value()
+                billing_key = dialog.locator(
+                    '[name="billing_idempotency_key"]'
+                ).input_value()
+                # Inject an emission failure only: Sale, stock and Payment are
+                # real durable services. The retry runs the real Billing service.
+                with patch(
+                    "apps.sales.checkout.issue_sale_document",
+                    side_effect=ValidationError("Emisión temporalmente indisponible"),
+                ):
+                    dialog.locator(".checkout-confirm").click()
+                    expect(dialog).to_be_visible()
+                    expect(dialog.locator(".recovery-note")).to_contain_text(
+                        "El cobro se ha registrado correctamente"
+                    )
+                    expect(
+                        dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                    ).to_have_count(0)
+                    expect(
+                        dialog.get_by_role("button", name="REINTENTAR EMISIÓN")
+                    ).to_be_visible()
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(payment_key)
+                expect(
+                    dialog.locator('[name="billing_idempotency_key"]')
+                ).to_have_value(billing_key)
+                expect(dialog.locator(".recovery-note")).to_contain_text(
+                    "Cambio 10,00 €"
+                )
+                dialog.get_by_role("button", name="REINTENTAR EMISIÓN").click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+                expect(dialog.locator(".success-summary")).to_contain_text("10,00 €")
+            finally:
+                browser.close()
+        sale = Sale.objects.get()
+        self.assertEqual(sale.pending_amount, Decimal("0.00"))
+        payment = Payment.objects.get(sale=sale)
+        self.assertEqual(
+            CashMovement.objects.get(payment=payment).amount, payment.amount
+        )
+        self.assertEqual(BillingDocument.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(
+            InventoryItem.objects.get(product__sku="CHECKOUT-1").current_stock,
+            Decimal("49.000"),
+        )
+
+    def test_non_cash_without_session_success_starts_new_sale_by_post(self):
+        from apps.business_config.models import POSSettings
+
+        POSSettings.objects.filter(business=self.result.business).update(
+            require_open_cash_register=False
+        )
+        self.session.delete()
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login(page)
+                page.locator(".topbar-sale").click()
+                expect(page.locator("#product-grid")).to_be_visible()
+                page.get_by_role("button", name=re.compile("Producto checkout")).click()
+                expect(page.locator(".cart-line")).to_be_visible()
+                first_sale_id = int(page.url.rstrip("/").split("/")[-1])
+                dialog = self._open_checkout(page, 1440)
+                dialog.get_by_role("radio", name=re.compile("Tarjeta")).check()
+                dialog.locator(".checkout-confirm").click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+                new_sale = dialog.get_by_role("button", name="NUEVA VENTA")
+                expect(new_sale).to_be_visible()
+                with page.expect_response(
+                    lambda r: (
+                        r.request.method == "POST" and r.url.endswith("/sales/start/")
+                    )
+                ) as response:
+                    new_sale.click()
+                self.assertEqual(response.value.status, 302)
+                expect(page.locator("#product-grid")).to_be_visible()
+                next_sale_id = int(page.url.rstrip("/").split("/")[-1])
+                self.assertNotEqual(next_sale_id, first_sale_id)
+            finally:
+                browser.close()
+        self.assertIsNone(Sale.objects.get(pk=first_sale_id).cash_session_id)
+        next_sale = Sale.objects.get(pk=next_sale_id)
+        self.assertEqual(next_sale.status, "open")
+        self.assertIsNone(next_sale.cash_session_id)
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(CashMovement.objects.count(), 0)
+
+    def test_uncertain_checkout_validation_422_preserves_feedback_data_and_keys(self):
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            try:
+                self._login_and_sale(page)
+                dialog = self._open_checkout(page, 1440)
+                dialog.get_by_role("radio", name=re.compile("Efectivo")).check()
+                payment_key = dialog.locator(
+                    '[name="payment_idempotency_key"]'
+                ).input_value()
+                billing_key = dialog.locator(
+                    '[name="billing_idempotency_key"]'
+                ).input_value()
+                requests = []
+                page.on(
+                    "request",
+                    lambda r: (
+                        requests.append(r.post_data)
+                        if r.method == "POST" and "/checkout/" in r.url
+                        else None
+                    ),
+                )
+
+                def disconnected(route):
+                    route.abort("failed")
+
+                page.route("**/checkout/", disconnected)
+                dialog.locator(".checkout-confirm").click()
+                expect(page.locator("#nx-feedback")).to_be_visible()
+                page.unroute("**/checkout/", disconnected)
+                dialog.locator('[name="cash_received"]').fill("0.01")
+                with page.expect_response(
+                    lambda r: r.request.method == "POST" and "/checkout/" in r.url
+                ) as invalid:
+                    dialog.locator(".checkout-confirm").click()
+                self.assertEqual(invalid.value.status, 422)
+                expect(dialog.locator(".tpv-errors")).to_contain_text("insuficiente")
+                expect(page.locator("#nx-feedback")).to_be_visible()
+                expect(dialog.locator('[name="cash_received"]')).to_have_value("0.01")
+                expect(
+                    dialog.locator('[name="payment_idempotency_key"]')
+                ).to_have_value(payment_key)
+                expect(
+                    dialog.locator('[name="billing_idempotency_key"]')
+                ).to_have_value(billing_key)
+                expect(dialog).to_be_visible()
+                dialog.locator('[name="cash_received"]').fill("")
+                dialog.locator(".checkout-confirm").click()
+                expect(
+                    dialog.get_by_role("heading", name="VENTA COMPLETADA")
+                ).to_be_visible()
+                expect(page.locator("#nx-feedback")).not_to_be_visible()
+                self.assertEqual(len(requests), 3)
+            finally:
+                browser.close()
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(CashMovement.objects.count(), 1)

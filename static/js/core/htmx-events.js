@@ -13,6 +13,7 @@ const setBusy = (detail, busy) => {
   if (busy) target.setAttribute("aria-busy", "true"); else target.removeAttribute("aria-busy");
 };
 const setProcessing = (detail, processing) => {
+  if (!mutating.has(requestVerb(detail))) return;
   const form = criticalForm(detail);
   const xhr = detail.xhr;
   let surface = requestSurface(detail);
@@ -30,7 +31,7 @@ const setProcessing = (detail, processing) => {
 };
 const resolvedRequestSurface = (detail) =>
   requestSurface(detail) || (detail.xhr ? requestSurfaces.get(detail.xhr) : null);
-const feedback = (message, action = "", surface = null) => {
+const feedback = (message, action = "", surface = null, operation = "") => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
   const host = document.querySelector("[data-nx-feedback-host]");
   if (surface?.isConnected) {
@@ -42,6 +43,8 @@ const feedback = (message, action = "", surface = null) => {
   }
   region.querySelector("[data-nx-feedback-message]").textContent = message;
   region.querySelector("[data-nx-feedback-action]").textContent = action;
+  region.dataset.operation = operation;
+  region.dataset.surface = surface?.id || "";
   region.hidden = false;
 };
 const restoreFeedbackHost = ({ hide = false } = {}) => {
@@ -55,6 +58,12 @@ const restoreFeedbackHost = ({ hide = false } = {}) => {
 const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail, false); };
 export const initHtmxEvents = () => {
   if (initialized) return;
+  document.addEventListener("submit", (event) => {
+    if (event.target.matches("[data-nx-critical-form]") && event.target.dataset.nxProcessing === "true") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
   document.body.addEventListener("htmx:configRequest", (event) => {
     // UX hint only: the server never uses this header as authentication authority.
     if (document.querySelector("[data-app-shell]")) {
@@ -67,11 +76,19 @@ export const initHtmxEvents = () => {
   });
   document.body.addEventListener("htmx:beforeRequest", (event) => { setBusy(event.detail, true); setProcessing(event.detail, true); });
   document.body.addEventListener("htmx:afterRequest", (event) => finishRequest(event.detail));
+  document.body.addEventListener("htmx:afterSwap", (event) => {
+    const confirmed = event.detail.xhr?.getResponseHeader("X-Netxodo-Confirmed-Operation");
+    const region = document.getElementById("nx-feedback");
+    const surface = resolvedRequestSurface(event.detail);
+    if (confirmed && region?.dataset.operation === confirmed
+        && region.dataset.surface === surface?.id) restoreFeedbackHost({ hide: true });
+  });
   document.body.addEventListener("htmx:sendError", (event) => {
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
     const surface = resolvedRequestSurface(event.detail);
     finishRequest(event.detail);
-    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface);
+    if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface,
+      String(event.detail.requestConfig?.parameters?.payment_idempotency_key || ""));
     else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.", surface);
   });
   document.body.addEventListener("htmx:beforeSwap", (event) => {
@@ -82,7 +99,13 @@ export const initHtmxEvents = () => {
     }
     const messages = {403: "No tienes permiso para realizar esta acción.", 404: "Este recurso ya no está disponible.", 409: "La información ha cambiado. Actualiza los datos antes de continuar."};
     const message = messages[status] || (status >= 500 ? "Se ha producido un error inesperado." : null);
-    if (message) { event.detail.shouldSwap = false; feedback(message, "", resolvedRequestSurface(event.detail)); }
+    if (message) {
+      event.detail.shouldSwap = false;
+      const uncertain = status >= 500 && mutating.has(requestVerb(event.detail));
+      feedback(uncertain ? "No podemos confirmar el resultado de la operación." : message,
+        uncertain ? "Comprueba el estado antes de repetir." : "", resolvedRequestSurface(event.detail),
+        uncertain ? String(event.detail.requestConfig?.parameters?.payment_idempotency_key || "") : "");
+    }
   });
   document.body.addEventListener("htmx:responseError", (event) => finishRequest(event.detail));
   document.addEventListener("nx:refresh-region", (event) => {

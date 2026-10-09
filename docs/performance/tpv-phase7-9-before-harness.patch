@@ -1,0 +1,59 @@
+diff --git a/tests/performance/baseline.py b/tests/performance/baseline.py
+index 749b0a9..a9c98b3 100644
+--- a/tests/performance/baseline.py
++++ b/tests/performance/baseline.py
+@@ -28,0 +29 @@ def metadata():
++        "harness_extension": "50-line server mutations and barcode/Enter UI scenario; application code unchanged from base",
+@@ -164,0 +166,27 @@ def scenarios(dataset):
++    # Additional phase 7 payload sizes, using the same fresh-sale method.
++    for mode in ("quantity", "discount", "price"):
++
++        def large_edit(kind=mode):
++            sale, lines = dataset.sale(50)
++            if kind == "quantity":
++                return (
++                    "POST",
++                    url("sale_line_quantity_update", sale, lines[24]),
++                    {"quantity": "1.5"},
++                    True,
++                )
++            data = (
++                {"discount_amount": "1.00"}
++                if kind == "discount"
++                else {"unit_base_price": "11.00"}
++            )
++            return (
++                "POST",
++                url("sale_line_update", sale, lines[24]) + "?mode=" + kind,
++                data,
++                True,
++            )
++
++        yield f"{mode}_50_lines", large_edit
++
++
+diff --git a/tests/performance/browser.py b/tests/performance/browser.py
+index e1f3a15..ff502da 100644
+--- a/tests/performance/browser.py
++++ b/tests/performance/browser.py
+@@ -83,0 +84 @@ class BrowserBaseline(StaticLiveServerTestCase):
++            "barcode_enter",
+@@ -138 +139 @@ class BrowserBaseline(StaticLiveServerTestCase):
+-                    if label == "search":
++                    if label in ("search", "barcode_enter"):
+@@ -140 +141 @@ class BrowserBaseline(StaticLiveServerTestCase):
+-                            "event": "input",
++                            "event": "keydown" if label == "barcode_enter" else "input",
+@@ -149,2 +150,7 @@ class BrowserBaseline(StaticLiveServerTestCase):
+-                        def action():
+-                            return page.locator("#product-search").fill("BASE-0020")
++                        if label == "barcode_enter":
++                            page.locator("#product-search").fill(dataset.products[20].barcode)
++                            def action():
++                                return page.locator("#product-search").press("Enter")
++                        else:
++                            def action():
++                                return page.locator("#product-search").fill("BASE-0020")
+@@ -227 +233 @@ class BrowserBaseline(StaticLiveServerTestCase):
+-                    if label == "search":
++                    if label in ("search", "barcode_enter"):

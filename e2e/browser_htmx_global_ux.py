@@ -74,23 +74,31 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         main.get_by_role("button", name="Abrir caja").click()
         main.get_by_role("button", name="Nueva venta").click()
         expect(main.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
-        # Prepare one settled interaction at a time. Otherwise the debounced
-        # search can still be pending when the expired-session test clears its
-        # cookie, producing two HX-Redirect navigations that abort each other.
-        page.evaluate(
-            """() => {
-              window.nxPreparedRegions = {};
-              document.addEventListener('htmx:afterSettle', event => {
-                window.nxPreparedRegions[event.detail.target?.id] = true;
-              });
-            }"""
+        # Navigation can expose HTML before deferred TPV listeners initialize.
+        # Begin user input only after the real page scripts finish loading.
+        page.wait_for_function(
+            "document.readyState === 'complete' && window.htmx !== undefined"
         )
-        main.get_by_label("Buscar producto").fill(self.product.name)
-        page.wait_for_function("window.nxPreparedRegions['product-grid'] === true")
-        main.locator("#product-grid").get_by_role(
+        search = main.get_by_label("Buscar producto")
+        search.fill(self.product.name)
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "GET"
+                and "/sales/" in response.url
+                and "q=" in response.url
+            )
+        ):
+            search.press("Enter")
+        product = main.locator("#product-grid").get_by_role(
             "button", name=re.compile(self.product.name)
-        ).click()
-        page.wait_for_function("window.nxPreparedRegions['sale-cart-content'] === true")
+        )
+        expect(product).to_be_visible()
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/lines/add/" in response.url
+            )
+        ):
+            product.click()
         expect(main.locator("#sale-cart .cart-line")).to_be_visible()
 
     def test_checkout_processing_422_toast_and_csrf(self):
@@ -119,11 +127,12 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
                 trigger.click()
                 dialog = page.locator("#checkout-dialog")
                 expect(dialog).to_be_visible()
-                self.assertTrue(
-                    page.evaluate(
-                        "document.querySelector('#checkout-dialog').contains(document.activeElement)"
-                    )
-                )
+                expect(dialog.locator("[data-checkout]")).to_be_visible()
+                expect(
+                    dialog.locator(
+                        '[name="method"]:checked, [name="method"], [type="submit"]'
+                    ).first
+                ).to_be_focused()
                 page.evaluate(
                     """
                     window.nxProcessingSnapshots = {};

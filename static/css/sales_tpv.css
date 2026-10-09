@@ -42,3 +42,10 @@
   .tpv-mode .tpv-cart.nx-drawer{grid-area:cart;top:calc(var(--topbar-height) + 1rem);height:calc(100dvh - var(--topbar-height) - var(--tpv-workspace-inset) - 1rem);max-height:calc(100dvh - var(--topbar-height) - var(--tpv-workspace-inset) - 1rem)}
   .tpv-mode .tpv-cart.nx-drawer:has(.empty-state){height:auto}
 }
+
+.checkout-loading { min-height: 180px; }
+.checkout-loading p { padding: 1rem 0; }
+
+[data-cart-scroll-region] { overflow-anchor: none; }
+
+.cart-line > .tpv-errors { grid-column: 1 / -1; }

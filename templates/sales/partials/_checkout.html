@@ -19,12 +19,13 @@
       <dl class="success-summary">
         <div><dt>Total</dt><dd>{{ sale.total_amount|floatformat:2 }} €</dd></div>
         <div><dt>Cobro</dt><dd>{% for payment in payments %}{{ payment.method.name }} · {{ payment.amount|floatformat:2 }} €{% if not forloop.last %}<br>{% endif %}{% endfor %}</dd></div>
+        {% if cash_received != None %}<div><dt>Efectivo entregado</dt><dd>{{ cash_received|floatformat:2 }} €</dd></div>{% endif %}
         {% if cash_change != None %}<div><dt>Cambio</dt><dd>{{ cash_change|floatformat:2 }} €</dd></div>{% endif %}
         <div><dt>Documento</dt><dd>{{ document.series_text }} / {{ document.number|stringformat:"06d" }}</dd></div>
       </dl>
       {% include "sales/partials/_document_preview.html" %}
       <div class="success-actions">
-        {% if sale.cash_session_id %}<form method="post" action="{% url 'sales:sale_start_for_session' store.pk sale.cash_session_id %}" data-nx-sale-start>{% csrf_token %}<button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
+        {% if can_sell %}<form novalidate method="post" action="{% if sale.cash_session_id %}{% url 'sales:sale_start_for_session' store.pk sale.cash_session_id %}{% else %}{% url 'sales:sale_start' store.pk %}{% endif %}" data-nx-sale-start>{% csrf_token %}<button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
         {% if document.status == 'issued' %}<a class="button button-secondary" href="{% url 'billing:document_print' store.pk document.pk %}?autoprint=1" target="_blank" rel="noopener" hx-boost="false" aria-label="IMPRIMIR (abre una nueva pestaña)">IMPRIMIR</a>{% endif %}
         <div class="success-secondary">
           {% if sale.cash_session_id %}<a href="{% url 'cash_register:session_detail' store.pk sale.cash_session_id %}">Volver a caja</a>{% else %}<a href="{% url 'sales:sale_detail' store.pk sale.pk %}">Volver a venta</a>{% endif %}
@@ -34,10 +35,10 @@
     </div>
   {% else %}
     {% if sale.payment_status == 'paid' %}
-      <div class="recovery-note" role="status"><strong>El cobro se ha registrado correctamente.</strong><span>No se ha podido completar la emisión del documento. Reinténtala sin volver a cobrar.</span></div>
+      <div class="recovery-note" role="status"><strong>El cobro se ha registrado correctamente.</strong><span>No se ha podido completar la emisión del documento. Reinténtala sin volver a cobrar.</span>{% if cash_change != None %}<span>Cambio {{ cash_change|floatformat:2 }} €</span>{% endif %}</div>
     {% elif sale.is_completed %}<div class="recovery-note"><strong>Venta completada.</strong><span>El cobro continúa pendiente.</span></div>{% endif %}
 
-    <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" data-checkout-form data-nx-critical-form>
+    <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" hx-sync="this:drop" data-checkout-form data-nx-critical-form>
       {% csrf_token %}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
       <section class="checkout-document" aria-label="Documento fiscal">
         <span><strong>Documento</strong> {% if document_type == 'F1' %}Factura{% else %}Ticket{% endif %}</span>
@@ -46,6 +47,13 @@
         {% for error in form.series.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
       </section>
 
+      {% if sale.payment_status == 'paid' %}
+        <input type="hidden" name="mode" value="{{ form.mode.value|default:'single' }}">
+        <input type="hidden" name="method" value="{{ form.method.value|default_if_none:'' }}">
+        <input type="hidden" name="cash_received" value="{{ form.cash_received.value|default_if_none:'' }}">
+        {{ payment_formset.management_form }}
+        {% for part in payment_formset %}{% for field in part %}<input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default_if_none:'' }}">{% endfor %}{% endfor %}
+      {% endif %}
       {% if sale.pending_amount > 0 %}
         <p class="checkout-due"><span>Pendiente</span><strong>{{ sale.pending_amount|floatformat:2 }} €</strong></p>
         <fieldset class="checkout-modes"><legend>Tipo de pago</legend>
@@ -56,15 +64,15 @@
 
         <section data-single-payment {% if form.mode.value == 'split' %}hidden{% endif %}>
           <fieldset class="payment-methods"><legend>¿Cómo paga el cliente?</legend>
-            {% for method in methods %}<label class="payment-method method-{{ method.code }}"><input type="radio" name="method" value="{{ method.pk }}" data-method-code="{{ method.code }}" {% if form.method.value|stringformat:'s' == method.pk|stringformat:'s' %}checked{% endif %}><span>{{ method.name }} <b aria-hidden="true">✓</b></span></label>{% empty %}<p>No hay métodos de pago activos.</p>{% endfor %}
+            {% for method in methods %}<label class="payment-method method-{{ method.code }}"><input type="radio" name="method" value="{{ method.pk }}" data-method-code="{{ method.code }}" data-method-cash="{{ method.affects_cash_register|yesno:'true,false' }}" {% if form.method.value|stringformat:'s' == method.pk|stringformat:'s' %}checked{% endif %}><span>{{ method.name }} <b aria-hidden="true">✓</b></span></label>{% empty %}<p>No hay métodos de pago activos.</p>{% endfor %}
           </fieldset>
           {% for error in form.method.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
-          <div class="cash-fields" data-cash-fields {% if selected_method_code != 'cash' %}hidden{% endif %}>
+          <div class="cash-fields" data-cash-fields {% if not selected_method_is_cash %}hidden{% endif %}>
             <label for="{{ form.cash_received.id_for_label }}">Entregado por el cliente</label>
             <input id="{{ form.cash_received.id_for_label }}" name="cash_received" type="number" inputmode="decimal" min="0" step="0.01" value="{{ form.cash_received.value|default_if_none:'' }}" {% if form.cash_received.errors %}aria-invalid="true" aria-describedby="cash-errors"{% endif %}>
             <div class="cash-quick" aria-label="Importes rápidos"><button type="button" data-cash-quick="exact">EXACTO</button><button type="button" data-cash-quick="20">20 €</button><button type="button" data-cash-quick="50">50 €</button></div>
             {% if form.cash_received.errors %}<div id="cash-errors" class="field-error" role="alert">{% for error in form.cash_received.errors %}{{ error }}{% endfor %}</div>{% endif %}
-            <p class="cash-change"><span>Cambio</span><strong data-cash-change>0,00 €</strong></p>
+            <p class="cash-change" aria-live="polite"><span data-cash-label>Cambio</span><strong data-cash-change>0,00 €</strong></p>
           </div>
           <label class="reference-field" data-single-reference for="{{ form.external_reference.id_for_label }}">Referencia <small>Opcional</small>{{ form.external_reference }}</label>
           {% for error in form.external_reference.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
@@ -81,6 +89,7 @@
               <label data-part-cash for="{{ part.cash_received.id_for_label }}">Entregado (efectivo)<input type="number" inputmode="decimal" min="0" step="0.01" name="{{ part.cash_received.html_name }}" id="{{ part.cash_received.id_for_label }}" value="{{ part.cash_received.value|default_if_none:'' }}"></label>
               <label data-part-reference for="{{ part.external_reference.id_for_label }}">Referencia <small>Opcional</small><input type="text" name="{{ part.external_reference.html_name }}" id="{{ part.external_reference.id_for_label }}" value="{{ part.external_reference.value|default_if_none:'' }}"></label>
             </div>
+            <p class="cash-change" data-part-cash aria-live="polite"><span data-part-cash-label>Cambio</span><strong data-part-cash-change>0,00 €</strong></p>
             <div hidden>{{ part.DELETE }}</div><button type="button" class="split-remove" data-remove-part>Quitar parte</button>
             {% if part.errors %}<div class="field-error" role="alert">{% for field,errors in part.errors.items %}{% for error in errors %}{{ error }} {% endfor %}{% endfor %}</div>{% endif %}
           </fieldset>{% endfor %}
