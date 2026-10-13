@@ -148,11 +148,14 @@ class CashRegisterSessionViewIsolationTests(TestCase):
             cash_session=other_session,
         )
         response = self.client.get(
-            self.detail_url(store_id=self.store.pk, session_id=session.pk)
+            self.detail_url(store_id=self.store.pk, session_id=session.pk),
+            {"tab": "sales"},
         )
-        self.assertContains(response, f"#{included.pk}")
+        included_url = reverse("sales:sale_detail", args=[self.store.pk, included.pk])
+        excluded_url = reverse("sales:sale_detail", args=[self.store.pk, excluded.pk])
+        self.assertContains(response, f'href="{included_url}"')
         self.assertContains(response, self.user.email)
-        self.assertNotContains(response, f"#{excluded.pk}")
+        self.assertNotContains(response, f'href="{excluded_url}"')
 
     def test_open_from_register_records_authenticated_user(self):
         register = create_cash_register(business=self.business, store=self.store)
@@ -500,7 +503,7 @@ class CashRegisterSessionViewIsolationTests(TestCase):
                 "document_type_requested": RequestedDocumentTypeChoices.TICKET,
             },
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(Sale.objects.exists())
 
     def test_contextual_sale_keeps_session_when_cash_register_not_required(self):

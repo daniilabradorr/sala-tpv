@@ -1,0 +1,26 @@
+{% load billing_print %}
+<section class="document-print-tax-section" aria-labelledby="tax-title">
+  <h2 id="tax-title">Desglose fiscal</h2>
+  {% if compact %}
+    {% for tax in document.tax_breakdowns.all %}
+    <div class="document-print-tax-item">
+      <h3>{{ tax.tax_type }} {{ tax.tax_rate|quantity }} %</h3>
+      {% if tax.operacion_exenta %}<p>Exenta: {{ tax.operacion_exenta }}</p>{% endif %}
+      {% if tax.clave_regimen %}<p>Régimen: {{ tax.clave_regimen }}</p>{% endif %}
+      {% if tax.calificacion_operacion %}<p>Calificación: {{ tax.calificacion_operacion }}</p>{% endif %}
+      {% if tax.has_equivalence_surcharge %}<p>Recargo {{ tax.equivalence_surcharge_rate|quantity }} %</p>{% endif %}
+      <dl>
+        <div><dt>Base imponible</dt><dd>{{ tax.taxable_base_amount|floatformat:2 }} €</dd></div>
+        <div><dt>Cuota</dt><dd>{{ tax.tax_amount|floatformat:2 }} €</dd></div>
+      </dl>
+    </div>
+    {% endfor %}
+  {% else %}
+    <table class="document-print-tax">
+      <thead><tr><th scope="col">Impuesto</th><th scope="col">Porcentaje</th><th scope="col">Base imponible</th><th scope="col">Cuota</th></tr></thead>
+      <tbody>{% for tax in document.tax_breakdowns.all %}
+        <tr><td>{{ tax.tax_type }}{% if tax.operacion_exenta %}<br>Exenta: {{ tax.operacion_exenta }}{% endif %}{% if tax.clave_regimen %}<br>Régimen: {{ tax.clave_regimen }}{% endif %}{% if tax.calificacion_operacion %}<br>Calificación: {{ tax.calificacion_operacion }}{% endif %}</td><td>{{ tax.tax_rate|quantity }} %{% if tax.has_equivalence_surcharge %}<br>Recargo {{ tax.equivalence_surcharge_rate|quantity }} %{% endif %}</td><td>{{ tax.taxable_base_amount|floatformat:2 }} €</td><td>{{ tax.tax_amount|floatformat:2 }} €</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  {% endif %}
+</section>

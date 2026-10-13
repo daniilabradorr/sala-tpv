@@ -136,7 +136,11 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
 
         self.assertEqual(sale_list_response.status_code, 200)
         self.assertEqual(sale_detail_response.status_code, 200)
-        self.assertEqual(sale_open_response.status_code, 200)
+        self.assertRedirects(
+            sale_open_response,
+            reverse("sales:sale_list", args=[self.store.pk]),
+            fetch_redirect_response=False,
+        )
         self.assertEqual(return_list_response.status_code, 200)
         self.assertEqual(return_detail_response.status_code, 200)
 
@@ -166,9 +170,20 @@ class SaleTemplatesSmokeIntegrationTests(TestCase):
         self.assertContains(
             response,
             f'id="quantity-{line.pk}" name="quantity" type="number" '
-            'min="0.001" step="0.001" inputmode="decimal" value="2.000"',
+            'min="0.001" step="0.001" inputmode="decimal" value="2"',
         )
         self.assertNotContains(response, 'value="2,000"')
+
+    def test_returns_display_exact_localized_quantities_without_trailing_zeros(self):
+        self.login_as_owner()
+        sale, line = self._create_completed_sale_with_line()
+        return_doc = self._create_draft_return_with_line(sale=sale, line=line)
+        response = self.client.get(
+            reverse("sales:return_detail", args=[self.store.pk, return_doc.pk])
+        )
+        self.assertContains(response, 'data-label="Vendido">2</div>')
+        self.assertContains(response, 'data-label="Devuelto">0</div>')
+        self.assertContains(response, 'data-label="Disponible"><strong>2</strong>')
 
     def test_workspace_hides_line_editor_when_manual_changes_are_disabled(self):
         self.login_as_owner()

@@ -20,6 +20,7 @@ from django.utils import timezone
 from apps.audit.constants import AuditEventType, AuditModule
 from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
+from apps.cash_register.models import CashSession
 from apps.catalog.models import Product
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
 from apps.customers.models import CustomerAccountEntry, EntryTypeChoices
@@ -227,6 +228,7 @@ def _validate_customer(
     business,
     customer,
     document_type_requested,
+    require_customer_for_invoice=True,
     require_fiscal_identity=False,
 ):
     if document_type_requested not in RequestedDocumentTypeChoices.values:
@@ -251,7 +253,8 @@ def _validate_customer(
             )
 
     if (
-        document_type_requested == RequestedDocumentTypeChoices.INVOICE
+        (require_customer_for_invoice or require_fiscal_identity)
+        and document_type_requested == RequestedDocumentTypeChoices.INVOICE
         and customer is None
     ):
         raise ValidationError(
@@ -302,6 +305,7 @@ def _validate_cash_context(
     cash_register,
     cash_session,
     pos_settings,
+    require_open=True,
 ):
     if bool(cash_register) != bool(cash_session):
         raise ValidationError(
@@ -312,7 +316,7 @@ def _validate_cash_context(
             }
         )
 
-    if pos_settings.require_open_cash_register:
+    if require_open and pos_settings.require_open_cash_register:
         if cash_register is None:
             raise ValidationError({"cash_register": "Debes seleccionar una caja."})
 
@@ -553,7 +557,10 @@ def open_sale(
     cash_register=None,
     cash_session=None,
 ):
-    """Abre una venta directamente en estado open."""
+    """Open a draft; missing cash context is required at completion/checkout.
+
+    Any supplied cash pair still undergoes every tenant, Store and status check.
+    """
 
     if business is None:
         raise ValidationError("No se ha indicado el negocio.")
@@ -578,6 +585,7 @@ def open_sale(
         cash_register=cash_register,
         cash_session=cash_session,
         pos_settings=pos_settings,
+        require_open=False,
     )
 
     sale = Sale(
@@ -598,6 +606,33 @@ def open_sale(
     )
     sale.save()
     return sale
+
+
+@transaction.atomic
+def update_sale_cash_session(*, business, sale, cash_session, updated_by):
+    """Attach a validated open session to an editable sale under its row lock."""
+    locked_sale = _lock_sale(business=business, sale=sale)
+    _validate_sale_editable(locked_sale)
+    _validate_can_sell(business=business, store=locked_sale.store, user=updated_by)
+    session = (
+        CashSession.objects.select_for_update(of=("self",))
+        .select_related("cash_register")
+        .filter(pk=cash_session.pk, business=business, store=locked_sale.store)
+        .first()
+    )
+    if session is None:
+        raise ValidationError({"cash_session": "La sesión no pertenece a esta tienda."})
+    _validate_cash_context(
+        business=business,
+        store=locked_sale.store,
+        cash_register=session.cash_register,
+        cash_session=session,
+        pos_settings=_get_pos_settings(business),
+    )
+    locked_sale.cash_register = session.cash_register
+    locked_sale.cash_session = session
+    locked_sale.save(update_fields=["cash_register", "cash_session", "updated_at"])
+    return locked_sale
 
 
 @transaction.atomic
@@ -624,6 +659,7 @@ def update_sale_header(
         business=business,
         customer=customer,
         document_type_requested=document_type_requested,
+        require_customer_for_invoice=False,
     )
 
     locked_sale.customer = customer
@@ -791,6 +827,7 @@ def add_sale_line(
     )
     line.save()
     _recalculate_locked_sale(locked_sale)
+    line._tpv_pos_settings = pos_settings
     return line
 
 
@@ -854,6 +891,7 @@ def update_sale_line(
         tax_rate=locked_line.tax_rate,
     )
 
+    locked_line.sale = locked_sale  # Reuse the authoritative, already locked relation.
     locked_line.quantity = calculated["quantity"]
     locked_line.unit_base_price = calculated["unit_base_price"]
     locked_line.discount_amount = calculated["discount_amount"]
@@ -871,6 +909,7 @@ def update_sale_line(
     )
 
     _recalculate_locked_sale(locked_sale)
+    locked_line._tpv_pos_settings = pos_settings
     return locked_line
 
 
@@ -953,8 +992,20 @@ def complete_sale(*, business, sale, closed_by):
         business=business,
         customer=locked_sale.customer,
         document_type_requested=locked_sale.document_type_requested,
+        require_customer_for_invoice=True,
         require_fiscal_identity=True,
     )
+
+    # Lock the session before stock writes/FK checks. Closing holds this same
+    # row; taking it later can deadlock at commit against inventory's FK locks.
+    if locked_sale.cash_session_id:
+        locked_sale.cash_session = CashSession.objects.select_for_update(
+            of=("self",)
+        ).get(
+            pk=locked_sale.cash_session_id,
+            business=business,
+            store=locked_sale.store,
+        )
 
     _validate_cash_context(
         business=business,

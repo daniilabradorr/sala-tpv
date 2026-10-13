@@ -8,7 +8,7 @@
     <h2 id="command-title" class="visually-hidden">Navegación y acciones rápidas</h2>
     <div class="command-results" data-command-results>
         {% if shell_quick_actions %}<section><h3>Acciones rápidas</h3>
-            {% for item in shell_quick_actions %}<a href="{{ item.url }}" data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></a>{% endfor %}
+            {% for item in shell_quick_actions %}{% if item.id == "new-sale" %}<form method="post" action="{{ item.url }}" data-nx-sale-start data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% csrf_token %}<button type="submit">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></button></form>{% else %}<a href="{{ item.url }}" data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></a>{% endif %}{% endfor %}
         </section>{% endif %}
         {% for group in shell_navigation %}<section><h3>{{ group.label }}</h3>
             {% for item in group.items %}<a href="{{ item.url }}" data-command-item data-search="{{ item.label }} {{ item.keywords }}">{% include "components/icon.html" with name=item.icon %}<span>{{ item.label }}</span></a>{% endfor %}

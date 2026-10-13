@@ -4,7 +4,7 @@
 
 {% block content %}
 <section class="card">
-    <h1>{{ title|default:"Ventas" }}</h1>
+    <h1>{% if form.mode == "discount" %}Descuento de {{ line.product_name }}{% elif form.mode == "price" %}Precio de {{ line.product_name }}{% else %}{{ title|default:"Línea de venta" }}{% endif %}</h1>
 
     <form method="post">
         {% csrf_token %}

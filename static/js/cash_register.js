@@ -5,6 +5,7 @@ const cents = (value) => {
   return Number.parseInt(whole, 10) * 100 + Number.parseInt(decimal.padEnd(2, "0"), 10);
 };
 const enhanceCountPreview = (root = document) => {
+  if (!root) return;
   const input = root.querySelector('[name="counted_amount"]');
   const expectedNode = root.querySelector("[data-expected-cents]");
   const output = root.querySelector("[data-count-preview]");

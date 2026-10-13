@@ -38,6 +38,7 @@ from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.cash_register.selectors import get_cash_session_detail
 from apps.catalog.services import ProductTaxResolutionError, resolve_product_tax
+from apps.payments.models import Payment
 from apps.payments.selectors import get_sale_payments, get_sale_return_refund_summary
 from apps.sales.forms import (
     CheckoutForm,
@@ -48,7 +49,8 @@ from apps.sales.forms import (
     SaleLineCreateForm,
     SaleLineQuantityUpdateForm,
     SaleLineUpdateForm,
-    SaleOpenForm,
+    SaleStartForm,
+    SaleCashSessionForm,
     SaleReturnCancelForm,
     SaleReturnCreateForm,
     SaleReturnFilterForm,
@@ -57,14 +59,23 @@ from apps.sales.forms import (
     SaleReturnLineUpdateForm,
     SaleReturnCompleteForm,
 )
+from apps.sales.models import Sale
 from apps.sales.checkout import (
     PaymentIntent,
+    CheckoutConflict,
     checkout_options,
     checkout_state,
     run_checkout,
 )
 from apps.sales.selectors import (
+    get_sale_cart,
+    get_sale_checkout,
+    get_sale_grid,
+    get_sale_changed_lines,
+    get_sale_cart_line,
+    get_sale_header,
     get_sale_open_cash_initial,
+    get_sale_cash_sessions,
     get_completed_returned_quantity_for_line,
     get_returnable_sale_lines,
     get_sale_detail,
@@ -88,6 +99,7 @@ from apps.sales.services import (
     delete_sale_return_line,
     open_sale,
     update_sale_header,
+    update_sale_cash_session,
     update_sale_line,
     update_sale_return_line,
 )
@@ -201,9 +213,12 @@ def _ensure_sale_editable(sale):
         raise PermissionDenied("Esta venta ya no puede modificarse.")
 
 
-def _workspace_cart_response(request, *, business, store, sale, form=None):
-    sale = get_sale_detail(business=business, pk=sale.pk)
-    pos_settings = POSSettings.objects.filter(business=business).first()
+def _workspace_cart_response(
+    request, *, business, store, sale, form=None, pos_settings=None
+):
+    sale = get_sale_cart(business=business, store=store, pk=sale.pk)
+    if pos_settings is None:
+        pos_settings = POSSettings.objects.filter(business=business).first()
     return render(
         request,
         "sales/partials/_cart_content.html",
@@ -214,6 +229,41 @@ def _workspace_cart_response(request, *, business, store, sale, form=None):
             "cart_form": form,
             "pos_settings": pos_settings,
         },
+    )
+
+
+def _workspace_line_response(
+    request, *, business, store, sale, line, form=None, editor=False, pos_settings=None
+):
+    # IDs are only rendering hints; the selector independently scopes every row.
+    dirty = {line.pk}
+    for value in request.headers.get("X-TPV-Changed-Lines", "").split(",")[:50]:
+        if value.isdecimal() and len(value) <= 18:
+            dirty.add(int(value))
+    current_sale = get_sale_header(business=business, store=store, pk=sale.pk)
+    changed_lines = list(
+        get_sale_changed_lines(
+            business=business, store=store, sale=current_sale, line_ids=dirty
+        )
+    )
+    if pos_settings is None:
+        pos_settings = POSSettings.objects.filter(business=business).first()
+    return render(
+        request,
+        "sales/partials/_line_update_success.html"
+        if editor
+        else "sales/partials/_line_mutation.html",
+        {
+            "store": store,
+            "sale": current_sale,
+            "lines": changed_lines,
+            "primary_line_id": line.pk,
+            "cart_form": form,
+            "pos_settings": pos_settings,
+            "line_oob": editor,
+            "footer_oob": True,
+        },
+        status=422 if form is not None and form.errors else 200,
     )
 
 
@@ -422,7 +472,18 @@ class SaleDetailView(
     template_name = "sales/sale_detail.html"
 
     def get(self, request, store_id, sale_pk):
-        sale = self.get_sale()
+        is_partial_request = request.htmx and not request.htmx.history_restore_request
+        business, store = self.get_business_and_store()
+        if is_partial_request and request.GET.get("region") == "cart":
+            sale = get_sale_header(business=business, store=store, pk=sale_pk)
+            return _workspace_cart_response(
+                request, business=business, store=store, sale=sale
+            )
+        sale = (
+            get_sale_grid(business=business, store=store, pk=sale_pk)
+            if is_partial_request
+            else self.get_sale()
+        )
 
         if sale.is_editable:
             business = _get_business(request)
@@ -456,26 +517,35 @@ class SaleDetailView(
             context = {
                 "store": self.store,
                 "sale": sale,
-                "lines": sale.lines.all(),
                 "products": products,
                 "product_page": page,
                 "categories": get_workspace_categories(business=business),
                 "selected_category": category,
                 "query": query,
-                "header_form": SaleHeaderUpdateForm(
-                    business=business,
-                    store=self.store,
-                    sale=sale,
-                    initial={
-                        "customer": sale.customer,
-                        "document_type_requested": sale.document_type_requested,
-                    },
-                ),
+                "can_sell": can_sell_in_store(request.user, self.store),
                 "pos_settings": pos_settings,
             }
-            is_partial_request = (
-                request.htmx and not request.htmx.history_restore_request
-            )
+            if not is_partial_request:
+                context.update(
+                    {
+                        "lines": sale.lines.all(),
+                        "cash_session_form": SaleCashSessionForm(
+                            sessions=get_sale_cash_sessions(
+                                business=business, store=self.store
+                            ),
+                            initial={"cash_session": sale.cash_session_id},
+                        ),
+                        "header_form": SaleHeaderUpdateForm(
+                            business=business,
+                            store=self.store,
+                            sale=sale,
+                            initial={
+                                "customer": sale.customer,
+                                "document_type_requested": sale.document_type_requested,
+                            },
+                        ),
+                    }
+                )
             template = (
                 "sales/partials/_product_grid.html"
                 if is_partial_request
@@ -554,8 +624,6 @@ class SaleOpenView(
     La venta nace directamente en estado open.
     """
 
-    template_name = "sales/sale_open.html"
-
     def get_locked_cash_session(self, business, store):
         session_id = self.kwargs.get("session_id")
         if session_id is None:
@@ -574,117 +642,59 @@ class SaleOpenView(
 
     def get(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
-        locked_session = self.get_locked_cash_session(business, store)
-        initial = (
-            {
-                "cash_register": locked_session.cash_register,
-                "cash_session": locked_session,
-            }
-            if locked_session
-            else get_sale_open_cash_initial(business=business, store=store)
-        )
-        customer_id = request.GET.get("customer")
-        if customer_id and customer_id.isdigit():
-            from apps.customers.models import Customer
-
-            customer = Customer.objects.filter(
-                pk=customer_id, business=business, is_active=True
-            ).first()
-            if customer is not None:
-                initial["customer"] = customer
-
-        form = SaleOpenForm(
-            business=business,
-            store=store,
-            user=request.user,
-            initial=initial,
-            locked_cash_session=locked_session,
-        )
-
-        return render(
-            request,
-            self.template_name,
-            {
-                "store": store,
-                "form": form,
-                "locked_cash_session": locked_session,
-            },
-        )
+        self.get_locked_cash_session(business, store)
+        return redirect("sales:sale_list", store_id=store.pk)
 
     def post(self, request, store_id, session_id=None):
         business, store = self.get_business_and_store()
-        locked_session = self.get_locked_cash_session(business, store)
-
-        form = SaleOpenForm(
-            request.POST,
-            business=business,
-            store=store,
-            user=request.user,
-            initial=(
-                {
-                    "cash_register": locked_session.cash_register,
-                    "cash_session": locked_session,
-                }
-                if locked_session
-                else None
-            ),
-            locked_cash_session=locked_session,
+        session = self.get_locked_cash_session(business, store)
+        cash_context = (
+            {"cash_register": session.cash_register, "cash_session": session}
+            if session
+            else get_sale_open_cash_initial(business=business, store=store)
         )
-
+        form = SaleStartForm(request.POST, business=business, cash_context=cash_context)
         if not form.is_valid():
             _add_invalid_form_messages(request, form)
-
-            return render(
-                request,
-                self.template_name,
-                {
-                    "store": store,
-                    "form": form,
-                    "locked_cash_session": locked_session,
-                },
-            )
-
+            return redirect("sales:sale_list", store_id=store.pk)
         try:
             sale = open_sale(
                 business=business,
                 store=store,
                 opened_by=request.user,
-                customer=form.cleaned_data.get("customer"),
-                document_type_requested=(form.cleaned_data["document_type_requested"]),
-                cash_register=(
-                    locked_session.cash_register
-                    if locked_session
-                    else form.cleaned_data.get("cash_register")
-                ),
-                cash_session=(
-                    locked_session
-                    if locked_session
-                    else form.cleaned_data.get("cash_session")
-                ),
+                customer=form.cleaned_data["customer"],
+                **cash_context,
             )
         except ValidationError as error:
-            _add_service_errors_to_form(form, error)
+            _add_validation_error_messages(request, error)
+            return redirect("sales:sale_list", store_id=store.pk)
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
-            return render(
-                request,
-                self.template_name,
-                {
-                    "store": store,
-                    "form": form,
-                    "locked_cash_session": locked_session,
-                },
-            )
 
-        messages.success(
-            request,
-            "Venta abierta correctamente.",
+class SaleCashSessionUpdateView(
+    SaleObjectMixin, CanSellInStoreMixin, BusinessRequiredMixin, View
+):
+    def post(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
+        form = SaleCashSessionForm(
+            request.POST,
+            sessions=get_sale_cash_sessions(business=business, store=store),
         )
-
-        return redirect(
-            "sales:sale_detail",
-            store_id=store.pk,
-            sale_pk=sale.pk,
-        )
+        if form.is_valid():
+            try:
+                update_sale_cash_session(
+                    business=business,
+                    sale=sale,
+                    cash_session=form.cleaned_data["cash_session"],
+                    updated_by=request.user,
+                )
+            except ValidationError as error:
+                _add_validation_error_messages(request, error)
+        else:
+            _add_invalid_form_messages(request, form)
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
 # ==========================================================
@@ -692,144 +702,109 @@ class SaleOpenView(
 # ==========================================================
 
 
+class SaleHeaderObjectMixin(SaleObjectMixin):
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs[self.sale_kwarg]
+        )
+
+
 class SaleHeaderUpdateView(
-    SaleObjectMixin,
+    SaleHeaderObjectMixin,
     CanSellInStoreMixin,
     BusinessRequiredMixin,
     View,
 ):
-    """
-    Actualiza únicamente los datos editables de la cabecera.
-
-    Campos modificables:
-
-    - customer
-    - document_type_requested
-    """
+    """Persist the two independent draft choices and render only the header."""
 
     template_name = "sales/sale_header_form.html"
 
-    def get(self, request, store_id, sale_pk):
-        business, store = self.get_business_and_store()
-        sale = self.get_sale()
-
-        _ensure_sale_editable(sale)
-
-        form = SaleHeaderUpdateForm(
+    def get_form(self, business, store, sale):
+        return SaleHeaderUpdateForm(
             business=business,
             store=store,
             sale=sale,
             initial={
-                "customer": sale.customer,
-                "document_type_requested": (sale.document_type_requested),
+                "customer": sale.customer_id,
+                "document_type_requested": sale.document_type_requested,
             },
         )
 
+    def get(self, request, store_id, sale_pk):
+        business, store = self.get_business_and_store()
+        sale = self.get_sale()
+        _ensure_sale_editable(sale)
         return render(
             request,
             self.template_name,
             {
                 "store": store,
                 "sale": sale,
-                "form": form,
+                "form": self.get_form(business, store, sale),
             },
         )
 
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
-
         _ensure_sale_editable(sale)
-
         form = SaleHeaderUpdateForm(
-            request.POST,
-            business=business,
-            store=store,
-            sale=sale,
+            request.POST, business=business, store=store, sale=sale
         )
-
-        if not form.is_valid():
-            _add_invalid_form_messages(request, form)
-
-            return render(
-                request,
-                (
-                    "sales/partials/_workspace_header.html"
-                    if request.htmx
-                    else self.template_name
-                ),
-                {
-                    "store": store,
-                    "sale": sale,
-                    "form": form,
-                    "header_form": form,
-                },
-                status=422 if request.htmx else 200,
-            )
-
-        try:
-            sale = update_sale_header(
-                business=business,
-                sale=sale,
-                customer=form.cleaned_data.get("customer"),
-                document_type_requested=(form.cleaned_data["document_type_requested"]),
-                updated_by=request.user,
-            )
-        except ValidationError as error:
-            _add_service_errors_to_form(form, error)
-
-            return render(
-                request,
-                (
-                    "sales/partials/_workspace_header.html"
-                    if request.htmx
-                    else self.template_name
-                ),
-                {
-                    "store": store,
-                    "sale": sale,
-                    "form": form,
-                    "header_form": form,
-                },
-                status=422 if request.htmx else 200,
-            )
+        if form.is_valid():
+            try:
+                update_sale_header(
+                    business=business,
+                    sale=sale,
+                    customer=form.cleaned_data["customer"],
+                    document_type_requested=form.cleaned_data[
+                        "document_type_requested"
+                    ],
+                    updated_by=request.user,
+                )
+            except ValidationError as error:
+                _add_service_errors_to_form(form, error)
 
         if request.htmx:
-            sale = get_sale_detail(business=business, pk=sale.pk)
-            form = SaleHeaderUpdateForm(
-                business=business,
-                store=store,
-                sale=sale,
-                initial={
-                    "customer": sale.customer,
-                    "document_type_requested": sale.document_type_requested,
-                },
-            )
+            # Even on rejection, the controls display persisted values, with the
+            # submitted form used only for accessible error feedback.
+            sale = self.get_sale()
             response = render(
                 request,
                 "sales/partials/_workspace_header.html",
                 {
                     "store": store,
                     "sale": sale,
-                    "header_form": form,
+                    "header_form": self.get_form(business, store, sale),
+                    "header_errors": form.errors,
                 },
+                status=422 if form.errors else 200,
             )
-            return add_hx_trigger(
-                response,
-                {"nx:toast": {"message": "Venta actualizada.", "tone": "success"}},
-            )
+            if form.errors:
+                return add_hx_trigger(
+                    response,
+                    {
+                        "nx:toast": {
+                            "message": "No se ha podido guardar la cabecera.",
+                            "tone": "error",
+                        }
+                    },
+                )
+            return response
 
+        if form.errors:
+            return render(
+                request,
+                self.template_name,
+                {"store": store, "sale": sale, "form": form},
+            )
         messages.success(request, "Cabecera de la venta actualizada correctamente.")
-
-        return redirect(
-            "sales:sale_detail",
-            store_id=store.pk,
-            sale_pk=sale.pk,
-        )
+        return redirect("sales:sale_detail", store_id=store.pk, sale_pk=sale.pk)
 
 
 class SaleQuickCustomerCreateView(
-    SaleObjectMixin,
+    SaleHeaderObjectMixin,
     CanSellInStoreMixin,
     BusinessRequiredMixin,
     View,
@@ -860,6 +835,10 @@ class SaleQuickCustomerCreateView(
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    # Preserve the latest persisted document under the same row lock.
+                    sale = Sale.objects.select_for_update().get(
+                        pk=sale.pk, business=business, store=store
+                    )
                     customer, _ = CustomerService.create_customer(
                         business=business,
                         customer_data=form.cleaned_data,
@@ -876,7 +855,11 @@ class SaleQuickCustomerCreateView(
             except ValidationError as error:
                 _add_service_errors_to_form(form, error)
             else:
-                sale = get_sale_detail(business=business, pk=sale.pk)
+                if not request.htmx:
+                    return redirect(
+                        "sales:sale_detail", store_id=store.pk, sale_pk=sale.pk
+                    )
+                sale = self.get_sale()
                 response = render(
                     request,
                     "sales/partials/_workspace_header.html",
@@ -928,6 +911,12 @@ class SaleLineAddView(
     """Añade un producto o servicio a una venta editable."""
 
     template_name = "sales/sale_line_form.html"
+
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
 
     def get(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
@@ -989,7 +978,7 @@ class SaleLineAddView(
             )
 
         try:
-            add_sale_line(
+            added_line = add_sale_line(
                 business=business,
                 sale=sale,
                 product=form.cleaned_data["product"],
@@ -1021,7 +1010,11 @@ class SaleLineAddView(
 
         if request.htmx:
             return _workspace_cart_response(
-                request, business=business, store=store, sale=sale
+                request,
+                business=business,
+                store=store,
+                sale=sale,
+                pos_settings=added_line._tpv_pos_settings,
             )
 
         messages.success(request, "Producto añadido a la venta.")
@@ -1048,8 +1041,14 @@ class SaleLineUpdateView(
 
     template_name = "sales/sale_line_form.html"
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def get_line(self, *, business, sale):
-        return get_sale_line_detail(
+        return get_sale_cart_line(
             business=business,
             pk=self.kwargs["line_pk"],
             sale=sale,
@@ -1071,6 +1070,7 @@ class SaleLineUpdateView(
             sale=sale,
             line=line,
             user=request.user,
+            mode=request.GET.get("mode", ""),
             initial={
                 "quantity": line.quantity,
                 "unit_base_price": line.unit_base_price,
@@ -1109,6 +1109,7 @@ class SaleLineUpdateView(
             sale=sale,
             line=line,
             user=request.user,
+            mode=request.GET.get("mode", ""),
         )
 
         if not form.is_valid():
@@ -1130,13 +1131,21 @@ class SaleLineUpdateView(
             )
 
         try:
-            update_sale_line(
+            updated_line = update_sale_line(
                 business=business,
                 sale=sale,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
-                unit_base_price=form.cleaned_data.get("unit_base_price"),
-                discount_amount=form.cleaned_data.get("discount_amount"),
+                unit_base_price=(
+                    form.cleaned_data.get("unit_base_price")
+                    if form.mode != "discount"
+                    else None
+                ),
+                discount_amount=(
+                    form.cleaned_data.get("discount_amount")
+                    if form.mode != "price"
+                    else None
+                ),
                 user=request.user,
             )
         except ValidationError as error:
@@ -1158,18 +1167,14 @@ class SaleLineUpdateView(
             )
 
         if request.htmx:
-            sale = get_sale_detail(business=business, pk=sale.pk)
-            pos_settings = POSSettings.objects.filter(business=business).first()
-            response = render(
+            response = _workspace_line_response(
                 request,
-                "sales/partials/_line_update_success.html",
-                {
-                    "store": store,
-                    "sale": sale,
-                    "lines": sale.lines.all(),
-                    "pos_settings": pos_settings,
-                    "cart_oob": True,
-                },
+                business=business,
+                store=store,
+                sale=sale,
+                line=updated_line,
+                editor=True,
+                pos_settings=updated_line._tpv_pos_settings,
             )
             return add_hx_trigger(
                 response,
@@ -1206,17 +1211,19 @@ class SaleLineDeleteView(
 
     http_method_names = ["post"]
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def post(self, request, store_id, sale_pk, line_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
 
         _ensure_sale_editable(sale)
 
-        line = get_sale_line_detail(
-            business=business,
-            pk=line_pk,
-            sale=sale,
-        )
+        line = get_sale_cart_line(business=business, pk=line_pk, sale=sale)
 
         try:
             delete_sale_line(
@@ -1258,22 +1265,27 @@ class SaleLineQuantityUpdateView(
 
     http_method_names = ["post"]
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_header(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def post(self, request, store_id, sale_pk, line_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
         _ensure_sale_editable(sale)
-        line = get_sale_line_detail(business=business, pk=line_pk, sale=sale)
+        line = get_sale_cart_line(business=business, pk=line_pk, sale=sale)
         form = SaleLineQuantityUpdateForm(request.POST)
 
+        updated_line = None
         if form.is_valid():
             try:
-                update_sale_line(
+                updated_line = update_sale_line(
                     business=business,
                     sale=sale,
                     line=line,
                     quantity=form.cleaned_data["quantity"],
-                    unit_base_price=line.unit_base_price,
-                    discount_amount=line.discount_amount,
                     user=request.user,
                 )
             except ValidationError as error:
@@ -1282,8 +1294,14 @@ class SaleLineQuantityUpdateView(
         if form.errors and not request.htmx:
             _add_invalid_form_messages(request, form)
         if request.htmx:
-            response = _workspace_cart_response(
-                request, business=business, store=store, sale=sale, form=form
+            response = _workspace_line_response(
+                request,
+                business=business,
+                store=store,
+                sale=sale,
+                line=line,
+                form=form,
+                pos_settings=getattr(updated_line, "_tpv_pos_settings", None),
             )
             if form.errors:
                 response.status_code = 422
@@ -1356,13 +1374,22 @@ class SaleCheckoutView(
     template_name = "sales/checkout.html"
     partial_name = "sales/partials/_checkout.html"
 
+    def get_sale(self):
+        business, store = self.get_business_and_store()
+        return get_sale_checkout(
+            business=business, store=store, pk=self.kwargs["sale_pk"]
+        )
+
     def _forms(self, request, business, sale):
         options = checkout_options(business=business, sale=sale)
         methods = options["methods"]
-        method_count = methods.count()
+        available_methods = list(methods)
+        method_count = len(available_methods)
         data = request.POST if request.method == "POST" else None
         initial = {}
         candidates = list(options["series"])
+        if method_count == 1:
+            initial["method"] = available_methods[0]
         if len(candidates) == 1:
             initial["series"] = candidates[0]
         form = CheckoutForm(
@@ -1370,6 +1397,9 @@ class SaleCheckoutView(
             methods=methods,
             series=options["series"],
             initial=initial,
+            method_choices=[("", "---------")]
+            + [(m.pk, str(m)) for m in available_methods],
+            series_choices=[("", "---------")] + [(c.pk, str(c)) for c in candidates],
         )
         formset = CheckoutPaymentFormSet(
             data,
@@ -1382,10 +1412,16 @@ class SaleCheckoutView(
                     for index in range(method_count)
                 ]
             ),
-            form_kwargs={"methods": methods},
+            form_kwargs={
+                "methods": methods,
+                "method_choices": [("", "---------")]
+                + [(m.pk, str(m)) for m in available_methods],
+            },
         )
         # There can never be more useful parts than active, unique methods.
         formset.max_num = method_count
+        options["methods"] = available_methods
+        options["series"] = candidates
         return options, form, formset, method_count
 
     @staticmethod
@@ -1402,9 +1438,24 @@ class SaleCheckoutView(
             return [str(message) for message in error.messages]
         return [str(error)]
 
-    def _render(self, request, business, store, sale, *, error=None, cash_change=None):
-        options, form, formset, method_count = self._forms(request, business, sale)
-        state = checkout_state(business=business, sale=sale)
+    def _render(
+        self,
+        request,
+        business,
+        store,
+        sale,
+        *,
+        error=None,
+        cash_change=None,
+        cash_received=None,
+        forms_bundle=None,
+    ):
+        state = checkout_state(
+            business=business, sale=sale, refresh=request.method == "POST"
+        )
+        options, form, formset, method_count = forms_bundle or self._forms(
+            request, business, sale
+        )
         pos_settings = POSSettings.objects.filter(business=business).first()
         selected_method = next(
             (
@@ -1425,7 +1476,11 @@ class SaleCheckoutView(
             ),
             "checkout_errors": self._error_messages(error),
             "cash_change": cash_change,
-            "selected_method_code": getattr(selected_method, "code", None),
+            "cash_received": cash_received,
+            "can_sell": can_sell_in_store(request.user, store),
+            "selected_method_is_cash": bool(
+                selected_method and selected_method.affects_cash_register
+            ),
         }
         response = render(
             request,
@@ -1442,25 +1497,32 @@ class SaleCheckoutView(
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
-        options, form, formset, _method_count = self._forms(request, business, sale)
+        forms_bundle = self._forms(request, business, sale)
+        options, form, formset, _method_count = forms_bundle
         mode = request.POST.get("mode", "single")
         valid = form.is_valid() and (mode != "split" or formset.is_valid())
         if not valid:
-            response = self._render(request, business, store, sale)
+            response = self._render(
+                request, business, store, sale, forms_bundle=forms_bundle
+            )
             if request.htmx:
                 response.status_code = 422
             return response
         pos_settings = POSSettings.objects.filter(business=business).first()
         intents = []
-        if sale.pending_amount > 0:
+        if sale.pending_amount > 0 or sale.payment_status == "paid":
             if mode == "split":
                 intents = [
                     PaymentIntent(
                         method_id=part["method"].pk,
                         amount=part["amount"],
                         cash_received=(
-                            part.get("cash_received")
-                            if part["method"].code == "cash"
+                            (
+                                part.get("cash_received")
+                                if part.get("cash_received") is not None
+                                else part["amount"]
+                            )
+                            if part["method"].affects_cash_register
                             else None
                         ),
                         external_reference=part.get("external_reference", ""),
@@ -1470,13 +1532,27 @@ class SaleCheckoutView(
                     if part and not part.get("DELETE")
                 ]
             elif form.cleaned_data.get("method"):
+                amount = sale.pending_amount
+                if amount == 0:
+                    confirmed = Payment.objects.filter(
+                        business=business,
+                        sale=sale,
+                        method=form.cleaned_data["method"],
+                        idempotency_key=form.cleaned_data["payment_idempotency_key"],
+                        status="completed",
+                    ).first()
+                    amount = confirmed.amount if confirmed else Decimal("0.00")
                 intents = [
                     PaymentIntent(
                         method_id=form.cleaned_data["method"].pk,
-                        amount=sale.pending_amount,
+                        amount=amount,
                         cash_received=(
-                            form.cleaned_data.get("cash_received")
-                            if form.cleaned_data["method"].code == "cash"
+                            (
+                                form.cleaned_data.get("cash_received")
+                                if form.cleaned_data.get("cash_received") is not None
+                                else amount
+                            )
+                            if form.cleaned_data["method"].affects_cash_register
                             else None
                         ),
                         external_reference=form.cleaned_data.get(
@@ -1485,6 +1561,36 @@ class SaleCheckoutView(
                         idempotency_key=form.cleaned_data["payment_idempotency_key"],
                     )
                 ]
+
+        def confirmed_cash_presentation():
+            payments = {
+                str(payment.idempotency_key): payment
+                for payment in Payment.objects.select_related("method").filter(
+                    business=business,
+                    sale=sale,
+                    status="completed",
+                    idempotency_key__in=[intent.idempotency_key for intent in intents],
+                )
+            }
+            changes = []
+            tenders = []
+            for intent in intents:
+                payment = payments.get(str(intent.idempotency_key))
+                if (
+                    payment
+                    and payment.method.affects_cash_register
+                    and payment.method_id == intent.method_id
+                    and payment.amount == intent.amount
+                    and intent.cash_received is not None
+                    and intent.cash_received >= payment.amount
+                ):
+                    changes.append(intent.cash_received - payment.amount)
+                    tenders.append(intent.cash_received)
+            return {
+                "cash_change": sum(changes, Decimal("0.00")) if changes else None,
+                "cash_received": sum(tenders, Decimal("0.00")) if tenders else None,
+            }
+
         try:
             run_checkout(
                 business=business,
@@ -1497,21 +1603,30 @@ class SaleCheckoutView(
             )
         except (ValidationError, ValueError) as error:
             # Re-read persisted state so partial success is represented truthfully.
-            response = self._render(request, business, store, sale, error=error)
+            response = self._render(
+                request,
+                business,
+                store,
+                sale,
+                error=error,
+                **confirmed_cash_presentation(),
+                forms_bundle=forms_bundle,
+            )
             state = checkout_state(business=business, sale=sale)
-            if request.htmx and state["sale"].payment_status != "paid":
+            if isinstance(error, CheckoutConflict):
+                response.status_code = 409
+                response["X-Netxodo-Allow-Error-Swap"] = "true"
+            elif request.htmx and state["sale"].payment_status != "paid":
                 response.status_code = 422
             return response
-        cash_change = next(
-            (
-                intent.cash_received - intent.amount
-                for intent in intents
-                if intent.cash_received is not None
-                and intent.cash_received >= intent.amount
-            ),
-            None,
+        response = self._render(
+            request, business, store, sale, **confirmed_cash_presentation()
         )
-        return self._render(request, business, store, sale, cash_change=cash_change)
+        if checkout_state(business=business, sale=sale)["complete"]:
+            response["X-Netxodo-Confirmed-Operation"] = str(
+                form.cleaned_data["payment_idempotency_key"]
+            )
+        return response
 
 
 # ==========================================================

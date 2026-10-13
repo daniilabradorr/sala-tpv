@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
@@ -20,6 +21,7 @@ from apps.sales.checkout import (
     checkout_state,
     run_checkout,
 )
+from apps.sales.services import complete_sale, update_sale_header, update_sale_line
 from apps.sales.models import (
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
@@ -153,6 +155,87 @@ class CheckoutIntegrationTests(TestCase):
         self.assertEqual(sale.status, SaleStatusChoices.OPEN)
         self.assertFalse(Payment.objects.filter(sale=sale).exists())
         self.assertFalse(BillingDocument.objects.filter(sale=sale).exists())
+
+    def test_discounted_checkout_freezes_line_and_document_amounts(self):
+        sale = self.sale()
+        line = sale.lines.get()
+        update_sale_line(
+            business=self.business,
+            sale=sale,
+            line=line,
+            user=self.user,
+            quantity=Decimal("1.500"),
+            discount_amount=Decimal("12.00"),
+        )
+        state = self._run_checkout(
+            sale, [self.intent(amount=Decimal("48.00"))], self.series()
+        )
+        document = state["document"]
+        snapshot = document.lines.get()
+        self.assertEqual(snapshot.quantity, Decimal("1.500"))
+        self.assertEqual(snapshot.unit_base_price, Decimal("40.00"))
+        self.assertEqual(snapshot.discount_amount, Decimal("12.00"))
+        self.assertEqual(snapshot.tax_amount, Decimal("0.00"))
+        self.assertEqual(snapshot.line_total, Decimal("48.00"))
+        self.assertEqual(document.subtotal_amount, Decimal("60.00"))
+        self.assertEqual(document.discount_amount, Decimal("12.00"))
+        self.assertEqual(document.total_amount, Decimal("48.00"))
+        self.product.base_price = Decimal("99.00")
+        self.product.save()
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.unit_base_price, Decimal("40.00"))
+        self.assertEqual(snapshot.discount_amount, Decimal("12.00"))
+
+    def test_invoice_draft_without_customer_cannot_complete_or_checkout(self):
+        sale = self.sale()
+        update_sale_header(
+            business=self.business,
+            sale=sale,
+            customer=None,
+            document_type_requested="invoice",
+            updated_by=self.user,
+        )
+        sale.refresh_from_db()
+        self.assertEqual(sale.document_type_requested, "invoice")
+        self.assertTrue(sale.lines.exists())
+        with self.assertRaisesMessage(ValidationError, "necesita cliente"):
+            complete_sale(business=self.business, sale=sale, closed_by=self.user)
+        with self.assertRaisesMessage(ValidationError, "requiere un cliente"):
+            self._run_checkout(sale, [self.intent()], self.series("F1"))
+        self.assert_pristine(sale)
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(BillingDocument.objects.count(), 0)
+
+    def test_invoice_with_incomplete_customer_cannot_complete_or_checkout(self):
+        incomplete = create_sales_customer(
+            business=self.business, legal_name="", tax_identifier=""
+        )
+        sale = self.sale()
+        update_sale_header(
+            business=self.business,
+            sale=sale,
+            customer=incomplete,
+            document_type_requested="invoice",
+            updated_by=self.user,
+        )
+        sale.refresh_from_db()
+        self.assertFalse(incomplete.has_complete_fiscal_identity)
+        with self.assertRaisesMessage(ValidationError, "identidad fiscal completa"):
+            complete_sale(business=self.business, sale=sale, closed_by=self.user)
+        with self.assertRaisesMessage(ValidationError, "identidad fiscal completa"):
+            self._run_checkout(sale, [self.intent()], self.series("F1"))
+        self.assert_pristine(sale)
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(BillingDocument.objects.count(), 0)
+
+    def test_ticket_with_customer_still_issues_f2(self):
+        sale = self.sale(customer=self.customer)
+        state = self._run_checkout(sale, [self.intent()], self.series("F2"))
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["document"].document_type, "F2")
+        sale.refresh_from_db()
+        self.assertEqual(sale.customer, self.customer)
+        self.assertEqual(sale.document_type_requested, "ticket")
 
     def test_preflight_rejects_missing_lines_none_and_invoice_without_customer(self):
         valid_series = self.series()
@@ -422,6 +505,82 @@ class CheckoutIntegrationTests(TestCase):
     def checkout_url(self, sale):
         return reverse("sales:sale_checkout", args=(self.store.pk, sale.pk))
 
+    def test_completed_checkout_links_to_print_in_new_tab_for_f1_and_f2(self):
+        for requested in (
+            RequestedDocumentTypeChoices.TICKET,
+            RequestedDocumentTypeChoices.INVOICE,
+        ):
+            with self.subTest(requested=requested):
+                sale = self.sale(
+                    requested=requested,
+                    customer=self.customer
+                    if requested == RequestedDocumentTypeChoices.INVOICE
+                    else None,
+                )
+                kind = (
+                    "F1" if requested == RequestedDocumentTypeChoices.INVOICE else "F2"
+                )
+                state = self._run_checkout(sale, [self.intent()], self.series(kind))
+                url = reverse(
+                    "billing:document_print", args=(self.store.pk, state["document"].pk)
+                )
+                for htmx in (False, True):
+                    response = self.client.get(
+                        self.checkout_url(sale),
+                        HTTP_HX_REQUEST="true" if htmx else "false",
+                    )
+                    self.assertTrue(response.context["complete"])
+                    self.assertContains(response, f'href="{url}?autoprint=1"')
+                    self.assertContains(
+                        response, 'target="_blank" rel="noopener" hx-boost="false"'
+                    )
+                    document = response.context["document"]
+                    self.assertTemplateUsed(
+                        response, "sales/partials/_document_preview.html"
+                    )
+                    self.assertEqual(document.preview_line_count, 1)
+                    with self.assertNumQueries(0):
+                        preview = render_to_string(
+                            "sales/partials/_document_preview.html",
+                            {"document": document},
+                        )
+                    self.assertIn(document.issuer_legal_name, preview)
+                    self.assertIn(document.full_number, preview)
+                    self.assertIn(
+                        "Factura simplificada" if kind == "F2" else "Factura", preview
+                    )
+                    self.assertIn("<dt>Líneas</dt><dd>1</dd>", preview)
+                    self.assertIn("<dt>Total</dt><dd>40,00 €</dd>", preview)
+                    self.assertNotIn("QR", preview)
+                    self.assertNotIn("VeriFactu", preview)
+
+    def test_open_checkout_has_no_print_action(self):
+        response = self.client.get(
+            self.checkout_url(self.sale()), HTTP_HX_REQUEST="true"
+        )
+        self.assertNotContains(response, "autoprint=1")
+        self.assertNotContains(response, 'class="checkout-document-preview"')
+
+    def test_preview_counts_fiscal_lines_instead_of_quantities(self):
+        sale = self.sale()
+        create_sale_line(
+            business=self.business,
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("3.000"),
+            tax_rate=Decimal("0.00"),
+        )
+        state = self._run_checkout(
+            sale, [self.intent(amount=Decimal("160.00"))], self.series()
+        )
+        self.assertEqual(state["document"].preview_line_count, 2)
+        with self.assertNumQueries(0):
+            preview = render_to_string(
+                "sales/partials/_document_preview.html", {"document": state["document"]}
+            )
+        self.assertIn("<dt>Líneas</dt><dd>2</dd>", preview)
+        self.assertIn("<dt>Total</dt><dd>160,00 €</dd>", preview)
+
     def test_http_progressive_enhancement_cash_change_and_card_tampering(self):
         self.product.base_price = Decimal("12.50")
         self.product.save()
@@ -623,7 +782,9 @@ class CheckoutIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Cobro registrado")
         self.assertContains(response, "REINTENTAR EMISIÓN")
+        self.assertNotContains(response, 'class="checkout-document-preview"')
         self.assertNotContains(response, "CONFIRMAR COBRO")
+        self.assertNotContains(response, "autoprint=1")
         self.assertEqual(Payment.objects.filter(sale=sale).count(), 1)
 
     def test_invalid_htmx_checkout_swaps_partial_with_422_and_preserves_intent(self):

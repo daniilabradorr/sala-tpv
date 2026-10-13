@@ -148,9 +148,5 @@ class CustomerBrowserTests(StaticLiveServerTestCase):
             expect(customer_select.locator("option:checked")).to_have_text(
                 "Cliente E2E rápido"
             )
-            expect(
-                page.locator(
-                    '#workspace-header input[name="customer_mode"][value="customer"]'
-                )
-            ).to_be_checked()
+            expect(page.get_by_role("radio", name="Ticket", exact=True)).to_be_checked()
             browser.close()

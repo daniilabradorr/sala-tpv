@@ -14,7 +14,7 @@ class _PaymentForm(forms.Form):
         max_digits=14, decimal_places=2, min_value=Decimal("0.01")
     )
     cash_session = forms.ModelChoiceField(
-        queryset=CashSession.objects.none(), required=True
+        queryset=CashSession.objects.none(), required=False
     )
     external_reference = forms.CharField(max_length=150, required=False)
     notes = forms.CharField(required=False, widget=forms.Textarea)
@@ -38,6 +38,15 @@ class _PaymentForm(forms.Form):
             .select_related("cash_register")
             .order_by("-opened_at", "-pk")
         )
+
+    def clean(self):
+        cleaned = super().clean()
+        method = cleaned.get("method")
+        if method and method.affects_cash_register and not cleaned.get("cash_session"):
+            self.add_error(
+                "cash_session", "El efectivo requiere una sesión de caja abierta."
+            )
+        return cleaned
 
 
 class PaymentCreateForm(_PaymentForm):

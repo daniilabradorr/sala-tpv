@@ -183,7 +183,7 @@ class PaymentsTests(TestCase):
             business=self.other_business, name="B", code="card"
         )
         form = PaymentCreateForm(business=self.business, store=self.store)
-        self.assertTrue(form.fields["cash_session"].required)
+        self.assertFalse(form.fields["cash_session"].required)
         self.assertNotIn(foreign, form.fields["method"].queryset)
         self.assertEqual(form.fields["idempotency_key"].widget.input_type, "hidden")
         invalid = PaymentCreateForm(
@@ -1167,6 +1167,132 @@ class PaymentsTests(TestCase):
         self.assertFalse(
             Payment.objects.filter(payment_type=PaymentTypeChoices.REFUND).exists()
         )
+
+    def test_all_noncash_methods_allow_completed_payment_without_session(self):
+        # Completion policy belongs to Sales even when require_open is true.
+        for code in ("card", "bizum", "transfer"):
+            method, _ = PaymentMethod.objects.get_or_create(
+                business=self.business, code=code, defaults={"name": code}
+            )
+            payment = register_sale_payment(
+                business=self.business,
+                sale_id=self.sale.pk,
+                method_id=method.pk,
+                amount=Decimal("10.00"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+            self.assertIsNone(payment.cash_session)
+            self.assertFalse(CashMovement.objects.filter(payment=payment).exists())
+        with self.assertRaisesMessage(ValidationError, "efectivo requiere"):
+            register_sale_payment(
+                business=self.business,
+                sale_id=self.sale.pk,
+                method_id=self.cash.pk,
+                amount=Decimal("10.00"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+            )
+
+    def test_form_requires_session_conditionally_for_physical_cash(self):
+        for method, valid in ((self.card, True), (self.cash, False)):
+            form = PaymentCreateForm(
+                {
+                    "method": method.pk,
+                    "amount": "10.00",
+                    "idempotency_key": uuid.uuid4(),
+                },
+                business=self.business,
+                store=self.store,
+            )
+            self.assertEqual(form.is_valid(), valid, form.errors)
+            if not valid:
+                self.assertIn("cash_session", form.errors)
+
+    def test_debt_collection_noncash_without_session_updates_customer_account_once(
+        self,
+    ):
+        customer = create_sales_customer(business=self.business)
+        self.sale.customer = customer
+        self.sale.save()
+        CustomerAccount.objects.create(
+            business=self.business, customer=customer, credit_limit=Decimal("200.00")
+        )
+        register_sale_on_account(
+            business=self.business, sale_id=self.sale.pk, user=self.user
+        )
+        key = uuid.uuid4()
+        for _ in range(2):
+            payment = register_sale_payment(
+                business=self.business,
+                sale_id=self.sale.pk,
+                method_id=self.card.pk,
+                amount=Decimal("10.00"),
+                user=self.user,
+                idempotency_key=key,
+            )
+        self.assertIsNone(payment.cash_session)
+        self.assertEqual(
+            CustomerAccountEntry.objects.filter(
+                payment=payment, entry_type=EntryTypeChoices.PAYMENT
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            CustomerAccount.objects.get(customer=customer).balance,
+            Decimal("90.00"),
+        )
+
+    def test_refund_noncash_without_session_and_cash_requires_open_session(self):
+        self.pay("100", self.cash)
+        returned = create_sale_return(
+            business=self.business,
+            store=self.store,
+            original_sale=self.sale,
+            created_by=self.user,
+            status=SaleReturnStatusChoices.COMPLETED,
+            total_amount=Decimal("100.00"),
+        )
+        with self.assertRaises(ValidationError):
+            register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=self.cash.pk,
+                amount=Decimal("10.00"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+                pin="1234",
+            )
+        for code in ("card", "bizum", "transfer"):
+            method, _ = PaymentMethod.objects.get_or_create(
+                business=self.business, code=code, defaults={"name": code}
+            )
+            refund = register_refund(
+                business=self.business,
+                sale_return_id=returned.pk,
+                method_id=method.pk,
+                amount=Decimal("10.00"),
+                user=self.user,
+                idempotency_key=uuid.uuid4(),
+                pin="1234",
+            )
+            self.assertIsNone(refund.cash_session)
+            self.assertFalse(CashMovement.objects.filter(payment=refund).exists())
+        before = CashSession.objects.get(pk=self.session.pk).expected_cash_amount
+        refund = register_refund(
+            business=self.business,
+            sale_return_id=returned.pk,
+            method_id=self.cash.pk,
+            amount=Decimal("10.00"),
+            user=self.user,
+            idempotency_key=uuid.uuid4(),
+            pin="1234",
+            cash_session_id=self.session.pk,
+        )
+        movement = CashMovement.objects.get(payment=refund)
+        self.assertEqual(movement.movement_type, CashMovement.MovementType.REFUND_CASH)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.expected_cash_amount, before - refund.amount)
 
 
 class PaymentModelTests(TestCase):

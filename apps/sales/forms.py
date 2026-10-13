@@ -19,6 +19,7 @@ from apps.cash_register.models import CashRegister, CashSession
 from apps.catalog.models import Product
 from apps.customers.models import Customer
 from apps.core.forms import wire_field_accessibility
+from apps.core.quantities import quantity
 from apps.billing.models import BillingSeries
 from apps.payments.models import PaymentMethod
 from apps.sales.models import (
@@ -48,7 +49,9 @@ class CheckoutForm(forms.Form):
     billing_idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
     series = forms.ModelChoiceField(BillingSeries.objects.none(), required=False)
 
-    def __init__(self, *args, methods, series, **kwargs):
+    def __init__(
+        self, *args, methods, series, method_choices=None, series_choices=None, **kwargs
+    ):
         kwargs.setdefault("initial", {})
         kwargs["initial"].setdefault("mode", "single")
         kwargs["initial"].setdefault("payment_idempotency_key", uuid.uuid4())
@@ -56,6 +59,10 @@ class CheckoutForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["method"].queryset = methods
         self.fields["series"].queryset = series
+        if method_choices is not None:
+            self.fields["method"].choices = method_choices
+        if series_choices is not None:
+            self.fields["series"].choices = series_choices
 
 
 class CheckoutPaymentPartForm(forms.Form):
@@ -69,10 +76,12 @@ class CheckoutPaymentPartForm(forms.Form):
     external_reference = forms.CharField(required=False, max_length=150)
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
-    def __init__(self, *args, methods, **kwargs):
+    def __init__(self, *args, methods, method_choices=None, **kwargs):
         kwargs.setdefault("initial", {}).setdefault("idempotency_key", uuid.uuid4())
         super().__init__(*args, **kwargs)
         self.fields["method"].queryset = methods
+        if method_choices is not None:
+            self.fields["method"].choices = method_choices
 
 
 CheckoutPaymentFormSet = forms.formset_factory(
@@ -233,8 +242,43 @@ class SaleFilterForm(forms.Form):
 # ==========================================================
 
 
+class SaleStartForm(forms.Form):
+    """Only explicit customer context is supplied by a start CTA."""
+
+    customer = forms.ModelChoiceField(Customer.objects.none(), required=False)
+
+    def __init__(self, *args, business, cash_context, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cash_context = cash_context
+        self.fields["customer"].queryset = Customer.objects.filter(
+            business=business, is_active=True
+        )
+
+    def clean(self):
+        data = super().clean()
+        # Legacy clients cannot override the server-resolved cash context.
+        for field in ("cash_register", "cash_session"):
+            posted = self.data.get(field)
+            expected = getattr(self.cash_context.get(field), "pk", None)
+            if posted and str(posted) != str(expected):
+                raise ValidationError(
+                    "La caja o sesión no coincide con el contexto de inicio."
+                )
+        return data
+
+
+class SaleCashSessionForm(forms.Form):
+    cash_session = forms.ModelChoiceField(
+        CashSession.objects.none(), label="Sesión de caja"
+    )
+
+    def __init__(self, *args, sessions, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["cash_session"].queryset = sessions
+
+
 class SaleOpenForm(forms.Form):
-    """Formulario para abrir una venta."""
+    """Legacy validation compatibility; start views use SaleStartForm."""
 
     customer = forms.ModelChoiceField(
         label="Cliente",
@@ -406,21 +450,19 @@ class SaleOpenForm(forms.Form):
 class SaleHeaderUpdateForm(forms.Form):
     """Formulario para modificar la cabecera editable."""
 
-    customer_mode = forms.ChoiceField(
-        label="Tipo de venta",
-        choices=(("counter", "Mostrador"), ("customer", "Cliente")),
-        required=False,
-    )
-
     customer = forms.ModelChoiceField(
         label="Cliente",
         required=False,
         queryset=Customer.objects.none(),
+        empty_label="Sin cliente",
     )
 
     document_type_requested = forms.ChoiceField(
         label="Documento solicitado",
-        choices=(RequestedDocumentTypeChoices.choices),
+        choices=(
+            (RequestedDocumentTypeChoices.TICKET, "Ticket"),
+            (RequestedDocumentTypeChoices.INVOICE, "Factura"),
+        ),
     )
 
     def __init__(
@@ -445,33 +487,6 @@ class SaleHeaderUpdateForm(forms.Form):
             "pk",
         )
         wire_field_accessibility(self)
-
-    def clean(self):
-        cleaned_data = super().clean()
-
-        customer_mode = cleaned_data.get("customer_mode")
-        customer = cleaned_data.get("customer")
-        if customer_mode == "counter":
-            customer = None
-            cleaned_data["customer"] = None
-        elif customer_mode == "customer":
-            pass
-        elif "customer_mode" not in self.data:
-            # Preserve the legacy form/HTTP contract outside the workspace.
-            customer_mode = "customer" if customer is not None else "counter"
-            cleaned_data["customer_mode"] = customer_mode
-
-        document_type = cleaned_data.get(
-            "document_type_requested",
-        )
-
-        if document_type == RequestedDocumentTypeChoices.INVOICE and customer is None:
-            self.add_error(
-                "customer",
-                ("Debes seleccionar un cliente cuando se solicita factura."),
-            )
-
-        return cleaned_data
 
 
 # ==========================================================
@@ -701,9 +716,19 @@ class SaleLineUpdateForm(BaseSaleLineForm):
         sale,
         line,
         user,
+        mode="",
         **kwargs,
     ):
         self.line = line
+        self.mode = mode if mode in {"price", "discount"} else ""
+        kwargs.setdefault(
+            "initial",
+            {
+                "quantity": line.quantity,
+                "unit_base_price": line.unit_base_price,
+                "discount_amount": line.discount_amount,
+            },
+        )
 
         super().__init__(
             *args,
@@ -723,7 +748,47 @@ class SaleLineUpdateForm(BaseSaleLineForm):
 
         if self.pos_settings and not self.pos_settings.allow_manual_discounts:
             self.fields.pop("discount_amount")
+        elif "discount_amount" in self.fields:
+            field = self.fields["discount_amount"]
+            field.label = "Descuento (€)"
+            field.help_text = (
+                (
+                    "Importe total del descuento de la línea. Máximo permitido: "
+                    f"{quantity(self.pos_settings.max_manual_discount_percent)} %. "
+                    "Introduce 0 para quitar el descuento."
+                )
+                if self.pos_settings
+                else "Introduce 0 para quitar el descuento."
+            )
+
+        if self.mode:
+            editable = (
+                "discount_amount" if self.mode == "discount" else "unit_base_price"
+            )
+            for name, field in self.fields.items():
+                if name != editable:
+                    field.disabled = True
+                    field.widget = forms.HiddenInput()
+                else:
+                    field.widget.attrs["autofocus"] = True
         wire_field_accessibility(self)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.pos_settings and not self.pos_settings.allow_manual_discounts:
+            raw_discount = self.data.get("discount_amount")
+            if raw_discount not in (None, ""):
+                try:
+                    discount = forms.DecimalField().clean(raw_discount)
+                except ValidationError:
+                    self.add_error(None, "El descuento indicado no es válido.")
+                else:
+                    if discount > 0:
+                        self.add_error(
+                            None,
+                            "La configuración del negocio no permite descuentos manuales.",
+                        )
+        return cleaned_data
 
     def get_reference_price(
         self,

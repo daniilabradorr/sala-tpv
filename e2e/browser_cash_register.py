@@ -110,7 +110,11 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
             ):
                 page.set_viewport_size({"width": width, "height": height})
                 expect(page.get_by_text("Esperado", exact=True).first).to_be_visible()
-                expect(page.get_by_role("button", name="Nueva venta")).to_be_visible()
+                expect(
+                    page.locator(".cash-session-header").get_by_role(
+                        "button", name="Nueva venta"
+                    )
+                ).to_be_visible()
                 more_details = None
                 more_summary = None
                 if 768 <= width <= 1199:
@@ -141,10 +145,18 @@ class CashRegisterBrowserTests(StaticLiveServerTestCase):
                 if more_details is not None:
                     more_summary.click()
                     expect(more_details).not_to_have_attribute("open", "")
-                page.get_by_role("tab", name="Ventas").click()
-                page.get_by_role("tab", name="Movimientos").click()
-                page.get_by_role("tab", name="Arqueos").click()
-                page.get_by_role("tab", name="Resumen").click()
+                for tab, heading in (
+                    ("Ventas", "Ventas del turno"),
+                    ("Movimientos", "Movimientos de efectivo"),
+                    ("Arqueos", "Arqueos"),
+                    ("Resumen", "Resumen del cajón"),
+                ):
+                    page.get_by_role("tab", name=tab).click()
+                    expect(
+                        page.locator("#cash-tab-panel").get_by_role(
+                            "heading", name=heading, exact=True
+                        )
+                    ).to_be_visible()
                 self.assertEqual(page.locator("#cash-tab-panel").count(), 1)
                 viewport_metrics = page.evaluate(
                     """() => {

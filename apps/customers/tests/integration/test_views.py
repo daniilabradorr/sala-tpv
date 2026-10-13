@@ -171,7 +171,7 @@ class CustomerViewTests(TestCase):
         response = self.client.get(detail_url)
         self.assertContains(
             response,
-            reverse("sales:sale_open", kwargs={"store_id": store_b.pk}),
+            reverse("sales:sale_start", kwargs={"store_id": store_b.pk}),
         )
 
         create_store_access(self.business, self.manager, store_a, can_sell=True)
@@ -183,11 +183,11 @@ class CustomerViewTests(TestCase):
         response = self.client.get(detail_url)
         self.assertContains(
             response,
-            reverse("sales:sale_open", kwargs={"store_id": store_a.pk}),
+            reverse("sales:sale_start", kwargs={"store_id": store_a.pk}),
         )
         self.assertNotContains(
             response,
-            f"{reverse('sales:sale_open', kwargs={'store_id': store_b.pk})}?customer=",
+            f"{reverse('sales:sale_start', kwargs={'store_id': store_b.pk})}?customer=",
         )
 
     def test_pending_debt_cta_requires_can_sell_but_history_only_requires_access(self):

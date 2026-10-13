@@ -71,6 +71,35 @@ class SaleModelTests(TestCase):
         with self.assertRaises(ValidationError):
             sale.save()
 
+    def test_invoice_without_customer_is_only_valid_before_finalisation(self):
+        sale = create_sale(
+            business=self.business,
+            store=self.store,
+            opened_by=self.user,
+            document_type_requested="invoice",
+        )
+        self.assertIsNone(sale.customer_id)
+        for status in (
+            SaleStatusChoices.DRAFT,
+            SaleStatusChoices.OPEN,
+            SaleStatusChoices.CANCELLED,
+        ):
+            with self.subTest(status=status):
+                sale.status = status
+                sale.full_clean()
+                sale.save()
+                sale.refresh_from_db()
+                self.assertEqual(sale.status, status)
+                self.assertIsNone(sale.customer_id)
+        for status in (SaleStatusChoices.COMPLETED, SaleStatusChoices.RETURNED):
+            sale.status = status
+            with (
+                self.subTest(status=status),
+                self.assertRaises(ValidationError) as error,
+            ):
+                sale.full_clean()
+            self.assertIn("customer", error.exception.message_dict)
+
     def test_sale_line_keeps_historical_snapshot_after_product_changes(self):
         sale = create_sale(
             business=self.business,

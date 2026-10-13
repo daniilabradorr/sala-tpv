@@ -1,15 +1,198 @@
 (() => {
   const workspace = () => document.querySelector(".tpv");
 
-  function syncCustomer(root = document) {
-    const header = root.querySelector("#workspace-header");
-    if (!header) return;
-    const mode = header.querySelector('[name="customer_mode"]:checked')?.value;
-    const field = header.querySelector(".customer-field");
-    if (!field) return;
-    field.hidden = mode !== "customer";
-    if (mode !== "customer") field.querySelector("select").value = "";
+  // Absolute quantities share one queue owner that survives cart-content swaps.
+  // Keep the old forms connected until the final queued intent is answered.
+  let cartRevision = 0;
+  const dirtyLines = new Set();
+  let searchTimer;
+  let searchValue = document.querySelector("[data-tpv-search]")?.value || "";
+  document.addEventListener("input", (event) => {
+    if (!event.target.matches("[data-tpv-search]")) return;
+    clearTimeout(searchTimer);
+    if (event.target.value === searchValue) return;
+    searchValue = event.target.value;
+    searchTimer = setTimeout(() => event.target.form.dispatchEvent(new CustomEvent("tpv:search", { bubbles: true })), 175);
+  });
+  document.addEventListener("htmx:configRequest", (event) => {
+    if (dirtyLines.size && event.detail.elt.closest?.("#sale-cart, .line-editor")) {
+      event.detail.headers["X-TPV-Changed-Lines"] = [...dirtyLines].join(",");
+    }
+  });
+  const cartRequests = new WeakMap();
+  const activeCartRequests = new Set();
+  let answeredRevision = 0;
+  let needsStructure = false;
+  let reconciling = false;
+  function reconcileStructure() {
+    if (!needsStructure || reconciling || activeCartRequests.size
+        || answeredRevision !== cartRevision) return;
+    reconciling = true;
+    htmx.ajax("GET", `${location.pathname}?region=cart`, {
+      source: "#sale-cart", target: "#sale-cart-content", swap: "outerHTML",
+    }).finally(() => { reconciling = false; });
   }
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (form.id === "catalog-filters") clearTimeout(searchTimer);
+    if (form.matches(".quantity-form")) {
+      const input = form.querySelector('[name="quantity"]');
+      if (!form.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // Swapped forms are visible before HTMX's settle task initializes them.
+      // Install the form's submit listener before this event reaches its target.
+      htmx.process(form);
+      form.dataset.quantitySubmitted = input.value;
+    }
+    if (event.target.matches('#sale-cart form, .line-editor form, .product-grid form')) {
+      event.cartRevision = ++cartRevision;
+      const lineId = form.dataset.cartLineId;
+      if (lineId) dirtyLines.add(lineId);
+    }
+  }, true);
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const revision = event.detail.requestConfig?.triggeringEvent?.cartRevision;
+    const reconcile = reconciling && event.detail.elt?.id === "sale-cart";
+    if (revision !== undefined || reconcile) {
+      cartRequests.set(event.detail.xhr, {
+        revision: reconcile ? cartRevision : revision,
+        structural: event.detail.target?.id === "sale-cart-content", reconcile,
+      });
+      activeCartRequests.add(event.detail.xhr);
+    }
+  });
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    const request = cartRequests.get(event.detail.xhr);
+    if (request && request.revision < cartRevision) {
+      event.detail.shouldSwap = false;
+      if (request.structural && event.detail.xhr.status === 200) needsStructure = true;
+    }
+  });
+
+  document.addEventListener("htmx:afterRequest", (event) => {
+    const request = cartRequests.get(event.detail.xhr);
+    if (!request) return;
+    activeCartRequests.delete(event.detail.xhr);
+    if (!request.reconcile) answeredRevision = Math.max(answeredRevision, request.revision);
+    // HTMX starts queued requests when its synchronous completion stack exits.
+    // A microtask observes that queue, rather than guessing a delay.
+    queueMicrotask(reconcileStructure);
+  });
+
+  // Capture at swap time, not request time: the user can scroll while waiting.
+  // The same shell is replaced by direct quantity/add/delete and editor OOB swaps.
+  let cartScroll = null;
+  function captureCartScroll(status = 200) {
+    const shell = document.querySelector("#sale-cart-content");
+    const region = shell?.querySelector("[data-cart-scroll-region]");
+    const active = document.activeElement;
+    const focus = shell?.closest("#sale-cart")?.matches(":modal") && shell.contains(active)
+      ? { id: active.id, label: active.getAttribute("aria-label") } : null;
+    cartScroll = region ? { shell, sale: shell.dataset.saleId, top: region.scrollTop, status, focus } : null;
+  }
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    if (event.detail.target?.id === "sale-cart-content" && event.detail.shouldSwap) {
+      captureCartScroll(event.detail.xhr.status);
+    }
+  });
+  document.addEventListener("htmx:oobBeforeSwap", (event) => {
+    if (event.detail.target?.id === "sale-cart-content" && event.detail.shouldSwap) {
+      captureCartScroll();
+    }
+  });
+  function restoreCartScroll() {
+    const saved = cartScroll;
+    const shell = document.querySelector("#sale-cart-content");
+    if (!saved || shell === saved.shell) return;
+    cartScroll = null;
+    const region = shell?.querySelector("[data-cart-scroll-region]");
+    if (!region || shell.dataset.saleId !== saved.sale) return;
+    region.scrollTop = saved.top; // The browser clamps after removal/emptying.
+    if (saved.focus && shell.closest("#sale-cart")?.matches(":modal")) {
+      const control = (saved.focus.id && document.getElementById(saved.focus.id))
+        || [...shell.querySelectorAll("[aria-label]")].find(node =>
+          node.getAttribute("aria-label") === saved.focus.label)
+        || shell.querySelector("[data-nx-drawer-close]");
+      control?.focus({ preventScroll: true });
+    }
+    const alert = saved.status === 422 && region.querySelector('[role="alert"]');
+    if (alert) {
+      const bounds = region.getBoundingClientRect();
+      const error = alert.getBoundingClientRect();
+      if (error.top < bounds.top || error.bottom > bounds.bottom) {
+        region.scrollTop += error.top - bounds.top;
+      }
+    }
+  }
+  document.addEventListener("htmx:afterSwap", restoreCartScroll);
+  document.addEventListener("htmx:oobAfterSwap", restoreCartScroll);
+  document.addEventListener("htmx:afterSettle", (event) => {
+    if (event.detail.xhr?.status !== 422 || !event.detail.target?.id?.startsWith("cart-line-")) return;
+    const region = document.querySelector("[data-cart-scroll-region]");
+    const alert = document.getElementById(event.detail.target.id)?.querySelector('[role="alert"]');
+    if (!region || !alert) return;
+    const bounds = region.getBoundingClientRect();
+    const error = alert.getBoundingClientRect();
+    if (error.top < bounds.top || error.bottom > bounds.bottom) region.scrollTop += Math.floor(error.top - bounds.top) - 2;
+  });
+
+  function saveQuantity(input) {
+    const form = input.closest("form");
+    // A swap can blur the old input and fire change after Enter already saved it.
+    // Never submit a form whose HTMX listeners are being removed.
+    if (!form?.isConnected || form.dataset.quantityRemoving || form.dataset.quantitySubmitted === input.value) return;
+    form.requestSubmit();
+  }
+  document.addEventListener("htmx:beforeCleanupElement", (event) => {
+    if (event.detail.elt.matches?.(".quantity-form")) event.detail.elt.dataset.quantityRemoving = "true";
+  });
+  document.addEventListener("htmx:afterRequest", (event) => {
+    if (event.detail.elt.matches?.(".quantity-form") && (event.detail.xhr.status === 0 || event.detail.xhr.status >= 500)) {
+      delete event.detail.elt.dataset.quantitySubmitted;
+    }
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.matches('.quantity-form [name="quantity"]')) saveQuantity(event.target);
+  });
+
+  // The sync owner (.tpv) survives header swaps. Keep the submitting form
+  // connected while HTMX has a newer change queued, or HTMX would discard it.
+  const headerRevisions = new WeakMap();
+  const headerRequests = new WeakMap();
+  document.addEventListener("change", (event) => {
+    const form = event.target.closest("[data-header-autosave]");
+    if (form) headerRevisions.set(form, (headerRevisions.get(form) || 0) + 1);
+  }, true);
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const form = event.detail.elt;
+    if (form?.matches("[data-checkout-open], [data-checkout-reload]")) {
+      const panel = event.detail.target;
+      const shell = document.querySelector("#checkout-loading-template")?.content.cloneNode(true);
+      if (shell) panel.replaceChildren(shell);
+    }
+    if (form?.id === "quick-customer-trigger") {
+      // Reopening must not expose the previous form while its replacement GET
+      // is in flight: edits/submits on that form would be lost on the swap.
+      const panel = event.detail.target;
+      const loading = document.createElement("p");
+      loading.id = "quick-customer-title";
+      loading.setAttribute("role", "status");
+      loading.textContent = "Cargando formulario de cliente…";
+      panel.replaceChildren(loading);
+    }
+    if (form?.matches("[data-header-autosave]")) {
+      headerRequests.set(event.detail.xhr, { form, revision: headerRevisions.get(form) || 0 });
+    }
+  });
+  document.addEventListener("htmx:beforeSwap", (event) => {
+    const request = headerRequests.get(event.detail.xhr);
+    if (request && (headerRevisions.get(request.form) || 0) !== request.revision) {
+      event.detail.shouldSwap = false;
+    }
+  });
 
   function syncCartSummary() {
     const root = workspace();
@@ -33,10 +216,19 @@
     }
   }
 
-  const money = (value) => `${value.toFixed(2).replace(".", ",")} €`;
-
+  // Visual feedback only. Decimal strings become integer cents without binary
+  // floating point; the server still validates and confirms every amount.
+  function cents(value) {
+    const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(String(value).trim());
+    return match ? BigInt(match[1]) * 100n + BigInt((match[2] || "").padEnd(2, "0")) : null;
+  }
+  function decimalMoney(value) {
+    const amount = value < 0n ? -value : value;
+    return `${value < 0n ? "-" : ""}${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
+  }
+  const money = (value) => `${decimalMoney(value).replace(".", ",")} €`;
   function pendingAmount(checkout) {
-    return Number(String(checkout.dataset.pending || "0").replace(",", ".")) || 0;
+    return cents(checkout.dataset.pending || "0") ?? 0n;
   }
 
   function syncCheckoutMode(checkout) {
@@ -51,14 +243,14 @@
     return new Map(
       [...checkout.querySelectorAll('[name="method"][data-method-code]')].map((input) => [
         input.value,
-        input.dataset.methodCode,
+        input.dataset.methodCash === "true",
       ]),
     );
   }
 
   function syncPaymentMethodFields(checkout) {
     const selected = checkout.querySelector('[name="method"]:checked');
-    const cash = selected?.dataset.methodCode === "cash";
+    const cash = selected?.dataset.methodCash === "true";
     const cashFields = checkout.querySelector("[data-cash-fields]");
     if (cashFields) cashFields.hidden = !cash;
     const reference = checkout.querySelector("[data-single-reference]");
@@ -66,31 +258,48 @@
 
     const codes = methodCodes(checkout);
     checkout.querySelectorAll("[data-split-part]:not([hidden])").forEach((part) => {
-      const code = codes.get(part.querySelector("[data-split-method]")?.value);
-      const partCash = part.querySelector("[data-part-cash]");
+      const selectedId = part.querySelector("[data-split-method]")?.value;
+      const cash = codes.get(selectedId);
+      const partCash = part.querySelectorAll("[data-part-cash]");
       const partReference = part.querySelector("[data-part-reference]");
-      if (partCash) partCash.hidden = code !== "cash";
-      if (partReference) partReference.hidden = !code || code === "cash";
+      partCash.forEach(node => { node.hidden = cash !== true; });
+      if (partReference) partReference.hidden = !selectedId || cash === true;
     });
   }
 
-  function updateCashChange(checkout) {
-    const received = Number(checkout.querySelector('[name="cash_received"]')?.value || 0);
-    const output = checkout.querySelector("[data-cash-change]");
-    if (output) output.textContent = money(Math.max(received - pendingAmount(checkout), 0));
+  function cashFeedback(input, amount, label, output) {
+    if (!input || !output) return;
+    const received = input.value.trim() === "" ? amount : cents(input.value);
+    if (received === null || amount === null) {
+      if (label) label.textContent = "Importe inválido";
+      output.textContent = "—";
+      return;
+    }
+    const difference = received - amount;
+    if (label) label.textContent = difference < 0n ? "Faltan" : "Cambio";
+    output.textContent = money(difference < 0n ? -difference : difference);
   }
-
+  function updateCashChange(checkout) {
+    cashFeedback(checkout.querySelector('[name="cash_received"]'), pendingAmount(checkout),
+      checkout.querySelector("[data-cash-label]"), checkout.querySelector("[data-cash-change]"));
+    checkout.querySelectorAll("[data-split-part]:not([hidden])").forEach((part) => {
+      cashFeedback(part.querySelector('[name$="-cash_received"]'), cents(part.querySelector('[name$="-amount"]')?.value || "0"),
+        part.querySelector("[data-part-cash-label]"), part.querySelector("[data-part-cash-change]"));
+    });
+  }
   function updateSplitSummary(checkout) {
-    const assigned = [...checkout.querySelectorAll('[data-split-part]:not([hidden]) [name$="-amount"]')]
-      .reduce((sum, input) => sum + Number(input.value || 0), 0);
+    const amounts = [...checkout.querySelectorAll('[data-split-part]:not([hidden]) [name$="-amount"]')].map(input => cents(input.value || "0"));
+    const valid = amounts.every(amount => amount !== null);
+    const assigned = amounts.reduce((sum, amount) => sum + (amount ?? 0n), 0n);
     const remaining = pendingAmount(checkout) - assigned;
     const assignedOutput = checkout.querySelector("[data-split-assigned]");
     const remainingOutput = checkout.querySelector("[data-split-remaining]");
-    if (assignedOutput) assignedOutput.textContent = money(assigned);
+    if (assignedOutput) assignedOutput.textContent = valid ? money(assigned) : "—";
     if (remainingOutput) {
-      remainingOutput.textContent = money(remaining);
-      remainingOutput.classList.toggle("is-negative", remaining < 0);
+      remainingOutput.textContent = valid ? money(remaining) : "—";
+      remainingOutput.classList.toggle("is-negative", remaining < 0n);
     }
+    updateCashChange(checkout);
   }
 
   function syncSplitParts(checkout) {
@@ -121,7 +330,6 @@
   }
 
   document.addEventListener("change", (event) => {
-    if (event.target.name === "customer_mode") syncCustomer();
     const checkout = event.target.closest(".checkout");
     if (!checkout) return;
     syncCheckoutMode(checkout);
@@ -143,7 +351,7 @@
     if (cashQuick) {
       const checkout = cashQuick.closest(".checkout");
       const input = checkout.querySelector('[name="cash_received"]');
-      input.value = cashQuick.dataset.cashQuick === "exact" ? pendingAmount(checkout).toFixed(2) : cashQuick.dataset.cashQuick;
+      input.value = cashQuick.dataset.cashQuick === "exact" ? decimalMoney(pendingAmount(checkout)) : cashQuick.dataset.cashQuick;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
       return;
@@ -178,17 +386,37 @@
     if (!button) return;
     const form = button.closest("form");
     const input = form.querySelector('[name="quantity"]');
-    const next = Number(input.value) + Number(button.dataset.quantityStep);
-    if (next <= 0) return;
-    input.value = next.toFixed(3);
-    form.requestSubmit();
+    // Only UI quantities: integer thousandths preserve all three decimal places.
+    const match = /^(\d+)(?:\.(\d{1,3}))?$/.exec(input.value);
+    if (!match) return;
+    const current = BigInt(match[1]) * 1000n + BigInt((match[2] || "").padEnd(3, "0"));
+    const next = current + BigInt(button.dataset.quantityStep) * 1000n;
+    if (next <= 0n) return;
+    const fraction = String(next % 1000n).padStart(3, "0").replace(/0+$/, "");
+    input.value = `${next / 1000n}${fraction ? `.${fraction}` : ""}`;
+    saveQuantity(input);
   });
 
-  document.addEventListener("htmx:afterSwap", () => {
-    syncCustomer();
+  document.addEventListener("htmx:afterSwap", (event) => {
+    const request = cartRequests.get(event.detail.xhr);
+    if (request && request.revision === cartRevision) {
+      dirtyLines.clear();
+      if (request.structural) needsStructure = false;
+    }
     syncCartSummary();
     normalizeResponsiveTicket();
     document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
+    document.querySelector('#line-editor-dialog[open] [autofocus]')?.focus();
+  });
+
+  document.addEventListener("htmx:afterSettle", (event) => {
+    if (event.detail.target?.id !== "checkout-panel") return;
+    const checkout = document.querySelector("#checkout-dialog[open] [data-checkout]");
+    if (checkout) {
+      const cash = checkout.querySelector('[name="method"]:checked')?.dataset.methodCash === "true";
+      const focus = cash ? checkout.querySelector('[name="cash_received"]') : checkout.querySelector('[name="method"]:checked, [name="method"], [type="submit"]');
+      focus?.focus();
+    }
   });
 
   document.addEventListener("htmx:oobAfterSwap", () => {
@@ -199,7 +427,6 @@
   if (matchMedia("(min-width: 768px)").matches) {
     document.querySelector("[data-tpv-search]")?.focus();
   }
-  syncCustomer();
   syncCartSummary();
   normalizeResponsiveTicket();
   document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);

@@ -31,6 +31,6 @@
         </nav>{% endif %}
     {% else %}
         <div class="sales-empty"><h2>{% if has_active_filters %}No encontramos ventas con estos filtros.{% else %}Todavía no hay ventas en esta tienda.{% endif %}</h2>
-        {% if has_active_filters %}<a class="button button-secondary" href="{% url 'sales:sale_list' store_id=store.pk %}">Limpiar filtros</a>{% elif can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=store.pk %}">Nueva venta</a>{% endif %}</div>
+        {% if has_active_filters %}<a class="button button-secondary" href="{% url 'sales:sale_list' store_id=store.pk %}">Limpiar filtros</a>{% elif can_sell %}<form method="post" action="{% url 'sales:sale_start' store_id=store.pk %}" data-nx-sale-start>{% csrf_token %}<button type="submit" class="button">Nueva venta</button></form>{% endif %}</div>
     {% endif %}
 </div>

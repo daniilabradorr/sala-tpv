@@ -1,4 +1,4 @@
-<section id="return-workspace" class="returns-page" aria-labelledby="return-title">
+{% load quantities %}<section id="return-workspace" class="returns-page" aria-labelledby="return-title">
   <a class="back-link" href="{% url 'sales:return_list' store_id=store.pk %}">← Devoluciones</a>
   <header class="returns-header">
     <div>
@@ -36,9 +36,9 @@
           <form class="return-line" method="post" action="{% url 'sales:return_line_inline' store_id=store.pk return_pk=return_doc.pk original_line_pk=row.original.pk %}" hx-post="{% url 'sales:return_line_inline' store_id=store.pk return_pk=return_doc.pk original_line_pk=row.original.pk %}" hx-target="#return-workspace" hx-swap="outerHTML">
             {% csrf_token %}
             <div class="return-product"><strong>{{ row.original.product_name }}</strong>{% if row.original.sku %}<small>SKU {{ row.original.sku }}</small>{% endif %}</div>
-            <div data-label="Vendido">{{ row.original.quantity }}</div>
-            <div data-label="Devuelto">{{ row.returned }}</div>
-            <div data-label="Disponible"><strong>{{ row.available }}</strong></div>
+            <div data-label="Vendido">{{ row.original.quantity|quantity }}</div>
+            <div data-label="Devuelto">{{ row.returned|quantity }}</div>
+            <div data-label="Disponible"><strong>{{ row.available|quantity }}</strong></div>
             <div class="return-edit" data-label="Devolver ahora">
               <label class="sr-only" for="{{ row.form.quantity.id_for_label }}">Cantidad a devolver de {{ row.original.product_name }}</label>
               <div class="quantity-control"><button type="button" data-quantity-step="-1" aria-label="Restar una unidad de {{ row.original.product_name }}">−</button>{{ row.form.quantity }}<button type="button" data-quantity-step="1" aria-label="Sumar una unidad de {{ row.original.product_name }}">+</button></div>
@@ -61,7 +61,7 @@
         {% for line in historical_lines %}
           <article class="return-history-line">
             <div class="return-product"><strong>{{ line.original_line.product_name }}</strong>{% if line.original_line.sku %}<small>SKU {{ line.original_line.sku }}</small>{% endif %}</div>
-            <div><span>Cantidad devuelta</span><strong>{{ line.quantity }}</strong></div>
+            <div><span>Cantidad devuelta</span><strong>{{ line.quantity|quantity }}</strong></div>
             <div><span>Importe</span><strong>{{ line.amount }} €</strong></div>
             <div><span>Stock</span><strong>{% if line.restock %}Repuesto{% else %}No repuesto{% endif %}</strong></div>
           </article>

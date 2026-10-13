@@ -1,0 +1,134 @@
+{
+  "implementation_sha": "95eb203d3c5c399107ebd1ee000837d759a1a3f0",
+  "generated_at": "2026-10-09 09:28:47 UTC",
+  "workflow_runs": [
+    {
+      "id": 37910679784,
+      "name": "Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679784"
+    },
+    {
+      "id": 37910679759,
+      "name": "Format Check",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679759"
+    },
+    {
+      "id": 37910679818,
+      "name": "Docker Check",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679818"
+    },
+    {
+      "id": 37910679897,
+      "name": "CI",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897"
+    }
+  ],
+  "jobs": [
+    {
+      "id": 113754802601,
+      "name": "lint",
+      "workflow": "Lint",
+      "run_id": 37910679784,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679784/job/113754802601"
+    },
+    {
+      "id": 113754802412,
+      "name": "format",
+      "workflow": "Format Check",
+      "run_id": 37910679759,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679759/job/113754802412"
+    },
+    {
+      "id": 113754802596,
+      "name": "docker",
+      "workflow": "Docker Check",
+      "run_id": 37910679818,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679818/job/113754802596"
+    },
+    {
+      "id": 113754802748,
+      "name": "browser-e2e",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754802748"
+    },
+    {
+      "id": 113754802899,
+      "name": "purchases-postgres-locking",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754802899"
+    },
+    {
+      "id": 113754802921,
+      "name": "billing-postgres-concurrency",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754802921"
+    },
+    {
+      "id": 113754802955,
+      "name": "ci",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754802955"
+    },
+    {
+      "id": 113754803029,
+      "name": "payments-postgres-locking",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754803029"
+    },
+    {
+      "id": 113754803057,
+      "name": "cash-postgres-concurrency",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754803057"
+    },
+    {
+      "id": 113754803070,
+      "name": "sales-postgres-locking",
+      "workflow": "CI",
+      "run_id": 37910679897,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/daniilabradorr/sala-tpv/actions/runs/37910679897/job/113754803070"
+    }
+  ],
+  "commit_statuses": [
+    {
+      "context": "Vercel",
+      "state": "success",
+      "target_url": "https://vercel.com/danielabrador47-1975s-projects/sala-tpv/8GXHrvrEQ5igwA1BZy9KRvaQuNS1"
+    }
+  ],
+  "scope": "Implementation snapshot. Final documentation delivery SHA checks are linked and verified in PR #227."
+}

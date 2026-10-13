@@ -74,10 +74,31 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         main.get_by_role("button", name="Abrir caja").click()
         main.get_by_role("button", name="Nueva venta").click()
         expect(main.get_by_role("heading", name=re.compile(r"Venta #"))).to_be_visible()
-        main.get_by_label("Buscar producto").fill(self.product.name)
-        main.locator("#product-grid").get_by_role(
+        # Navigation can expose HTML before deferred TPV listeners initialize.
+        # Begin user input only after the real page scripts finish loading.
+        page.wait_for_function(
+            "document.readyState === 'complete' && window.htmx !== undefined"
+        )
+        search = main.get_by_label("Buscar producto")
+        search.fill(self.product.name)
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "GET"
+                and "/sales/" in response.url
+                and "q=" in response.url
+            )
+        ):
+            search.press("Enter")
+        product = main.locator("#product-grid").get_by_role(
             "button", name=re.compile(self.product.name)
-        ).click()
+        )
+        expect(product).to_be_visible()
+        with page.expect_response(
+            lambda response: (
+                response.request.method == "POST" and "/lines/add/" in response.url
+            )
+        ):
+            product.click()
         expect(main.locator("#sale-cart .cart-line")).to_be_visible()
 
     def test_checkout_processing_422_toast_and_csrf(self):
@@ -94,20 +115,24 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
             )
             try:
                 self._open_sale_with_product(page)
-                page.get_by_role("button", name="Actualizar cabecera").click()
-                expect(page.locator("#nx-toast-region .nx-toast")).to_have_text(
-                    "Venta actualizada."
-                )
+                with page.expect_response(lambda r: "/header/" in r.url):
+                    page.get_by_role("radio", name="Factura", exact=True).check()
+                expect(page.locator(".header-help")).to_be_visible()
+                expect(page.locator("#nx-toast-region .nx-toast")).to_have_count(0)
+                with page.expect_response(lambda r: "/header/" in r.url):
+                    page.get_by_role("radio", name="Ticket", exact=True).check()
+                expect(page.locator(".header-help")).to_have_count(0)
 
                 trigger = page.get_by_role("link", name=re.compile(r"^COBRAR"))
                 trigger.click()
                 dialog = page.locator("#checkout-dialog")
                 expect(dialog).to_be_visible()
-                self.assertTrue(
-                    page.evaluate(
-                        "document.querySelector('#checkout-dialog').contains(document.activeElement)"
-                    )
-                )
+                expect(dialog.locator("[data-checkout]")).to_be_visible()
+                expect(
+                    dialog.locator(
+                        '[name="method"]:checked, [name="method"], [type="submit"]'
+                    ).first
+                ).to_be_focused()
                 page.evaluate(
                     """
                     window.nxProcessingSnapshots = {};
@@ -289,9 +314,16 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
             try:
                 self._open_sale_with_product(page)
                 context.clear_cookies(name=settings.SESSION_COOKIE_NAME)
-                page.locator("#sale-cart .quantity-form").get_by_role(
-                    "button", name="Actualizar"
-                ).click()
+                quantity = page.locator('#sale-cart .quantity-form [name="quantity"]')
+                quantity.fill("2")
+                with page.expect_request(
+                    lambda request: (
+                        request.method == "POST"
+                        and "/quantity/" in request.url
+                        and request.headers.get("hx-request") == "true"
+                    )
+                ):
+                    quantity.press("Enter")
                 page.wait_for_url(
                     re.compile(r"/users/login/\?(?=.*next=)(?=.*expired=1)")
                 )

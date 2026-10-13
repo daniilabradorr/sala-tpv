@@ -1,0 +1,29 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ document.full_number }} | Netxodo</title>
+  <link rel="stylesheet" href="{% static 'css/pages/billing-print.css' %}">
+  <script src="{% static 'js/pages/billing-print.js' %}" defer></script>
+</head>
+<body class="document-print-page">
+  <nav class="document-print-controls" aria-label="Acciones del documento">
+    <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">← Volver al documento</a>
+    <button type="button" data-print-document>IMPRIMIR</button>
+  </nav>
+  <main class="document-print document-print--{{ document.document_type }}">
+    {% if document.document_type == 'F2' %}
+      {% include "billing/print/_f2_receipt.html" %}
+    {% elif document.document_type == 'F1' %}
+      {% include "billing/print/_f1_invoice.html" %}
+    {% else %}
+      {% include "billing/print/_legacy_document.html" %}
+    {% endif %}
+    {% comment %}An integration can override this region once real persisted fiscal data exists.{% endcomment %}
+    {% block fiscal_region %}{% endblock %}
+    {% if business_profile.receipt_footer %}<footer class="document-print-footer">{{ business_profile.receipt_footer }}</footer>{% endif %}
+  </main>
+</body>
+</html>

@@ -8,7 +8,7 @@
                 <p class="dashboard-date">{{ today|date:"l, j \d\e F"|capfirst }}</p>
             </div>
             <div class="dashboard-actions">
-                {% if shell_capabilities.can_sell %}<a class="button" href="{% url 'sales:sale_open' store_id=active_store.pk %}">Nueva venta</a>{% endif %}
+                {% if shell_capabilities.can_sell %}<form method="post" action="{% url 'sales:sale_start' store_id=active_store.pk %}" data-nx-sale-start>{% csrf_token %}<button type="submit" class="button">Nueva venta</button></form>{% endif %}
                 <label for="dashboard-period">Periodo</label>
                 <select id="dashboard-period" name="period"
                         hx-get="{% url 'core:home' %}"

@@ -7,6 +7,21 @@ app_name = "sales"
 
 urlpatterns = [
     path(
+        "stores/<int:store_id>/sales/start/",
+        views.SaleOpenView.as_view(),
+        name="sale_start",
+    ),
+    path(
+        "stores/<int:store_id>/cash-sessions/<int:session_id>/sales/start/",
+        views.SaleOpenView.as_view(),
+        name="sale_start_for_session",
+    ),
+    path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/cash-session/",
+        views.SaleCashSessionUpdateView.as_view(),
+        name="sale_cash_session_update",
+    ),
+    path(
         "stores/<int:store_id>/sales/", views.SaleListView.as_view(), name="sale_list"
     ),
     path(

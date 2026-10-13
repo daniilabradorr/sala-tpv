@@ -6,6 +6,11 @@ app_name = "billing"
 
 urlpatterns = [
     path(
+        "stores/<int:store_id>/documents/<int:document_pk>/print/",
+        views.BillingDocumentPrintView.as_view(),
+        name="document_print",
+    ),
+    path(
         "stores/<int:store_id>/documents/",
         views.BillingDocumentListView.as_view(),
         name="document_list",

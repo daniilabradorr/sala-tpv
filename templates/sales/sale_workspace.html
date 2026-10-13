@@ -12,13 +12,27 @@
     </div>
     {% if sale.cash_session %}<a href="{% url 'cash_register:session_detail' store.pk sale.cash_session.pk %}" class="button button-secondary">Volver a la sesión</a>{% endif %}
   </header>
+  {% if can_sell and not sale.cash_session.is_open %}
+  <section class="tpv-cash-context" aria-label="Caja para el cobro">
+    {% if cash_session_form.fields.cash_session.queryset %}
+    <form method="post" action="{% url 'sales:sale_cash_session_update' store.pk sale.pk %}">
+      {% csrf_token %}{{ cash_session_form.cash_session.label_tag }}{{ cash_session_form.cash_session }}
+      <button type="submit" class="button button-secondary">Usar sesión</button>
+    </form>
+    <p>Selecciona una sesión de caja antes de cobrar. Puedes añadir productos mientras tanto.</p>
+    {% else %}
+    <p>No hay sesiones de caja abiertas. Puedes añadir productos; el cobro necesita una sesión abierta.</p>
+    <a class="button button-secondary" href="{% url 'cash_register:open' store.pk %}">Abrir caja</a>
+    {% endif %}
+  </section>
+  {% endif %}
   {% include "sales/partials/_workspace_header.html" %}
   <div class="tpv-columns">
     <section class="tpv-catalog" aria-labelledby="catalog-title">
       <h2 id="catalog-title">Catálogo</h2>
       <form id="catalog-filters" class="tpv-search" method="get"
             hx-get="{% url 'sales:sale_detail' store.pk sale.pk %}" hx-target="#product-grid"
-            hx-swap="outerHTML" hx-trigger="submit, input changed delay:275ms from:[name=q]"
+            hx-swap="outerHTML" hx-trigger="submit, tpv:search"
             hx-sync="this:replace">
         <label class="sr-only" for="product-search">Buscar producto, SKU o código de barras</label>
         <input id="product-search" name="q" value="{{ query }}" placeholder="Buscar producto, SKU o código de barras…" autocomplete="off" data-tpv-search>
@@ -32,7 +46,8 @@
     <span>🛒 <strong data-cart-count>{{ lines|length }}</strong> productos · <strong data-cart-total>{{ sale.total_amount|floatformat:2 }} €</strong></span><span>Ver ticket</span>
   </button>
   <dialog id="line-editor-dialog" class="nx-modal line-editor-dialog" data-nx-modal aria-labelledby="line-editor-title"><div id="line-editor-panel"></div></dialog>
-  <dialog id="checkout-dialog" class="checkout-dialog nx-modal" data-nx-modal aria-labelledby="checkout-title"><div id="checkout-panel"></div></dialog>
+  <dialog id="checkout-dialog" class="checkout-dialog nx-modal" data-nx-modal aria-labelledby="checkout-title"><div id="checkout-panel">{% include "sales/partials/_checkout_loading.html" %}</div></dialog>
+  <template id="checkout-loading-template">{% include "sales/partials/_checkout_loading.html" %}</template>
   <dialog id="quick-customer-dialog" class="nx-modal" data-nx-modal aria-labelledby="quick-customer-title"><div id="quick-customer-panel"></div></dialog>
 </section>
 {% endblock %}
