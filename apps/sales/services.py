@@ -1040,20 +1040,36 @@ def complete_sale(*, business, sale, closed_by):
             locked_sale.pk,
         )
 
-        for line in lines:
-            product = line.product
-
-            if product is None or product.is_service or not product.track_stock:
-                continue
-
-            try:
-                inventory_item = InventoryItem.objects.get(
+        # Discover only identities in one tenant/store-scoped query. The stock
+        # service still re-reads and locks each authoritative row; never reuse
+        # current_stock from this preload, including for repeated products.
+        stock_lines = [
+            line
+            for line in lines
+            if line.product is not None
+            and not line.product.is_service
+            and line.product.track_stock
+        ]
+        inventory_by_product = (
+            {
+                item.product_id: item
+                for item in InventoryItem.objects.filter(
                     business=business,
                     store=locked_sale.store,
-                    product=product,
+                    product_id__in={line.product_id for line in stock_lines},
                     is_active=True,
                 )
-            except InventoryItem.DoesNotExist as exc:
+                .order_by("product_id", "pk")
+                .only("pk", "product_id")
+            }
+            if stock_lines
+            else {}
+        )
+
+        for line in stock_lines:
+            product = line.product
+            inventory_item = inventory_by_product.get(product.pk)
+            if inventory_item is None:
                 raise ValidationError(
                     {
                         "stock": (
@@ -1061,7 +1077,7 @@ def complete_sale(*, business, sale, closed_by):
                             f"para '{line.product_name}' en esta tienda."
                         )
                     }
-                ) from exc
+                )
 
             decrease_stock(
                 inventory_item=inventory_item,

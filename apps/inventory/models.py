@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.catalog.models import Product
 from apps.core.models import Business, TimeStampedModel
 from apps.stores.models import Store
+from apps.inventory.validation import validate_stock_constraints
 
 
 class InventoryItem(TimeStampedModel):
@@ -196,6 +197,9 @@ class InventoryItem(TimeStampedModel):
 
         if errors:
             raise ValidationError(errors)
+
+    def validate_constraints(self, exclude=None):
+        validate_stock_constraints(self, exclude=exclude)
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -1137,6 +1141,9 @@ class StockMovement(TimeStampedModel):
 
         if errors:
             raise ValidationError(errors)
+
+    def validate_constraints(self, exclude=None):
+        validate_stock_constraints(self, exclude=exclude)
 
     def save(self, *args, **kwargs):
         if self.inventory_item_id:
