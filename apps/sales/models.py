@@ -51,7 +51,9 @@ class Sale(TimeStampedModel):
     - Los importes guardados son una fotografía calculada de la venta.
     """
 
-    cart_version = models.PositiveBigIntegerField(default=0, db_default=0, editable=False)
+    cart_version = models.PositiveBigIntegerField(
+        default=0, db_default=0, editable=False
+    )
 
     business = models.ForeignKey(
         Business,

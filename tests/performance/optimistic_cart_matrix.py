@@ -6,7 +6,7 @@ are not production measurements or an A/B benchmark of backend commits.
 """
 
 import time
-from apps.sales import tests_browser_cart as browser_tests
+from e2e import browser_optimistic_cart as browser_tests
 
 
 class VisualMatrix(browser_tests.OptimisticCartBrowserTests):

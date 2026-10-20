@@ -24,7 +24,8 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         super().setUpClass()
         cls.playwright = sync_playwright().start()
         cls.browser = cls.playwright.chromium.launch(
-            executable_path=os.getenv("TPV_CHROMIUM", "/usr/bin/chromium"),
+            executable_path=os.getenv("TPV_CHROMIUM")
+            or ("/usr/bin/chromium" if Path("/usr/bin/chromium").exists() else None),
             headless=True,
         )
         cls.measurements = []
@@ -169,7 +170,9 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         other.locator("[data-plus]").click()
         other.wait_for_function("tpvCart.conflict")
         self.assertEqual(sum(line.quantity for line in self.sale.lines.all()), 2)
-        other.evaluate("tpvCart.discard()")
+        other.get_by_role(
+            "button", name="Descartar pendientes y recuperar venta"
+        ).click()
         self.assertEqual(CartOperation.objects.filter(sale=self.sale).count(), 2)
 
     def test_checkout_opens_shell_and_flushes_pending_before_enabling_payment(self):
@@ -325,3 +328,112 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         self.assertFalse(
             self.page.locator("#line-editor-dialog").evaluate("dialog=>dialog.open")
         )
+
+    def test_invalid_quantity_is_visible_and_blocks_checkout_until_fixed(self):
+        self.add()
+        self.settled()
+        field = self.page.locator("[data-optimistic-row] input")
+        field.fill("0")
+        self.assertEqual(field.get_attribute("aria-invalid"), "true")
+        self.page.locator("[data-checkout-open]").click()
+        self.assertFalse(
+            self.page.locator("#checkout-dialog").evaluate("dialog=>dialog.open")
+        )
+        self.assertEqual(sum(line.quantity for line in self.sale.lines.all()), 1)
+        field.fill("1.125")
+        self.settled()
+        self.assertEqual(field.get_attribute("aria-invalid"), "false")
+        self.assertEqual(str(self.sale.lines.first().quantity), "1.125")
+
+    def external_quantity(self, quantity):
+        from uuid import uuid4
+        from apps.sales.cart import mutate
+
+        self.sale.refresh_from_db()
+        line = self.sale.lines.order_by("pk").first()
+        mutate(
+            business=self.d.business,
+            store=self.d.store,
+            sale_id=self.sale.pk,
+            user=self.d.user,
+            data={
+                "key": str(uuid4()),
+                "kind": "quantity",
+                "line": line.pk,
+                "version": self.sale.cart_version,
+                "quantity": str(quantity),
+            },
+        )
+
+    def test_replayed_receipt_does_not_rebase_pending_quantity_over_other_tab(self):
+        self.add()
+        self.settled()
+        lost = [False]
+
+        def lose(route):
+            if route.request.method == "POST" and not lost[0]:
+                lost[0] = True
+                route.fetch()
+                route.abort("failed")
+            else:
+                route.continue_()
+
+        self.page.route("**/cart-sync/", lose)
+        self.page.locator("[data-plus]").click()
+        self.page.wait_for_function("Boolean(tpvCart.error)")
+        self.page.locator("[data-plus]").click()
+        self.external_quantity(5)
+        self.page.evaluate("tpvCart.retry()")
+        self.page.wait_for_function("tpvCart.conflict")
+        self.assertEqual(str(self.sale.lines.first().quantity), "5.000")
+        self.assertEqual(self.page.evaluate("tpvCart.ops.length"), 1)
+        self.page.get_by_role(
+            "button", name="Descartar pendientes y recuperar venta"
+        ).click()
+        self.settled()
+        self.assertEqual(str(self.sale.lines.first().quantity), "5.000")
+
+    def test_reload_unsent_intent_detects_changed_baseline(self):
+        self.add()
+        self.settled()
+        self.page.evaluate("""() => {
+            tpvCart.busy=true;
+            tpvCart.enqueue({kind:'quantity',line:tpvCart.cart.lines[0].id,quantity:'2.000'});
+        }""")
+        self.external_quantity(5)
+        self.page.reload()
+        self.page.wait_for_function("Boolean(tpvCart?.conflict)")
+        self.assertEqual(str(self.sale.lines.first().quantity), "5.000")
+        self.page.get_by_role(
+            "button", name="Descartar pendientes y recuperar venta"
+        ).click()
+        self.settled()
+
+    def test_reload_preserves_add_quantity_delete_order_with_arbitrary_storage_iteration(
+        self,
+    ):
+        result = self.page.evaluate("""() => {
+            const values=new Map();
+            const storage={get length(){return values.size;},
+                key:i=>[...values.keys()].reverse()[i],
+                getItem:key=>values.get(key)||null,
+                setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+            const originalUuid=crypto.randomUUID,originalDate=Date.now,originalPerformance=performance.now;
+            let sequence=4;
+            try {
+                crypto.randomUUID=()=>`00000000-0000-4000-8000-${String(--sequence).padStart(12,'0')}`;
+                Date.now=()=>1700000000000;performance.now=()=>0;
+                const options={storage,prefix:'restore-order:',send:async()=>{},read:async()=>({})};
+                const queue=new SalesCartQueue(options);
+                queue.cart={version:0,status:'open',lines:[]};queue.busy=true;
+                const key=queue.enqueue({kind:'add',product:1,quantity:'1',price:'1',estimate:'1',name:'Test'});
+                queue.enqueue({kind:'quantity',line:'tmp:'+key,quantity:'2'});
+                queue.enqueue({kind:'delete',line:'tmp:'+key});
+                const restored=new SalesCartQueue(options);restored.cart=queue.cart;
+                return {before:queue.visible(),after:restored.visible()};
+            } finally {
+                crypto.randomUUID=originalUuid;Date.now=originalDate;performance.now=originalPerformance;
+            }
+        }""")
+        self.assertEqual(result["before"], [])
+        self.assertEqual(result["after"], [])

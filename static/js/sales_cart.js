@@ -17,6 +17,10 @@
           this.ops.push(JSON.parse(storage.getItem(key)));
       }
       this.ops.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
+      this.sequence = this.ops.reduce(
+        (maximum, op) => Math.max(maximum, op.order),
+        0,
+      );
     }
     save(op) {
       this.storage.setItem(this.prefix + "op:" + op.key, JSON.stringify(op));
@@ -59,6 +63,9 @@
         try {
           this.save(replacement);
         } catch (_) {
+          this.error =
+            "No se pueden guardar los cambios pendientes. Libera espacio y reintenta.";
+          this.notify();
           return false;
         }
         this.ops[this.ops.length - 1] = replacement;
@@ -68,7 +75,8 @@
       const op = {
         ...intent,
         key: crypto.randomUUID(),
-        order: Date.now() + performance.now() / 1e6,
+        baseVersion: this.cart.version,
+        order: ++this.sequence,
       };
       try {
         this.save(op);
@@ -131,6 +139,13 @@
       this.notify();
       const op = this.ops[0];
       try {
+        if (op.version === undefined && op.baseVersion !== this.cart.version) {
+          this.conflict = this.rejected = true;
+          this.error =
+            "La venta ha cambiado desde que preparaste estos cambios. Revisa el estado confirmado.";
+          await this.refresh();
+          return;
+        }
         if (op.version === undefined) {
           op.version = this.cart.version;
           this.save(op);
@@ -158,7 +173,29 @@
             );
           this.storage.removeItem(this.prefix + "op:" + op.key);
           this.ops.shift();
-          this.cart = result.body.cart;
+          if (result.body.cart.version >= this.cart.version)
+            this.cart = result.body.cart;
+          const externalChange =
+            this.cart.version !== result.body.accepted_version;
+          if (
+            externalChange &&
+            this.ops.length &&
+            this.ops[0].version === undefined
+          ) {
+            this.conflict = this.rejected = true;
+            this.error =
+              "Otra ventana cambió la venta después de la operación confirmada. Revisa los pendientes antes de aplicarlos.";
+            await this.refresh();
+          } else if (!externalChange) {
+            // Only our own confirmed transition may advance the baseline of
+            // unsent intents. Never silently rebase them onto another editor.
+            for (const pending of this.ops) {
+              if (pending.version === undefined) {
+                pending.baseVersion = this.cart.version;
+                this.save(pending);
+              }
+            }
+          }
         }
       } catch (error) {
         this.error =
@@ -182,6 +219,7 @@
       // A definitive version conflict has no receipt. The user may explicitly
       // resubmit the same intent against the freshly reviewed version.
       delete op.version;
+      op.baseVersion = this.cart.version;
       this.save(op);
       this.error = "";
       this.conflict = this.rejected = false;
@@ -345,6 +383,7 @@
         b.type = "button";
         b.textContent = text;
         b.onclick = action;
+        b.disabled = queue.busy;
         status.append(b);
       };
       if (queue.conflict)
@@ -387,14 +426,37 @@
         ? `Provisional · confirmado: ${confirmedQuantity}`
         : "Confirmado";
       const input = row.querySelector("input");
-      if (document.activeElement !== input)
+      if (
+        document.activeElement !== input &&
+        input.getAttribute("aria-invalid") !== "true"
+      )
         input.value = String(Number(group.quantity.toFixed(3)));
-      input.oninput = () => changeGroup(group, Number(input.value));
-      input.onchange = input.oninput;
-      row.querySelector("[data-minus]").onclick = () =>
-        changeGroup(group, Number((group.quantity - 1).toFixed(3)));
-      row.querySelector("[data-plus]").onclick = () =>
-        changeGroup(group, Number((group.quantity + 1).toFixed(3)));
+      input.oninput = () => {
+        const value = Number(input.value);
+        const valid =
+          Number.isFinite(value) &&
+          value > 0 &&
+          Math.abs(Math.round(value * 1000) - value * 1000) < 1e-7;
+        input.setCustomValidity(
+          valid
+            ? ""
+            : "Introduce una cantidad positiva con hasta tres decimales.",
+        );
+        input.setAttribute("aria-invalid", String(!valid));
+        if (valid) changeGroup(group, value);
+      };
+      input.onchange = () => {
+        input.oninput();
+        if (!input.checkValidity()) input.reportValidity();
+      };
+      const step = (amount) => {
+        input.setCustomValidity("");
+        input.setAttribute("aria-invalid", "false");
+        input.value = String(group.quantity);
+        changeGroup(group, Number((group.quantity + amount).toFixed(3)));
+      };
+      row.querySelector("[data-minus]").onclick = () => step(-1);
+      row.querySelector("[data-plus]").onclick = () => step(1);
       row.querySelector("[data-delete]").onclick = () =>
         group.lines.forEach((line) =>
           queue.enqueue({ kind: "delete", line: line.id }),
@@ -624,6 +686,14 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       if (checkoutRequested || !queue.visible().length) return;
+      const invalid = document.querySelector(
+        '.cart-lines input[aria-invalid="true"]',
+      );
+      if (invalid) {
+        invalid.focus();
+        invalid.reportValidity();
+        return;
+      }
       checkoutRequested = true;
       queue.frozen = true;
       render();

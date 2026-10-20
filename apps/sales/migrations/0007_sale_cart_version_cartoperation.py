@@ -14,7 +14,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="sale",
             name="cart_version",
-            field=models.PositiveBigIntegerField(db_default=0, default=0, editable=False),
+            field=models.PositiveBigIntegerField(
+                db_default=0, default=0, editable=False
+            ),
         ),
         migrations.CreateModel(
             name="CartOperation",
