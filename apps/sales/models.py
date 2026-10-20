@@ -51,6 +51,8 @@ class Sale(TimeStampedModel):
     - Los importes guardados son una fotografía calculada de la venta.
     """
 
+    cart_version = models.PositiveBigIntegerField(default=0, db_default=0, editable=False)
+
     business = models.ForeignKey(
         Business,
         verbose_name="Negocio",
@@ -1089,3 +1091,24 @@ class SaleReturnLine(TimeStampedModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class CartOperation(TimeStampedModel):
+    """Durable receipt; retained for the lifetime of its sale, never TTL-purged."""
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE)
+    sale = models.ForeignKey(
+        Sale, on_delete=models.CASCADE, related_name="cart_operations"
+    )
+    key = models.UUIDField()
+    kind = models.CharField(max_length=16)
+    fingerprint = models.CharField(max_length=64)
+    version = models.PositiveBigIntegerField()
+    line_id_result = models.PositiveBigIntegerField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sale", "key"], name="sales_cart_operation_key"
+            )
+        ]

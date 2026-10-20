@@ -33,11 +33,12 @@ def path(name, sale, line=None):
     return reverse(f"sales:{name}", args=args)
 
 
-def checkout_data(dataset):
+def checkout_data(dataset, sale):
     return {
         "mode": "single",
         "method": next(m.pk for m in dataset.methods if m.affects_cash_register),
         "cash_received": "",
+        "cart_version": sale.cart_version,
         "payment_idempotency_key": str(uuid4()),
         "billing_idempotency_key": str(uuid4()),
     }
@@ -117,7 +118,7 @@ class ServerMatrix(TestCase):
                     else:
                         url = path("sale_checkout", sale)
                         data = (
-                            checkout_data(dataset)
+                            checkout_data(dataset, sale)
                             if operation == "checkout_post"
                             else None
                         )

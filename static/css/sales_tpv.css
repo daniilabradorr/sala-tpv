@@ -49,3 +49,9 @@
 [data-cart-scroll-region] { overflow-anchor: none; }
 
 .cart-line > .tpv-errors { grid-column: 1 / -1; }
+
+/* Pending cart state remains visible without blocking catalog/search. */
+.tpv-sync-status { padding: .6rem 1rem; font-size: .85rem; border-bottom: 1px solid var(--border-color, #ddd); }
+.tpv-sync-status p { margin: .4rem 0; }
+.tpv-sync-status button { margin: .4rem .5rem .2rem 0; }
+[data-optimistic-row] [data-editors] { display: flex; gap: .5rem; flex-wrap: wrap; }

@@ -1136,6 +1136,7 @@ class SaleLineUpdateView(
                 sale=sale,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
+                expected_version=request.POST.get("cart_version"),
                 unit_base_price=(
                     form.cleaned_data.get("unit_base_price")
                     if form.mode != "discount"
@@ -1497,6 +1498,19 @@ class SaleCheckoutView(
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
+        try:
+            expected_version = int(request.POST["cart_version"])
+        except (KeyError, TypeError, ValueError):
+            response = self._render(
+                request,
+                business,
+                store,
+                sale,
+                error=CheckoutConflict("Actualiza el checkout antes de confirmar."),
+            )
+            response.status_code = 409
+            response["X-Netxodo-Allow-Error-Swap"] = "true"
+            return response
         forms_bundle = self._forms(request, business, sale)
         options, form, formset, _method_count = forms_bundle
         mode = request.POST.get("mode", "single")
@@ -1599,6 +1613,7 @@ class SaleCheckoutView(
                 intents=intents,
                 series_id=getattr(form.cleaned_data.get("series"), "pk", None),
                 billing_key=form.cleaned_data["billing_idempotency_key"],
+                expected_version=expected_version,
                 allow_split=bool(pos_settings and pos_settings.allow_split_payments),
             )
         except (ValidationError, ValueError) as error:
@@ -2501,3 +2516,75 @@ class SaleReturnCancelView(
             store_id=store.pk,
             return_pk=return_doc.pk,
         )
+
+
+class SaleCartSyncView(
+    SaleObjectMixin, CanSellInStoreMixin, BusinessRequiredMixin, View
+):
+    """JSON protocol for optimistic edits; HTML routes remain progressive fallbacks."""
+
+    def get(self, request, store_id, sale_pk):
+        from apps.sales.cart import snapshot
+        from django.http import JsonResponse
+
+        business, store = self.get_business_and_store()
+        with transaction.atomic():
+            sale = get_object_or_404(
+                Sale.objects.select_for_update(of=("self",)),
+                pk=sale_pk,
+                business=business,
+                store=store,
+            )
+            from uuid import UUID
+            from apps.sales.models import CartOperation
+
+            pending = []
+            for raw in request.GET.get("pending", "").split(",")[:50]:
+                try:
+                    pending.append(UUID(raw))
+                except ValueError:
+                    continue
+            receipts = (
+                [
+                    {"key": str(op.key), "line": op.line_id_result}
+                    for op in CartOperation.objects.filter(
+                        sale=sale, business=business, key__in=pending
+                    )
+                ]
+                if pending
+                else []
+            )
+            response = JsonResponse({"cart": snapshot(sale), "receipts": receipts})
+        response["Cache-Control"] = "no-store"
+        return response
+
+    def post(self, request, store_id, sale_pk):
+        import json
+        from django.http import JsonResponse
+        from apps.sales.cart import CartConflict, mutate
+
+        business, store = self.get_business_and_store()
+        get_object_or_404(Sale, pk=sale_pk, business=business, store=store)
+        try:
+            data = json.loads(request.body)
+            if not isinstance(data, dict):
+                raise ValueError
+            result = mutate(
+                business=business,
+                store=store,
+                sale_id=sale_pk,
+                user=request.user,
+                data=data,
+            )
+            response = JsonResponse(result)
+        except CartConflict as error:
+            response = JsonResponse(
+                {"error": error.messages[0], "code": error.conflict_code}, status=409
+            )
+        except (ValidationError, ValueError, TypeError) as error:
+            message = "Operación no válida."
+            if isinstance(error, ValidationError):
+                message = " ".join(error.messages)
+            response = JsonResponse({"error": message}, status=422)
+        response["Cache-Control"] = "no-store"
+        return response

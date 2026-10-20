@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -20,6 +21,7 @@ from apps.payments.models import Payment, PaymentStatusChoices as PaymentRecordS
 from apps.payments.selectors import get_active_payment_methods, get_sale_payments
 from apps.payments.services import register_sale_payment
 from apps.sales.models import (
+    Sale,
     PaymentStatusChoices,
     RequestedDocumentTypeChoices,
     SaleStatusChoices,
@@ -213,37 +215,60 @@ def _preflight(*, business, sale, intents, series_id, allow_split):
     return chosen_id
 
 
-def run_checkout(*, business, sale, user, intents, series_id, billing_key, allow_split):
+def run_checkout(
+    *,
+    business,
+    sale,
+    user,
+    intents,
+    series_id,
+    billing_key,
+    allow_split,
+    expected_version=None,
+):
     """Advance durable steps; an exception never rolls earlier modules back."""
-    state = checkout_state(business=business, sale=sale)
-    if state["complete"]:
-        return state
-    chosen_series = _preflight(
-        business=business,
-        sale=sale,
-        intents=intents,
-        series_id=series_id,
-        allow_split=allow_split,
-    )
-    if sale.status == SaleStatusChoices.OPEN:
-        try:
-            sale = complete_sale(business=business, sale=sale, closed_by=user)
-        except ValidationError as error:
-            if (
-                sale.cash_session_id
-                and not CashSession.objects.filter(
-                    pk=sale.cash_session_id,
+    with transaction.atomic():
+        sale = Sale.objects.select_for_update(of=("self",)).get(
+            pk=sale.pk, business=business
+        )
+        if expected_version is not None and sale.cart_version != expected_version:
+            raise CheckoutConflict(
+                "El carrito ha cambiado. Actualiza y revisa el total antes de cobrar."
+            )
+        state = checkout_state(business=business, sale=sale)
+        if state["complete"]:
+            return state
+        chosen_series = _preflight(
+            business=business,
+            sale=sale,
+            intents=intents,
+            series_id=series_id,
+            allow_split=allow_split,
+        )
+        if sale.status == SaleStatusChoices.OPEN:
+            try:
+                sale = complete_sale(
                     business=business,
-                    store_id=sale.store_id,
-                    status=CashSession.Status.OPEN,
-                    closed_at__isnull=True,
-                ).exists()
-            ):
-                raise CheckoutConflict(
-                    "La sesión de caja se ha cerrado. Actualiza el estado antes de continuar."
-                ) from error
-            raise
-        sale.refresh_from_db()
+                    sale=sale,
+                    closed_by=user,
+                    expected_version=expected_version,
+                )
+            except ValidationError as error:
+                if (
+                    sale.cash_session_id
+                    and not CashSession.objects.filter(
+                        pk=sale.cash_session_id,
+                        business=business,
+                        store_id=sale.store_id,
+                        status=CashSession.Status.OPEN,
+                        closed_at__isnull=True,
+                    ).exists()
+                ):
+                    raise CheckoutConflict(
+                        "La sesión de caja se ha cerrado. Actualiza el estado antes de continuar."
+                    ) from error
+                raise
+            sale.refresh_from_db()
     for intent in intents:
         if sale.pending_amount <= 0:
             break

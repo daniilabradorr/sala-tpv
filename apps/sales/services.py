@@ -629,9 +629,16 @@ def update_sale_cash_session(*, business, sale, cash_session, updated_by):
         cash_session=session,
         pos_settings=_get_pos_settings(business),
     )
+    if (locked_sale.cash_register_id, locked_sale.cash_session_id) != (
+        session.cash_register_id,
+        session.pk,
+    ):
+        locked_sale.cart_version += 1
     locked_sale.cash_register = session.cash_register
     locked_sale.cash_session = session
-    locked_sale.save(update_fields=["cash_register", "cash_session", "updated_at"])
+    locked_sale.save(
+        update_fields=["cash_register", "cash_session", "cart_version", "updated_at"]
+    )
     return locked_sale
 
 
@@ -662,12 +669,18 @@ def update_sale_header(
         require_customer_for_invoice=False,
     )
 
+    if (locked_sale.customer_id, locked_sale.document_type_requested) != (
+        getattr(customer, "pk", None),
+        document_type_requested,
+    ):
+        locked_sale.cart_version += 1
     locked_sale.customer = customer
     locked_sale.document_type_requested = document_type_requested
     locked_sale.save(
         update_fields=[
             "customer",
             "document_type_requested",
+            "cart_version",
             "updated_at",
         ]
     )
@@ -679,7 +692,7 @@ def update_sale_header(
 # ==========================================================
 
 
-def _recalculate_locked_sale(locked_sale):
+def _recalculate_locked_sale(locked_sale, *, changed=False):
     lines = list(
         SaleLine.objects.filter(
             business=locked_sale.business,
@@ -707,6 +720,8 @@ def _recalculate_locked_sale(locked_sale):
     if total_amount != line_total_sum:
         raise ValidationError("Los importes de las líneas no coinciden con el total.")
 
+    if changed or locked_sale.total_amount != total_amount:
+        locked_sale.cart_version += 1
     locked_sale.subtotal_amount = subtotal_amount
     locked_sale.discount_amount = discount_amount
     locked_sale.tax_amount = tax_amount
@@ -714,6 +729,7 @@ def _recalculate_locked_sale(locked_sale):
     locked_sale.pending_amount = total_amount
     locked_sale.save(
         update_fields=[
+            "cart_version",
             "subtotal_amount",
             "discount_amount",
             "tax_amount",
@@ -826,7 +842,7 @@ def add_sale_line(
         line_total=calculated["line_total"],
     )
     line.save()
-    _recalculate_locked_sale(locked_sale)
+    _recalculate_locked_sale(locked_sale, changed=True)
     line._tpv_pos_settings = pos_settings
     return line
 
@@ -841,11 +857,23 @@ def update_sale_line(
     user,
     unit_base_price=None,
     discount_amount=None,
+    expected_version=None,
 ):
     """Actualiza una línea conservando el impuesto histórico."""
 
     locked_sale = _lock_sale(business=business, sale=sale)
     _validate_sale_editable(locked_sale)
+    if expected_version is not None:
+        from apps.sales.cart import CartConflict
+
+        try:
+            expected_version = int(expected_version)
+        except (ValueError, TypeError) as error:
+            raise ValidationError("Actualiza el editor antes de guardar.") from error
+        if locked_sale.cart_version != expected_version:
+            raise CartConflict(
+                "La venta ha cambiado. Cierra el editor y vuelve a abrirlo."
+            )
 
     _validate_can_sell(
         business=business,
@@ -891,6 +919,17 @@ def update_sale_line(
         tax_rate=locked_line.tax_rate,
     )
 
+    if (
+        locked_line.quantity == calculated["quantity"]
+        and locked_line.unit_base_price == calculated["unit_base_price"]
+        and locked_line.discount_amount == calculated["discount_amount"]
+        and locked_line.tax_amount == calculated["tax_amount"]
+        and locked_line.line_total == calculated["line_total"]
+    ):
+        locked_line.full_clean()
+        locked_line._tpv_pos_settings = pos_settings
+        return locked_line
+
     locked_line.sale = locked_sale  # Reuse the authoritative, already locked relation.
     locked_line.quantity = calculated["quantity"]
     locked_line.unit_base_price = calculated["unit_base_price"]
@@ -908,7 +947,7 @@ def update_sale_line(
         ]
     )
 
-    _recalculate_locked_sale(locked_sale)
+    _recalculate_locked_sale(locked_sale, changed=True)
     locked_line._tpv_pos_settings = pos_settings
     return locked_line
 
@@ -936,7 +975,7 @@ def delete_sale_line(*, business, sale, line, user):
         raise ValidationError("La línea no pertenece a la venta indicada.") from exc
 
     locked_line.delete()
-    _recalculate_locked_sale(locked_sale)
+    _recalculate_locked_sale(locked_sale, changed=True)
     return locked_sale
 
 
@@ -961,10 +1000,17 @@ def _validate_line_integrity(line):
 
 
 @transaction.atomic
-def complete_sale(*, business, sale, closed_by):
+def complete_sale(*, business, sale, closed_by, expected_version=None):
     """Completa una venta y descuenta stock de forma atómica."""
 
     locked_sale = _lock_sale(business=business, sale=sale)
+
+    if expected_version is not None and locked_sale.cart_version != expected_version:
+        from apps.sales.checkout import CheckoutConflict
+
+        raise CheckoutConflict(
+            "El carrito ha cambiado. Revisa el total antes de cobrar."
+        )
 
     if locked_sale.status == SaleStatusChoices.COMPLETED:
         return locked_sale

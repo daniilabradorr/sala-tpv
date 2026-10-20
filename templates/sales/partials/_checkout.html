@@ -39,7 +39,7 @@
     {% elif sale.is_completed %}<div class="recovery-note"><strong>Venta completada.</strong><span>El cobro continúa pendiente.</span></div>{% endif %}
 
     <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" hx-sync="this:drop" data-checkout-form data-nx-critical-form>
-      {% csrf_token %}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
+      {% csrf_token %}<input type="hidden" name="cart_version" value="{{ sale.cart_version }}">{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
       <section class="checkout-document" aria-label="Documento fiscal">
         <span><strong>Documento</strong> {% if document_type == 'F1' %}Factura{% else %}Ticket{% endif %}</span>
         {% if series|length == 1 %}<span><strong>Serie</strong> {{ series.0 }}</span><input type="hidden" name="series" value="{{ series.0.pk }}">
