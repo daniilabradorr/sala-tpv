@@ -1,6 +1,9 @@
 # Fase 2B: propuesta pendiente de autorización
 
-Estado: diseño previo; interfaz optimista sin implementar. Rama
+Documento histórico del diseño previo a la autorización. El estado actual se
+documenta en `tpv-optimistic-cart-report.md`.
+
+Estado en el momento de esta propuesta: interfaz sin implementar. Rama
 `feat/tpv-optimistic-cart`, basada en `perf/tpv-inventory` (`61fa856`).
 No se han modificado reglas de negocio, servicios, modelos ni migraciones.
 
