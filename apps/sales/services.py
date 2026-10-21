@@ -669,6 +669,7 @@ def update_sale_header(
         require_customer_for_invoice=False,
     )
 
+    previous_version = locked_sale.cart_version
     if (locked_sale.customer_id, locked_sale.document_type_requested) != (
         getattr(customer, "pk", None),
         document_type_requested,
@@ -684,6 +685,7 @@ def update_sale_header(
             "updated_at",
         ]
     )
+    locked_sale._cart_previous_version = previous_version
     return locked_sale
 
 

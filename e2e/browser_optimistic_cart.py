@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 from playwright.sync_api import sync_playwright
 
@@ -15,6 +15,7 @@ from apps.sales.models import CartOperation
 from tests.performance.dataset import Dataset
 
 
+@override_settings(TPV_OPTIMISTIC_CART=True)
 class OptimisticCartBrowserTests(StaticLiveServerTestCase):
     @classmethod
     def setUpClass(cls):
@@ -64,7 +65,7 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         self.page.wait_for_function("Boolean(window.tpvCart?.cart)")
 
     def tearDown(self):
-        self.page.unroute_all(behavior="wait")
+        self.page.unroute_all(behavior="ignoreErrors")
         self.context.close()
         self.assertEqual(self.errors, [])
 
@@ -94,6 +95,32 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         )
         self.assertTrue(all(x["visible"] > 0 for x in values))
         return values
+
+    def test_header_save_waits_without_false_cart_conflict(self):
+        held = []
+
+        def hold_header(route):
+            held.append((route, route.fetch()))
+
+        self.page.route("**/header/", hold_header)
+        try:
+            self.page.locator("#header-document-invoice").check()
+            self.page.wait_for_function("tpvCart.headerPending === 1")
+            self.add()
+            self.assertEqual(self.sale.lines.count(), 0)
+            deadline = time.monotonic() + 10
+            while not held and time.monotonic() < deadline:
+                self.page.wait_for_timeout(50)
+            self.assertTrue(held)
+        finally:
+            for route, response in held:
+                route.fulfill(response=response)
+        self.assertEqual(response.headers["x-sales-cart-previous-version"], "0")
+        self.assertEqual(response.headers["x-sales-cart-version"], "1")
+        self.settled()
+        self.assertEqual(self.sale.lines.count(), 1)
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.cart_version, 2)
 
     def test_twenty_same_product_immediate_and_persisted(self):
         self.add(20)
@@ -183,6 +210,10 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         self.assertEqual(self.page.locator('[name="cart_version"]').input_value(), "5")
         self.assertEqual(sum(line.quantity for line in self.sale.lines.all()), 5)
         self.assertTrue(self.page.evaluate("tpvCart.frozen"))
+        self.page.keyboard.press("Escape")
+        self.assertTrue(
+            self.page.evaluate("document.activeElement.matches('[data-checkout-open]')")
+        )
 
     def test_rejected_inactive_product_can_discard_pending(self):
         self.d.products[0].is_active = False

@@ -12,6 +12,7 @@ Arquitectura:
 - Las views no crean movimientos de inventario.
 """
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
@@ -515,6 +516,7 @@ class SaleDetailView(
                 except ProductTaxResolutionError:
                     product.display_price = None
             context = {
+                "optimistic_cart_enabled": settings.TPV_OPTIMISTIC_CART,
                 "store": self.store,
                 "sale": sale,
                 "products": products,
@@ -752,9 +754,10 @@ class SaleHeaderUpdateView(
         form = SaleHeaderUpdateForm(
             request.POST, business=business, store=store, sale=sale
         )
+        changed_sale = None
         if form.is_valid():
             try:
-                update_sale_header(
+                changed_sale = update_sale_header(
                     business=business,
                     sale=sale,
                     customer=form.cleaned_data["customer"],
@@ -791,6 +794,11 @@ class SaleHeaderUpdateView(
                         }
                     },
                 )
+            if changed_sale is not None:
+                response["X-Sales-Cart-Previous-Version"] = str(
+                    changed_sale._cart_previous_version
+                )
+                response["X-Sales-Cart-Version"] = str(changed_sale.cart_version)
             return response
 
         if form.errors:
@@ -859,6 +867,7 @@ class SaleQuickCustomerCreateView(
                     return redirect(
                         "sales:sale_detail", store_id=store.pk, sale_pk=sale.pk
                     )
+                changed_sale = sale
                 sale = self.get_sale()
                 response = render(
                     request,
@@ -877,6 +886,10 @@ class SaleQuickCustomerCreateView(
                         ),
                     },
                 )
+                response["X-Sales-Cart-Previous-Version"] = str(
+                    changed_sale._cart_previous_version
+                )
+                response["X-Sales-Cart-Version"] = str(changed_sale.cart_version)
                 response["HX-Retarget"] = "#workspace-header"
                 response["HX-Reswap"] = "outerHTML"
                 return add_hx_trigger(

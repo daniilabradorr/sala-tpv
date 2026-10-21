@@ -152,6 +152,7 @@ jobs:
           uv run python manage.py test
           apps.sales.tests_postgres_locking
           apps.sales.tests_postgres_checkout
+          apps.sales.tests_postgres_cart
           tests.performance.test_queries
           tests.performance.test_metrics
           --verbosity 2

@@ -7,6 +7,8 @@
       this.ops = [];
       this.cart = null;
       this.busy = false;
+      this.headerPending = 0;
+      this.ownRevisions = new Map();
       this.error = "";
       this.conflict = false;
       this.rejected = false;
@@ -133,8 +135,30 @@
       }
       return lines;
     }
+    advanceOwnVersion(version) {
+      while (this.ownRevisions.has(version))
+        version = this.ownRevisions.get(version);
+      return version;
+    }
+    recordOwnRevision(previous, current) {
+      if (current > previous) this.ownRevisions.set(previous, current);
+      this.cart.version = this.advanceOwnVersion(this.cart.version);
+      for (const op of this.ops) {
+        if (op.version === undefined) {
+          op.baseVersion = this.advanceOwnVersion(op.baseVersion);
+          this.save(op);
+        }
+      }
+      this.notify();
+    }
     async pump() {
-      if (this.busy || this.error || !this.cart || !this.ops.length) return;
+      if (
+        this.headerPending ||
+        this.busy ||
+        this.error ||
+        !this.cart ||
+        !this.ops.length
+      ) return;
       this.busy = true;
       this.notify();
       const op = this.ops[0];
@@ -175,8 +199,9 @@
           this.ops.shift();
           if (result.body.cart.version >= this.cart.version)
             this.cart = result.body.cart;
+          this.cart.version = this.advanceOwnVersion(this.cart.version);
           const externalChange =
-            this.cart.version !== result.body.accepted_version;
+            this.cart.version !== this.advanceOwnVersion(result.body.accepted_version);
           if (
             externalChange &&
             this.ops.length &&
@@ -244,9 +269,12 @@
       }
     }
     async flush() {
+      while (this.busy || this.headerPending)
+        await new Promise((resolve) => setTimeout(resolve, 20));
       await this.pump();
       // A pump might already be active when checkout is clicked.
-      while (this.busy) await new Promise((resolve) => setTimeout(resolve, 20));
+      while (this.busy || this.headerPending)
+        await new Promise((resolve) => setTimeout(resolve, 20));
       if (this.error || this.ops.length)
         throw new Error(this.error || "Hay cambios pendientes.");
       await this.refresh();
@@ -279,7 +307,8 @@
       currency: "EUR",
     }).format(value);
   let queue,
-    checkoutRequested = false;
+    checkoutRequested = false,
+    checkoutTrigger = null;
   const rows = new Map();
   const status = document.createElement("div");
   status.className = "tpv-sync-status";
@@ -410,12 +439,18 @@
         row.className = "cart-line";
         row.dataset.optimisticRow = "true";
         row.innerHTML =
-          '<div><strong data-name></strong><small data-state></small></div><strong data-total></strong><div class="quantity-form"><button type="button" data-minus aria-label="Reducir cantidad">−</button><input type="number" min="0.001" step="0.001" aria-label="Cantidad"><button type="button" data-plus aria-label="Aumentar cantidad">+</button></div><div class="line-actions"><button type="button" class="link-danger" data-delete>Eliminar</button><span data-editors></span></div>';
+          '<div><strong data-name></strong><small data-state></small></div><strong data-total></strong><div class="quantity-form"><button type="button" data-minus aria-label="Reducir cantidad">−</button><input name="quantity" type="number" min="0.001" step="0.001" aria-label="Cantidad"><button type="button" data-plus aria-label="Aumentar cantidad">+</button></div><div class="line-actions"><button type="button" class="link-danger" data-delete>Eliminar</button><span data-editors></span></div>';
         rows.set(group.key, row);
         container.append(row);
       }
       if (!row.isConnected) container.append(row);
       row.querySelector("[data-name]").textContent = group.name;
+      row
+        .querySelector("[data-minus]")
+        .setAttribute("aria-label", `Reducir ${group.name}`);
+      row
+        .querySelector("[data-plus]")
+        .setAttribute("aria-label", `Aumentar ${group.name}`);
       row.querySelector("[data-total]").textContent = money(group.total);
       const confirmedQuantity = (queue.cart.lines || [])
         .filter((x) =>
@@ -695,6 +730,7 @@
         return;
       }
       checkoutRequested = true;
+      checkoutTrigger = checkout;
       queue.frozen = true;
       render();
       const dialog = document.querySelector("#checkout-dialog"),
@@ -741,6 +777,9 @@
   );
   document.querySelector("#checkout-dialog").addEventListener("close", () => {
     queue.frozen = false;
+    render();
+    if (checkoutTrigger?.isConnected)
+      checkoutTrigger.focus({ preventScroll: true });
     queue.refresh().catch(() => {});
   });
   document.addEventListener("htmx:beforeSwap", (event) => {
@@ -753,7 +792,29 @@
       event.detail.shouldSwap = false;
     }
   });
+  const headerRequests = new Set();
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const { elt, xhr, requestConfig } = event.detail;
+    if (
+      requestConfig?.verb?.toLowerCase() === "post" &&
+      (elt?.matches?.("[data-header-autosave]") ||
+        elt?.closest?.("#quick-customer-panel"))
+    ) {
+      headerRequests.add(xhr);
+      queue.headerPending++;
+    }
+  });
   document.addEventListener("htmx:afterRequest", (event) => {
+    const xhr = event.detail.xhr;
+    if (headerRequests.delete(xhr)) {
+      queue.headerPending--;
+      const previous = xhr.getResponseHeader("X-Sales-Cart-Previous-Version");
+      const current = xhr.getResponseHeader("X-Sales-Cart-Version");
+      if (xhr.status === 200 && previous !== null && current !== null)
+        queue.recordOwnRevision(Number(previous), Number(current));
+      if (!queue.headerPending) queue.pump();
+    }
+
     if (
       event.detail.xhr?.status === 200 &&
       event.detail.elt?.closest?.(".line-editor")

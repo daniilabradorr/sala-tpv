@@ -463,8 +463,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                 expect(
                     dialog.locator(".checkout-loading[aria-busy=true]")
                 ).to_be_visible()
-                self.assertEqual(requests, ["GET"])
+                # The shell now precedes draining/validating the cart queue.
                 page.wait_for_function("window.checkoutHeldReady === true")
+                self.assertEqual(requests, ["GET"])
                 page.evaluate("window.checkoutHeldReady = false")
                 held["route"].fulfill(response=held["response"])
                 expect(

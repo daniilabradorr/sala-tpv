@@ -3,7 +3,7 @@
 {% block body_class %}tpv-mode{% endblock %}
 {% block extra_head %}<link rel="stylesheet" href="{% static 'css/sales_tpv.css' %}">{% endblock %}
 {% block content %}
-<section data-cart-version="{{ sale.cart_version }}" data-cart-total="{{ sale.total_amount|unlocalize }}" data-cart-subtotal="{{ sale.subtotal_amount|unlocalize }}" data-cart-tax="{{ sale.tax_amount|unlocalize }}" data-cart-discount="{{ sale.discount_amount|unlocalize }}" data-cart-status="{{ sale.status }}" data-cart-sync="{% url 'sales:sale_cart_sync' store.pk sale.pk %}" data-user="{{ request.user.pk }}" data-business="{{ sale.business_id }}" data-store="{{ store.pk }}" data-sale="{{ sale.pk }}" data-price="{{ pos_settings.allow_manual_price|yesno:'true,false' }}" data-discount="{{ pos_settings.allow_manual_discounts|yesno:'true,false' }}" class="tpv" aria-labelledby="workspace-title">
+<section data-cart-version="{{ sale.cart_version }}" data-cart-total="{{ sale.total_amount|unlocalize }}" data-cart-subtotal="{{ sale.subtotal_amount|unlocalize }}" data-cart-tax="{{ sale.tax_amount|unlocalize }}" data-cart-discount="{{ sale.discount_amount|unlocalize }}" data-cart-status="{{ sale.status }}" {% if optimistic_cart_enabled %}data-cart-sync="{% url 'sales:sale_cart_sync' store.pk sale.pk %}"{% endif %} data-user="{{ request.user.pk }}" data-business="{{ sale.business_id }}" data-store="{{ store.pk }}" data-sale="{{ sale.pk }}" data-price="{{ pos_settings.allow_manual_price|yesno:'true,false' }}" data-discount="{{ pos_settings.allow_manual_discounts|yesno:'true,false' }}" class="tpv" aria-labelledby="workspace-title">
   <header class="tpv-title">
     <div>
       <span class="eyebrow">Venta abierta</span>

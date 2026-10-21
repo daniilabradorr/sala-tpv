@@ -146,6 +146,18 @@ class CartProtocolTests(TestCase):
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.cart_version, 2)
 
+    def test_header_response_reports_only_its_accepted_revision(self):
+        url = reverse("sales:sale_header_update", args=[self.d.store.pk, self.sale.pk])
+        for previous, current in ((0, 1), (1, 1)):
+            response = self.client.post(
+                url,
+                {"customer": "", "document_type_requested": "invoice"},
+                HTTP_HX_REQUEST="true",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response["X-Sales-Cart-Previous-Version"], str(previous))
+            self.assertEqual(response["X-Sales-Cart-Version"], str(current))
+
     def test_stale_checkout_never_calls_payment_or_completion(self):
         self.mutate(self.data())
         with (
@@ -246,3 +258,14 @@ class CartProtocolTests(TestCase):
         self.lines[0].refresh_from_db()
         self.assertEqual(self.lines[0].quantity, Decimal("2.000"))
         self.assertEqual(self.lines[0].unit_base_price, Decimal("10.00"))
+
+    def test_frontend_can_be_disabled_without_disabling_server_protocol(self):
+        from django.test import override_settings
+
+        url = reverse("sales:sale_detail", args=[self.d.store.pk, self.sale.pk])
+        with override_settings(TPV_OPTIMISTIC_CART=False):
+            response = self.client.get(url)
+            self.assertNotContains(response, "data-cart-sync=")
+            self.assertEqual(self.post(self.data()).status_code, 200)
+        with override_settings(TPV_OPTIMISTIC_CART=True):
+            self.assertContains(self.client.get(url), "data-cart-sync=")
