@@ -350,7 +350,7 @@ class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
         self.assertEqual(self.sale.lines.count(), 1)
         self.assertEqual(str(CartOperation.objects.get(sale=self.sale).key), key)
 
-    def test_independent_tab_does_not_claim_unsaved_intents_are_recovered(self):
+    def test_forced_close_reopen_keeps_only_server_confirmed_state(self):
         self.page.route(
             "**/cart-sync/",
             lambda route: (
@@ -361,12 +361,14 @@ class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
         )
         self.add()
         self.page.wait_for_function("Boolean(tpvCart.error)")
-        other = self.context.new_page()
-        other.goto(self.url)
-        other.wait_for_function("Boolean(window.tpvCart?.cart)")
-        self.assertEqual(other.evaluate("tpvCart.ops.length"), 0)
+        # Forced termination models loss of tab context, bypassing beforeunload.
+        self.page.close()
+        self.page = self.context.new_page()
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        self.page.goto(self.url)
+        self.page.wait_for_function("Boolean(window.tpvCart?.protocolReady)")
+        self.assertEqual(self.page.evaluate("tpvCart.ops.length"), 0)
         self.assertFalse(self.sale.lines.exists())
-        other.close()
 
     def test_keyboard_wedge_search_and_enter_preserve_units(self):
         product = self.d.products[0]
