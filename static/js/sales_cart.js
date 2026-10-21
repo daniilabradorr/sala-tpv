@@ -380,6 +380,14 @@
     }
     async flush({ signal } = {}) {
       const deadline = performance.now() + this.flushTimeout;
+      // The initial protocol read must validate this session before queued
+      // mutations can drain. Reuse that read rather than racing a second one.
+      if (!this.protocolReady)
+        await this.bounded(
+          this.initialization || this.refresh(),
+          Math.max(1, deadline - performance.now()),
+          signal,
+        );
       await this.waitIdle(signal, deadline);
       if (this.headerError) throw new Error(this.headerError);
       // Start draining without letting its Promise hide an unbounded wait.
@@ -1036,8 +1044,8 @@
     if (event.key?.startsWith(queue.prefix) && !queue.busy && !queue.ops.length)
       queue.refresh().catch(() => {});
   });
-  queue
-    .refresh()
+  queue.initialization = queue.refresh();
+  queue.initialization
     .then(() => queue.pump())
     .catch((error) => {
       queue.error = error.message;

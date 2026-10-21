@@ -9,6 +9,7 @@ from django.test import override_settings
 from django.core.exceptions import ValidationError
 from playwright.sync_api import expect, sync_playwright
 
+from e2e.browser_evidence import BrowserEvidence
 from apps.billing.models import BillingDocument
 from apps.cash_register.models import CashSession, CashMovement
 from apps.catalog.models import Category
@@ -84,6 +85,7 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         self.session_id = self.session.pk
 
     def _login(self, page):
+        page._tpv_evidence = BrowserEvidence(page, self.id())
         page.goto(f"{self.live_server_url}/users/login/")
         page.get_by_label("Correo electrónico").fill(self.email)
         page.get_by_label("Contraseña").fill(self.password)
@@ -191,14 +193,18 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         self.assertEqual(Sale.objects.count(), 1)
 
     def _open_checkout(self, page, width):
-        if width < 1200:
-            page.locator('[data-nx-drawer-trigger="sale-cart"]').click()
-        page.get_by_role("link", name=re.compile("COBRAR")).click()
-        dialog = page.locator("#checkout-dialog")
-        expect(dialog).to_have_attribute("open", "")
-        expect(dialog.get_by_role("heading", name="COBRAR")).to_be_visible()
-        expect(dialog.locator("[data-checkout]")).to_be_visible()
-        return dialog
+        try:
+            if width < 1200:
+                page.locator('[data-nx-drawer-trigger="sale-cart"]').click()
+            page.get_by_role("link", name=re.compile("COBRAR")).click()
+            dialog = page.locator("#checkout-dialog")
+            expect(dialog).to_have_attribute("open", "")
+            expect(dialog.get_by_role("heading", name="COBRAR")).to_be_visible()
+            expect(dialog.locator("[data-checkout]")).to_be_visible()
+            return dialog
+        except Exception:
+            page._tpv_evidence.capture()
+            raise
 
     def _pending_amount(self, dialog):
         raw_amount = dialog.locator("[data-checkout]").get_attribute("data-pending")

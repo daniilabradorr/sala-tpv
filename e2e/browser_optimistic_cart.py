@@ -2,20 +2,29 @@
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
-from django.test import Client, override_settings
+from django.test import Client, LiveServerTestCase, override_settings
 from django.urls import reverse
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from apps.sales.models import CartOperation
 from tests.performance.dataset import Dataset
+from e2e.browser_evidence import BrowserEvidence
 
 
-@override_settings(TPV_OPTIMISTIC_CART=True)
+@override_settings(
+    TPV_OPTIMISTIC_CART=True,
+    STORAGES={
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        }
+    },
+)
 class OptimisticCartBrowserTests(StaticLiveServerTestCase):
     @classmethod
     def setUpClass(cls):
@@ -55,19 +64,31 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
                 }
             ]
         )
+        self.addCleanup(self.context.close)
         self.page = self.context.new_page()
+        self.evidence = BrowserEvidence(self.page, self.id())
         self.errors = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.page.on("dialog", lambda dialog: dialog.accept())
         self.url = self.live_server_url + reverse(
             "sales:sale_detail", args=[self.d.store.pk, self.sale.pk]
         )
-        self.page.goto(self.url)
-        self.page.wait_for_function(
-            "Boolean(window.tpvCart?.cart) && tpvCart.protocolReady"
-        )
+        try:
+            self.page.goto(self.url)
+            self.page.wait_for_function(
+                "Boolean(window.tpvCart?.cart) && tpvCart.protocolReady"
+            )
+        except Exception:
+            self.evidence.capture()
+            raise
 
     def tearDown(self):
+        result = self._outcome.result
+        if self.errors or any(
+            test is self or getattr(test, "test_case", None) is self
+            for test, _ in result.errors + result.failures
+        ):
+            self.evidence.capture()
         self.page.unroute_all(behavior="ignoreErrors")
         self.context.close()
         self.assertEqual(self.errors, [])
@@ -124,6 +145,47 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         self.assertEqual(self.sale.lines.count(), 1)
         self.sale.refresh_from_db()
         self.assertEqual(self.sale.cart_version, 2)
+
+    def test_checkout_waits_for_initial_protocol_read_before_draining(self):
+        page = self.context.new_page()
+        evidence = BrowserEvidence(page, self.id() + ".initial-read")
+        held = []
+        page.route(
+            "**/cart-sync/",
+            lambda route: (
+                held.append(route)
+                if route.request.method == "GET"
+                else route.continue_()
+            ),
+        )
+        try:
+            page.goto(self.url)
+            page.wait_for_function("Boolean(window.tpvCart?.cart)")
+            self.assertFalse(page.evaluate("tpvCart.protocolReady"))
+            page.locator(".product-card").first.click()
+            page.locator("[data-checkout-open]").click()
+            expect(page.locator("#checkout-panel .checkout-loading")).to_be_visible()
+            self.assertEqual(
+                page.locator("#checkout-panel [data-checkout-form]").count(), 0
+            )
+            self.assertEqual(len(held), 1)
+            while held:
+                held.pop(0).continue_()
+            page.unroute("**/cart-sync/")
+            expect(
+                page.locator("#checkout-dialog").get_by_role(
+                    "heading", name="COBRAR", exact=True
+                )
+            ).to_be_visible()
+            expect(page.locator("#checkout-panel [data-checkout-form]")).to_be_visible()
+            self.assertEqual(page.evaluate("tpvCart.ops.length"), 0)
+            self.assertEqual(self.sale.lines.count(), 1)
+        except Exception:
+            evidence.capture()
+            raise
+        finally:
+            page.unroute_all(behavior="ignoreErrors")
+            page.close()
 
     def test_twenty_same_product_immediate_and_persisted(self):
         self.add(20)
@@ -473,3 +535,74 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         }""")
         self.assertEqual(result["before"], [])
         self.assertEqual(result["after"], [])
+
+
+@override_settings(TPV_OPTIMISTIC_CART=True)
+class CollectedCartAssetsBrowserTests(LiveServerTestCase):
+    """Exercise actual manifest URLs through WhiteNoise after collectstatic."""
+
+    # Neither staticfiles finders nor LiveServer's STATIC_ROOT handler should
+    # intercept these requests: use the application's WSGI/WhiteNoise stack.
+    static_handler = staticmethod(lambda application: application)
+
+    def test_collected_assets_initialize_and_persist_cart(self):
+        dataset = Dataset(1, label="collected-cart")
+        sale, _ = dataset.sale(0)
+        client = Client()
+        client.force_login(dataset.user)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context()
+            context.add_cookies(
+                [
+                    {
+                        "name": "sessionid",
+                        "value": client.cookies["sessionid"].value,
+                        "url": self.live_server_url,
+                    }
+                ]
+            )
+            page = context.new_page()
+            evidence = BrowserEvidence(page, self.id())
+            try:
+                page.goto(
+                    self.live_server_url
+                    + reverse("sales:sale_detail", args=[dataset.store.pk, sale.pk])
+                )
+                page.wait_for_function(
+                    "Boolean(window.tpvCart?.cart) && tpvCart.protocolReady"
+                )
+                scripts = page.locator("script[src]").evaluate_all(
+                    "els => els.map(el => el.src)"
+                )
+                self.assertTrue(
+                    any(
+                        re.search(r"/sales_cart\.[a-f0-9]+\.js$", src)
+                        for src in scripts
+                    )
+                )
+                page.locator(".product-card").first.click()
+                page.locator("[data-checkout-open]").click()
+                expect(
+                    page.locator("#checkout-dialog").get_by_role(
+                        "heading", name="COBRAR", exact=True
+                    )
+                ).to_be_visible()
+                expect(
+                    page.locator("#checkout-panel [data-checkout-form]")
+                ).to_be_visible()
+                self.assertEqual(page.evaluate("tpvCart.ops.length"), 0)
+                self.assertFalse(
+                    [
+                        event
+                        for event in evidence.events
+                        if event.get("path", "").startswith("/static/")
+                        and event.get("status", 0) >= 400
+                    ]
+                )
+            except Exception:
+                evidence.capture()
+                raise
+            finally:
+                browser.close()
+        self.assertEqual(sale.lines.count(), 1)
