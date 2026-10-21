@@ -2,13 +2,20 @@
 (() => {
   "use strict";
   class CartQueue {
-    constructor({ storage, prefix, send, read, changed }) {
-      Object.assign(this, { storage, prefix, send, read, changed });
+    constructor({ storage, prefix, send, read, changed, expectedUser = null }) {
+      Object.assign(this, { storage, prefix, send, read, changed, expectedUser });
+      this.protocolReady = expectedUser === null;
       this.ops = [];
       this.cart = null;
       this.busy = false;
       this.headerPending = 0;
       this.ownRevisions = new Map();
+      this.waiters = new Set();
+      this.headerError = "";
+      this.readTimeout = 15000;
+      this.headerTimeout = 15000;
+      this.flushTimeout = 20000;
+      this.flight = null;
       this.error = "";
       this.conflict = false;
       this.rejected = false;
@@ -18,6 +25,26 @@
         if (key.startsWith(prefix + "op:"))
           this.ops.push(JSON.parse(storage.getItem(key)));
       }
+      const flight = storage.getItem(prefix + "flight");
+      if (flight) {
+        this.flight = JSON.parse(flight);
+        if (!Number.isSafeInteger(this.flight.version) || this.flight.version < 0 ||
+            !Array.isArray(this.flight.ops) || !this.flight.ops.length || this.flight.ops.length > 50)
+          throw new Error("Diario de petición no válido");
+        for (const op of this.flight.ops) {
+          this.ops = this.ops.filter((pending) => pending.key !== op.key);
+          this.ops.push(op);
+        }
+      }
+      for (const op of this.ops) {
+        if (!op || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(op.key) ||
+            !["add", "quantity", "delete"].includes(op.kind) ||
+            !Number.isSafeInteger(op.order) || !Number.isSafeInteger(op.baseVersion) ||
+            (op.version !== undefined && !Number.isSafeInteger(op.version)))
+          throw new Error("Diario local dañado; no se reenviará automáticamente.");
+      }
+      if (new Set(this.ops.map(op => op.key)).size !== this.ops.length)
+        throw new Error("Identidades locales duplicadas.");
       this.ops.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
       this.sequence = this.ops.reduce(
         (maximum, op) => Math.max(maximum, op.order),
@@ -28,11 +55,50 @@
       this.storage.setItem(this.prefix + "op:" + op.key, JSON.stringify(op));
     }
     notify() {
+      for (const wake of [...this.waiters]) wake();
       this.changed?.(this);
+    }
+    async bounded(work, milliseconds, signal) {
+      if (signal?.aborted) throw new Error("Sincronización cancelada. Las operaciones conservan su identidad.");
+      return new Promise((resolve, reject) => {
+        const finish = (callback, value) => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+          callback(value);
+        };
+        const abort = () => finish(reject, new Error("Sincronización cancelada. No se supone rollback."));
+        const timer = setTimeout(() => finish(reject, new Error(
+          "La sincronización supera el tiempo de espera. El resultado puede ser desconocido; reintenta sin duplicar."
+        )), milliseconds);
+        signal?.addEventListener("abort", abort, { once: true });
+        Promise.resolve(work).then(value => finish(resolve, value), error => finish(reject, error));
+      });
+    }
+    async waitIdle(signal, deadline) {
+      while (this.busy || this.headerPending) {
+        const left = deadline - performance.now();
+        if (left <= 0) throw new Error("La sincronización sigue pendiente. No se puede cobrar sin verificarla.");
+        let wake;
+        const changed = new Promise(resolve => { wake = resolve; this.waiters.add(wake); });
+        try { await this.bounded(changed, left, signal); }
+        finally { this.waiters.delete(wake); }
+      }
     }
     async refresh() {
       const result = await this.read();
       const cart = result.cart;
+      if (this.expectedUser !== null) {
+        const sameScope = this.cart && ["sale_id", "business_id", "store_id"]
+          .every(field => cart?.[field] === this.cart[field]);
+        if (result.protocol !== 2 || result.user_id !== this.expectedUser || !sameScope) {
+          this.protocolReady = false;
+          this.error = "Ha cambiado la sesión o la versión del servidor. Recarga la página y revisa la venta; no se enviarán los pendientes automáticamente.";
+          this.notify();
+          throw new Error(this.error);
+        }
+        this.protocolReady = true;
+      }
+
       if (!this.cart || cart.version >= this.cart.version) {
         this.cart = cart;
         this.acknowledged = new Set((result.receipts || []).map((x) => x.key));
@@ -59,7 +125,8 @@
         intent.kind === "quantity" &&
         previous?.kind === "quantity" &&
         previous.line === intent.line &&
-        previous.version === undefined
+        previous.version === undefined &&
+        !this.flight?.ops.some(op => op.key === previous.key)
       ) {
         const replacement = { ...previous, quantity: intent.quantity };
         try {
@@ -153,7 +220,9 @@
     }
     async pump() {
       if (
+        !this.protocolReady ||
         this.headerPending ||
+        this.headerError ||
         this.busy ||
         this.error ||
         !this.cart ||
@@ -170,14 +239,41 @@
           await this.refresh();
           return;
         }
-        if (op.version === undefined) {
-          op.version = this.cart.version;
-          this.save(op);
+        let sending = this.flight?.ops;
+        if (!sending) {
+          sending = op.version === undefined
+            ? this.ops.slice(0, 50).filter((pending, index, all) =>
+                pending.version === undefined && pending.baseVersion === op.baseVersion &&
+                all.slice(0, index).every(before => before.version === undefined))
+            : [op];
+          if (sending.length > 1) {
+            sending = sending.map(pending => ({ ...pending, version: this.cart.version }));
+            const flight = { version: this.cart.version, ops: sending };
+            // One atomic storage write BEFORE any network mutation; survives partial cleanup.
+            this.storage.setItem(this.prefix + "flight", JSON.stringify(flight));
+            this.flight = flight;
+            for (const pending of sending) {
+              this.save(pending);
+              Object.assign(this.ops.find(x => x.key === pending.key), pending);
+            }
+          } else if (op.version === undefined) {
+            op.version = this.cart.version;
+            this.save(op);
+          }
         }
-        const line = this.resolve(op.line);
-        if (op.kind !== "add" && !line)
+        const wire = pending => {
+          const line = this.resolve(pending.line);
+          if (pending.kind === "add") return { ...pending };
+          if (line) return { ...pending, line };
+          if (String(pending.line).startsWith("tmp:")) {
+            const { line: _, ...rest } = pending;
+            return { ...rest, line_ref: pending.line.slice(4) };
+          }
           throw new Error("Falta la confirmación de una línea pendiente.");
-        const result = await this.send({ ...op, line });
+        };
+        const result = await this.send(this.flight
+          ? { version: this.flight.version, operations: sending.map(wire) }
+          : wire(op));
         if (result.status === 409 || result.status === 422) {
           this.conflict =
             result.status === 409 && result.body.code === "version";
@@ -189,14 +285,20 @@
             "No se recibió confirmación. Reintenta para comprobar la operación sin duplicarla.",
           );
         } else {
-          // Persist dependency resolution BEFORE removing the accepted parent operation.
-          if (op.kind === "add")
-            this.storage.setItem(
-              this.prefix + "map:" + op.key,
-              JSON.stringify(result.body.line),
-            );
-          this.storage.removeItem(this.prefix + "op:" + op.key);
-          this.ops.shift();
+          const receipts = this.flight ? result.body.results : [result.body];
+          if (!Array.isArray(receipts) || receipts.length !== sending.length ||
+              receipts.some((receipt, index) => receipt.key !== sending[index].key))
+            throw new Error("Respuesta incompleta. Reintenta las mismas identidades.");
+          for (const receipt of receipts) {
+            if (receipt.line)
+              this.storage.setItem(this.prefix + "map:" + receipt.key, JSON.stringify(receipt.line));
+          }
+          for (const pending of sending)
+            this.storage.removeItem(this.prefix + "op:" + pending.key);
+          this.storage.removeItem(this.prefix + "flight");
+          this.flight = null;
+          const accepted = new Set(sending.map(pending => pending.key));
+          this.ops = this.ops.filter(pending => !accepted.has(pending.key));
           if (result.body.cart.version >= this.cart.version)
             this.cart = result.body.cart;
           this.cart.version = this.advanceOwnVersion(this.cart.version);
@@ -236,16 +338,22 @@
       // a timed-out operation: replay its original UUID and version first.
       if (this.rejected) return;
       this.error = "";
-      await this.pump();
+      try {
+        if (!this.protocolReady) await this.refresh();
+        await this.pump();
+      } catch (error) { this.error = error.message; this.notify(); }
     }
     async acceptConflict() {
       if (!this.conflict || this.busy) return;
-      const op = this.ops[0];
       // A definitive version conflict has no receipt. The user may explicitly
       // resubmit the same intent against the freshly reviewed version.
-      delete op.version;
-      op.baseVersion = this.cart.version;
-      this.save(op);
+      this.storage.removeItem(this.prefix + "flight");
+      this.flight = null;
+      for (const pending of this.ops) {
+        delete pending.version;
+        pending.baseVersion = this.cart.version;
+        this.save(pending);
+      }
       this.error = "";
       this.conflict = this.rejected = false;
       await this.pump();
@@ -254,6 +362,8 @@
       if (this.busy || !this.rejected) return;
       for (const op of this.ops)
         this.storage.removeItem(this.prefix + "op:" + op.key);
+      this.storage.removeItem(this.prefix + "flight");
+      this.flight = null;
       this.ops = [];
       this.error = "";
       this.conflict = this.rejected = false;
@@ -268,17 +378,18 @@
         this.notify();
       }
     }
-    async flush() {
-      while (this.busy || this.headerPending)
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      await this.pump();
-      // A pump might already be active when checkout is clicked.
-      while (this.busy || this.headerPending)
-        await new Promise((resolve) => setTimeout(resolve, 20));
+    async flush({ signal } = {}) {
+      const deadline = performance.now() + this.flushTimeout;
+      await this.waitIdle(signal, deadline);
+      if (this.headerError) throw new Error(this.headerError);
+      // Start draining without letting its Promise hide an unbounded wait.
+      this.pump();
+      await this.waitIdle(signal, deadline);
       if (this.error || this.ops.length)
         throw new Error(this.error || "Hay cambios pendientes.");
-      await this.refresh();
+      await this.bounded(this.refresh(), Math.max(1, deadline - performance.now()), signal);
     }
+
   }
   window.SalesCartQueue = CartQueue;
   const root = document.querySelector(".tpv[data-cart-sync]");
@@ -291,16 +402,23 @@
       .slice(0, 50)
       .map((op) => op.key)
       .join(",");
-    const r = await fetch(
-      endpoint + (pending ? "?pending=" + encodeURIComponent(pending) : ""),
-      { credentials: "same-origin", cache: "no-store" },
-    );
-    if (!r.ok)
-      throw new Error(
-        "No se puede recuperar esta venta. Comprueba sesión y permisos.",
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), queue?.readTimeout || 15000);
+    try {
+      const r = await fetch(
+        endpoint + (pending ? "?pending=" + encodeURIComponent(pending) : ""),
+        { credentials: "same-origin", cache: "no-store", signal: controller.signal },
       );
-    return r.json();
+      if (!r.ok) throw new Error("No se puede recuperar esta venta. Comprueba sesión y permisos.");
+      return await r.json();
+    } catch (error) {
+      if (error.name === "AbortError")
+        throw new Error("No se recibió el estado de la venta a tiempo. Reintenta la sincronización.");
+      if (error instanceof TypeError) throw new Error("No se puede conectar para verificar la venta. Conserva los pendientes.");
+      throw error;
+    } finally { clearTimeout(timer); }
   };
+
   const money = (value) =>
     new Intl.NumberFormat("es-ES", {
       style: "currency",
@@ -308,7 +426,9 @@
     }).format(value);
   let queue,
     checkoutRequested = false,
-    checkoutTrigger = null;
+    checkoutTrigger = null,
+    checkoutAttempt = null;
+  const checkoutReads = new WeakMap();
   const rows = new Map();
   const status = document.createElement("div");
   status.className = "tpv-sync-status";
@@ -396,11 +516,22 @@
     status.replaceChildren();
     const message = document.createElement("span");
     message.textContent =
-      queue.error ||
-      (queue.ops.length
-        ? `${queue.ops.length} cambios pendientes · importes provisionales`
-        : "Sincronizado");
+      queue.headerError || queue.error ||
+      (!navigator.onLine ? "Sin conexión · no se enviarán cambios" :
+        queue.headerPending || queue.busy ? "Sincronizando · espera la confirmación antes de cerrar" :
+        queue.ops.length ? `${queue.ops.length} cambios pendientes · importes provisionales` :
+        "Cambios guardados en el servidor");
+    status.dataset.state = queue.headerError ? "intervention" : queue.conflict ? "conflict" :
+      !navigator.onLine ? "offline" : queue.error ? "intervention" :
+      queue.busy || queue.headerPending ? "syncing" : queue.ops.length ? "pending" : "saved";
     status.append(message);
+    if (queue.headerError) {
+      const reload = document.createElement("button");
+      reload.type = "button";
+      reload.textContent = "Recargar y revisar cabecera";
+      reload.onclick = () => location.reload();
+      status.append(reload);
+    }
     if (queue.error) {
       const confirmed = document.createElement("p");
       confirmed.textContent = `Total confirmado en el servidor: ${money(queue.cart.total)} · versión ${queue.cart.version}. Revisa las cantidades confirmadas antes de aplicar pendientes.`;
@@ -603,6 +734,7 @@
       storage: sessionStorage,
       prefix: `nx-cart:${root.dataset.user}:${root.dataset.business}:${root.dataset.store}:${root.dataset.sale}:`,
       read,
+      expectedUser: Number(root.dataset.user),
       changed: render,
       send: async (op) => {
         const controller = new AbortController();
@@ -615,11 +747,20 @@
             headers: {
               "Content-Type": "application/json",
               "X-CSRFToken": csrf(),
+              "X-Sales-Cart-User": root.dataset.user,
+              "X-Sales-Cart-Protocol": "2",
             },
             body: JSON.stringify(op),
           });
+          if (r.headers.get("X-Sales-Cart-Protocol") !== "2")
+            throw new Error("El servidor no confirma un protocolo compatible. Conserva los pendientes y recarga para revisar.");
           const body = await r.json();
           return { status: r.status, body };
+        } catch (error) {
+          if (error.name === "AbortError")
+            throw new Error("Sin confirmación en 15 segundos. El servidor puede haber guardado los cambios; reintenta sin duplicar.");
+          if (error instanceof TypeError) throw new Error("Sin conexión o respuesta no válida. Conserva los pendientes y reintenta sin duplicar.");
+          throw error;
         } finally {
           clearTimeout(timeout);
         }
@@ -671,8 +812,31 @@
       if (!queue.busy && !queue.ops.length) queue.refresh().catch(() => {});
     });
   } catch (_) {
+    // Fail closed: an unreadable journal may contain a committed unknown operation.
+    const warning = document.createElement("p");
+    warning.setAttribute("role", "alert");
+    warning.textContent = "No se puede verificar el diario local del carrito. No borres el almacenamiento: podría haber cambios de resultado desconocido. Revisa la venta desde otra pestaña o solicita asistencia antes de editar o cobrar.";
+    root.prepend(warning);
+    root.querySelectorAll(".product-card, .cart-lines input, .cart-lines button, .checkout-open").forEach(control => {
+      control.disabled = true;
+      control.setAttribute("aria-disabled", "true");
+    });
+    for (const type of ["submit", "click"]) root.addEventListener(type, event => {
+      if (event.target.closest(".product-grid, #sale-cart, [data-checkout-open]")) {
+        event.preventDefault(); event.stopImmediatePropagation();
+      }
+    }, true);
     return;
-  } // Storage unavailable: retain the original progressive forms.
+  }
+  window.addEventListener("beforeunload", event => {
+    if (queue.ops.length || queue.busy || queue.headerPending || queue.headerError) {
+      event.preventDefault(); event.returnValue = "";
+    }
+  });
+  window.addEventListener("offline", render);
+  window.addEventListener("online", () => {
+    render(); // Recovery requires an explicit retry; never silently rebase.
+  });
   // Capture before HTMX and the legacy delegated cart handlers.
   document.addEventListener(
     "submit",
@@ -730,6 +894,8 @@
         return;
       }
       checkoutRequested = true;
+      const attempt = new AbortController();
+      checkoutAttempt = attempt;
       checkoutTrigger = checkout;
       queue.frozen = true;
       render();
@@ -746,14 +912,16 @@
         .reduce((sum, line) => sum + Number(line.total), 0)
         .toFixed(2);
       queue
-        .flush()
-        .then(() =>
-          window.htmx.ajax("GET", checkout.href, {
-            target: panel,
-            swap: "innerHTML",
-          }),
-        )
+        .flush({ signal: attempt.signal })
         .then(() => {
+          if (attempt.signal.aborted) throw new Error("Apertura cancelada.");
+          return queue.bounded(window.htmx.ajax("GET", checkout.href, {
+            target: panel, swap: "innerHTML",
+            headers: { "X-Sales-Checkout-Read": "1" },
+          }), 15000, attempt.signal);
+        })
+        .then(() => {
+          if (checkoutAttempt !== attempt || attempt.signal.aborted) return;
           if (provisionalTotal !== Number(queue.cart.total).toFixed(2)) {
             const note = document.createElement("p");
             note.className = "recovery-note";
@@ -762,20 +930,30 @@
           }
         })
         .catch((error) => {
+          if (checkoutAttempt !== attempt || !dialog.open) return;
+          attempt.abort();
           panel.replaceChildren();
           const p = document.createElement("p");
           p.textContent =
             error.message +
             " Cierra esta ventana para resolverlo en el ticket.";
           panel.append(p);
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.textContent = "Volver al ticket";
+          retry.onclick = () => dialog.close();
+          panel.append(retry);
         })
         .finally(() => {
-          checkoutRequested = false;
+          if (checkoutAttempt === attempt) checkoutRequested = false;
         });
     },
     true,
   );
   document.querySelector("#checkout-dialog").addEventListener("close", () => {
+    checkoutAttempt?.abort();
+    checkoutAttempt = null;
+    checkoutRequested = false;
     queue.frozen = false;
     render();
     if (checkoutTrigger?.isConnected)
@@ -783,6 +961,11 @@
     queue.refresh().catch(() => {});
   });
   document.addEventListener("htmx:beforeSwap", (event) => {
+    if (checkoutReads.get(event.detail.xhr)?.signal.aborted) {
+      event.detail.shouldSwap = false;
+      event.detail.isError = false;
+      return;
+    }
     if (
       event.detail.xhr?.status === 200 &&
       event.detail.requestConfig?.elt?.closest?.(".line-editor")
@@ -792,28 +975,50 @@
       event.detail.shouldSwap = false;
     }
   });
-  const headerRequests = new Set();
+  const headerRequests = new Map();
+  const uncertainHeaders = new Set();
+  const finishHeader = (xhr, timedOut = false) => {
+    const request = headerRequests.get(xhr);
+    if (!request) return;
+    if (!request.finished) {
+      request.finished = true;
+      queue.headerPending--;
+      clearTimeout(request.timer);
+    }
+    const previous = xhr.getResponseHeader("X-Sales-Cart-Previous-Version");
+    const current = xhr.getResponseHeader("X-Sales-Cart-Version");
+    if (!timedOut && xhr.status === 200 && previous !== null && current !== null) {
+      uncertainHeaders.delete(xhr);
+      queue.recordOwnRevision(Number(previous), Number(current));
+      headerRequests.delete(xhr);
+    } else {
+      uncertainHeaders.add(xhr);
+    }
+    queue.headerError = uncertainHeaders.size
+      ? "No se ha verificado el guardado de cliente/documento. Recarga y revisa la cabecera antes de cobrar."
+      : "";
+    queue.notify();
+    if (!queue.headerPending && !queue.headerError) queue.pump();
+  };
   document.addEventListener("htmx:beforeRequest", (event) => {
     const { elt, xhr, requestConfig } = event.detail;
-    if (
-      requestConfig?.verb?.toLowerCase() === "post" &&
-      (elt?.matches?.("[data-header-autosave]") ||
-        elt?.closest?.("#quick-customer-panel"))
-    ) {
-      headerRequests.add(xhr);
+    if (requestConfig?.headers?.["X-Sales-Checkout-Read"] && checkoutAttempt) {
+      const attempt = checkoutAttempt;
+      checkoutReads.set(xhr, attempt);
+      xhr.timeout = 15000;
+      attempt.signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    }
+    if (requestConfig?.verb?.toLowerCase() === "post" &&
+        (elt?.matches?.("[data-header-autosave]") || elt?.closest?.("#quick-customer-panel"))) {
+      const request = { finished: false };
+      headerRequests.set(xhr, request);
       queue.headerPending++;
+      request.timer = setTimeout(() => finishHeader(xhr, true), queue.headerTimeout);
+      queue.notify();
     }
   });
   document.addEventListener("htmx:afterRequest", (event) => {
-    const xhr = event.detail.xhr;
-    if (headerRequests.delete(xhr)) {
-      queue.headerPending--;
-      const previous = xhr.getResponseHeader("X-Sales-Cart-Previous-Version");
-      const current = xhr.getResponseHeader("X-Sales-Cart-Version");
-      if (xhr.status === 200 && previous !== null && current !== null)
-        queue.recordOwnRevision(Number(previous), Number(current));
-      if (!queue.headerPending) queue.pump();
-    }
+    finishHeader(event.detail.xhr);
 
     if (
       event.detail.xhr?.status === 200 &&

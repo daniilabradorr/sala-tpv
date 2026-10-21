@@ -2567,22 +2567,36 @@ class SaleCartSyncView(
                 if pending
                 else []
             )
-            response = JsonResponse({"cart": snapshot(sale), "receipts": receipts})
+            response = JsonResponse(
+                {
+                    "cart": snapshot(sale),
+                    "receipts": receipts,
+                    "protocol": 2,
+                    "user_id": request.user.pk,
+                }
+            )
+        response["X-Sales-Cart-Protocol"] = "2"
         response["Cache-Control"] = "no-store"
         return response
 
     def post(self, request, store_id, sale_pk):
         import json
         from django.http import JsonResponse
-        from apps.sales.cart import CartConflict, mutate
+        from apps.sales.cart import CartConflict, mutate, mutate_batch
 
         business, store = self.get_business_and_store()
         get_object_or_404(Sale, pk=sale_pk, business=business, store=store)
+        expected_user = request.headers.get("X-Sales-Cart-User")
+        if expected_user is not None and expected_user != str(request.user.pk):
+            raise PermissionDenied(
+                "La sesión ha cambiado. Recarga antes de editar la venta."
+            )
         try:
             data = json.loads(request.body)
             if not isinstance(data, dict):
                 raise ValueError
-            result = mutate(
+            handler = mutate_batch if "operations" in data else mutate
+            result = handler(
                 business=business,
                 store=store,
                 sale_id=sale_pk,
@@ -2599,5 +2613,6 @@ class SaleCartSyncView(
             if isinstance(error, ValidationError):
                 message = " ".join(error.messages)
             response = JsonResponse({"error": message}, status=422)
+        response["X-Sales-Cart-Protocol"] = "2"
         response["Cache-Control"] = "no-store"
         return response

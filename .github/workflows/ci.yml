@@ -374,6 +374,7 @@ jobs:
           e2e.browser_tpv
           e2e.browser_checkout
           e2e.browser_optimistic_cart
+          e2e.browser_cart_hardening
           e2e.browser_returns
           e2e.browser_billing
           e2e.browser_reports

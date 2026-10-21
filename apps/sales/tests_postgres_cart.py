@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import connections, connection
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
-from apps.sales.cart import mutate
+from apps.sales.cart import mutate, mutate_batch
 from apps.sales.checkout import PaymentIntent, run_checkout
 from apps.sales.models import CartOperation, Sale
 from apps.payments.models import Payment
@@ -149,3 +149,47 @@ class CartPostgreSQLTests(TransactionTestCase):
             self.d.products[0].inventory_items.get(store=self.d.store).current_stock,
             Decimal("999.000"),
         )
+
+    def batch(self, payload):
+        return mutate_batch(
+            business=self.d.business,
+            store=self.d.store,
+            sale_id=self.sale.pk,
+            user=self.d.user,
+            data=payload,
+        )
+
+    def test_same_batch_concurrent_replay_is_atomic(self):
+        payload = dict(version=0, operations=[self.payload(), self.payload()])
+        outcomes = self.threads(
+            lambda: self.batch(payload), lambda: self.batch(payload)
+        )
+        self.assertNotIn("conflict", outcomes)
+        self.assertEqual(self.sale.lines.count(), 3)
+        self.assertEqual(CartOperation.objects.count(), 2)
+        self.assertEqual(
+            sorted(x["results"][0]["replayed"] for x in outcomes), [False, True]
+        )
+
+    def test_two_batches_same_revision_one_conflicts(self):
+        a = dict(version=0, operations=[self.payload(), self.payload()])
+        b = dict(version=0, operations=[self.payload(), self.payload()])
+        outcomes = self.threads(lambda: self.batch(a), lambda: self.batch(b))
+        self.assertEqual(outcomes.count("conflict"), 1)
+        self.assertEqual(self.sale.lines.count(), 3)
+        self.assertEqual(CartOperation.objects.count(), 2)
+
+    def test_batch_racing_checkout_never_charges_stale_total(self):
+        self.payment_key, self.billing_key = uuid4(), uuid4()
+        payload = dict(version=0, operations=[self.payload(), self.payload()])
+        outcomes = self.threads(lambda: self.batch(payload), self.checkout)
+        self.assertEqual(outcomes.count("conflict"), 1)
+        self.sale.refresh_from_db()
+        if self.sale.status == "completed":
+            self.assertEqual(self.sale.lines.count(), 1)
+            self.assertEqual(
+                Payment.objects.get(sale=self.sale).amount, self.sale.total_amount
+            )
+        else:
+            self.assertEqual(self.sale.lines.count(), 3)
+            self.assertFalse(Payment.objects.filter(sale=self.sale).exists())

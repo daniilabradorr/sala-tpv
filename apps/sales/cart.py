@@ -114,13 +114,25 @@ def mutate(*, business, store, sale_id, user, data):
         pk=sale_id, business=business, store=store
     )
     _validate_can_sell(business=business, store=store, user=user)
+    return _mutate_locked(
+        sale=sale, business=business, user=user, data=data, include_snapshot=True
+    )
+
+
+_RECEIPT_UNREAD = object()
+
+
+def _mutate_locked(
+    *, sale, business, user, data, include_snapshot, receipt=_RECEIPT_UNREAD
+):
     key, version, payload, fingerprint = normalize(data)
-    receipt = CartOperation.objects.filter(sale=sale, key=key).first()
+    if receipt is _RECEIPT_UNREAD:
+        receipt = CartOperation.objects.filter(sale=sale, key=key).first()
     if receipt:
         if receipt.fingerprint != fingerprint:
             raise CartConflict("La clave ya se utilizó con otro contenido.", code="key")
         return {
-            "cart": snapshot(sale),
+            **({"cart": snapshot(sale)} if include_snapshot else {}),
             "key": str(key),
             "replayed": True,
             "accepted_version": receipt.version,
@@ -176,9 +188,81 @@ def mutate(*, business, store, sale_id, user, data):
         line_id_result=line.pk if kind != "delete" else None,
     )
     return {
-        "cart": snapshot(sale),
+        **({"cart": snapshot(sale)} if include_snapshot else {}),
         "key": str(key),
         "replayed": False,
         "accepted_version": sale.cart_version,
         "line": line.pk if kind != "delete" else None,
+    }
+
+
+@transaction.atomic
+def mutate_batch(*, business, store, sale_id, user, data):
+    """Atomic transport only: preserve each original intent, service and receipt.
+
+    A retry may replay all receipts; mixing previously accepted operations with
+    new effects is rejected, so there is no implicit partial-commit contract.
+    """
+    operations = data.get("operations")
+    if not isinstance(operations, list) or not 1 <= len(operations) <= 50:
+        raise ValidationError("El lote debe contener entre 1 y 50 operaciones.")
+    try:
+        keys = [UUID(str(op["key"])) for op in operations]
+        if len(set(keys)) != len(keys):
+            raise ValueError
+        # Reuse the single-operation revision validator, including bool rejection.
+        normalize(
+            {"key": keys[0], "version": data["version"], "kind": "delete", "line": 1}
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError("Identidad o revisión de lote no válida.") from error
+    sale = Sale.objects.select_for_update(of=("self",)).get(
+        pk=sale_id, business=business, store=store
+    )
+    _validate_can_sell(business=business, store=store, user=user)
+    receipts = {
+        op.key: op for op in CartOperation.objects.filter(sale=sale, key__in=keys)
+    }
+    if receipts and len(receipts) != len(keys):
+        raise CartConflict(
+            "El lote mezcla operaciones confirmadas y nuevas. Recupera el estado antes de continuar.",
+            code="key",
+        )
+    if not receipts:
+        _validate_sale_editable(sale)
+        if int(data["version"]) != sale.cart_version:
+            raise CartConflict("La venta ha cambiado. Revisa los cambios pendientes.")
+    results = []
+    resolved = {}
+    for key, raw in zip(keys, operations):
+        op = dict(raw, version=sale.cart_version)
+        if "line_ref" in op:
+            try:
+                reference = UUID(str(op.pop("line_ref")))
+                if "line" in op or op.get("kind") == "add":
+                    raise ValueError
+                line_id = resolved.get(reference)
+                if line_id is None:
+                    parent = CartOperation.objects.get(
+                        sale=sale, key=reference, kind="add"
+                    )
+                    line_id = parent.line_id_result
+                op["line"] = line_id
+            except (ValueError, TypeError, CartOperation.DoesNotExist) as error:
+                raise ValidationError("Referencia provisional no válida.") from error
+        result = _mutate_locked(
+            sale=sale,
+            business=business,
+            user=user,
+            data=op,
+            include_snapshot=False,
+            receipt=receipts.get(key),
+        )
+        results.append(result)
+        if raw.get("kind") == "add":
+            resolved[key] = result["line"]
+    return {
+        "cart": snapshot(sale),
+        "results": results,
+        "accepted_version": results[-1]["accepted_version"],
     }

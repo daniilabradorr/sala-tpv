@@ -58,11 +58,14 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         self.page = self.context.new_page()
         self.errors = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        self.page.on("dialog", lambda dialog: dialog.accept())
         self.url = self.live_server_url + reverse(
             "sales:sale_detail", args=[self.d.store.pk, self.sale.pk]
         )
         self.page.goto(self.url)
-        self.page.wait_for_function("Boolean(window.tpvCart?.cart)")
+        self.page.wait_for_function(
+            "Boolean(window.tpvCart?.cart) && tpvCart.protocolReady"
+        )
 
     def tearDown(self):
         self.page.unroute_all(behavior="ignoreErrors")
@@ -191,7 +194,9 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         other.goto(self.url)
         other.wait_for_function("Boolean(window.tpvCart?.cart)")
         # Prevent passive storage refresh to deliberately reproduce a stale tab.
-        other.evaluate("tpvCart.read=async()=>({cart:tpvCart.cart})")
+        other.evaluate(
+            "tpvCart.read=async()=>({cart:tpvCart.cart,protocol:2,user_id:tpvCart.expectedUser})"
+        )
         self.page.locator("[data-plus]").click()
         self.settled()
         other.locator("[data-plus]").click()
