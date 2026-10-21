@@ -67,6 +67,11 @@ eliminar, actualizar contador e importe provisional se reflejan antes de HTTP.
 Las filas se conservan y sus controles se actualizan sin reconstruir el carrito
 por cada clic. Los editores manuales conservan su validación original, incluyen
 la versión vista y concilian las filas agrupadas mediante JSON al guardar. HTMX mantiene catálogo, búsqueda, cabecera y editores existentes.
+`TPV_OPTIMISTIC_CART=1` es el valor por defecto; `0` recupera el frontend anterior
+sin retirar versión, recibos ni protección de checkout. Los tests históricos
+`e2e/browser_tpv.py` verifican ese fallback y sus reemplazos de filas; los nuevos
+20 casos verifican explícitamente el modo optimista. No se han aplicado flags
+en ningún despliegue real.
 
 La cola usa **sessionStorage por usuario/Business/Store/Sale y pestaña**. Sobrevive
 al reload en esa pestaña; cerrar la pestaña termina ese diario local. No promete
@@ -81,6 +86,14 @@ Cada intención conserva además la versión sobre la que se preparó. Solo un
 avance confirmado de esa misma cola permite actualizar automáticamente la base
 de las intenciones aún no enviadas; una lectura más nueva, una recarga o un
 recibo repetido con cambios posteriores de otra pestaña exige revisión explícita.
+Los guardados de cliente/documento de esta misma pestaña actúan como barrera de
+la cola: el cambio visual sigue siendo inmediato, pero las mutaciones esperan su
+respuesta. Las cabeceras `X-Sales-Cart-Previous-Version` y
+`X-Sales-Cart-Version` identifican la transición realmente confirmada bajo el
+bloqueo; solo esas transiciones propias pueden avanzar una intención pendiente.
+Una respuesta perdida o un salto de versión externo sigue exigiendo conciliación.
+Estas cabeceras contienen únicamente revisiones numéricas.
+
 Cada intención se guarda antes de enviarse;
 una operación enviada conserva UUID, contenido y versión ante timeout. El timeout
 aborta la espera del navegador a los 15 s; **no supone rollback en el servidor**.
@@ -142,6 +155,18 @@ TPV_CART_BROWSER_REPORT=work/tpv-optimistic-cart/visual-matrix.json \
   .venv/bin/python manage.py test tests.performance.optimistic_cart_matrix.VisualMatrix --noinput
 ```
 
+Para repetir los gates de integración y concurrencia:
+
+```bash
+.venv/bin/python manage.py test \
+  apps.sales.tests.integration.test_cart_protocol \
+  apps.sales.tests.integration.test_ticket_editing \
+  apps.sales.tests_postgres_cart --noinput
+.venv/bin/python -m playwright install chromium
+.venv/bin/python manage.py test e2e.browser_optimistic_cart \
+  e2e.browser_checkout e2e.browser_full_flow e2e.browser_htmx_global_ux --noinput
+```
+
 No ejecutar estos comandos de test simultáneamente sobre la misma base de test:
 el runner crea y destruye su esquema. Las emisiones de esas pruebas son locales,
 con datos ficticios; no hay cobros ni envíos fiscales reales. Playwright requiere
@@ -162,7 +187,8 @@ Recargar páginas abiertas para renovar JS y formularios (los antiguos no llevan
 la versión de checkout). No operar el carrito con una mezcla de escritores
 antiguos y nuevos. Eso requiere autorización de despliegue independiente.
 
-Rollback preferible: pausar/drenar y retirar la interfaz optimista manteniendo
+Rollback preferible: pausar/drenar, establecer `TPV_OPTIMISTIC_CART=0` y reiniciar
+los workers locales/de staging para retirar la interfaz optimista manteniendo
 los servicios nuevos que avanzan revisiones. Si se vuelve al código anterior,
 conservar columna y recibos; antes de reactivar el protocolo habrá que conciliar
 las colas y avanzar las revisiones de las ventas afectadas de forma controlada,
@@ -174,17 +200,35 @@ destructiva necesita planificación y copia de seguridad, no un borrado rutinari
 
 Resultados obtenidos en el entorno local de prueba:
 
+- Cierre de validación de `bc5c182`: **79 casos distintos correctos**: 42 de
+  navegador (20 del carrito optimista, 16 de checkout, 1 de flujo completo de
+  venta/devolución y 5 del transporte HTMX anterior), 6 de concurrencia PostgreSQL
+  y 31 de protocolo/edición. La ejecución conjunta inicial de 66 casos tardó
+  154,572 s y tuvo un único fallo en un test nuevo que enviaba un tipo de documento
+  no admitido por el formulario. Corregido ese dato de prueba, los 31 casos de
+  protocolo y edición se ejecutaron de nuevo: **31/31 correctos en 6,055 s**.
+  Los 42 de navegador y 6 de concurrencia pasaron en la ejecución conjunta.
+  La regresión nueva retiene la respuesta de cabecera, añade un producto y
+  comprueba su aparición inmediata, espera de persistencia y versión final sin
+  conflicto falso. También se comprueba la transición de versión de un no-op.
+
 - Suite completa PostgreSQL ejecutada: **1.613 tests correctos**, 223,912 s.
   Incluía 15 casos de navegador. Después se separaron los casos de navegador en
   `e2e/browser_optimistic_cart.py`, siguiendo la estructura de CI existente.
 - Tras los ajustes finales de recuperación: **54 tests específicos correctos**,
-  57,567 s, con **19 pruebas de navegador**, 16 del protocolo, 6 de carreras
+  57,567 s, con **19 pruebas de navegador**, 16 del protocolo antes del test adicional del flag, 6 de carreras
   PostgreSQL y 13 de edición existente. Se comprueban también respuesta perdida
   seguida de cambios externos, base obsoleta al recargar, orden de añadido →
   cantidad → eliminación con almacenamiento desordenado e input inválido.
 - La suite general actual no descubre automáticamente `e2e/browser_*.py`;
   ejecutarlos explícitamente como en los comandos anteriores. El job existente
   de CI que instala Chromium incluye ahora `e2e.browser_optimistic_cart`.
+- Compatibilidad adicional: 49 tests de protocolo, checkout y layout correctos,
+  incluidos el flag de frontend y la permanencia de las protecciones al apagarlo.
+- Regresiones de navegador: 24 tests correctos, con los 19 casos nuevos y flujos
+  existentes de tarjeta, efectivo, recuperación de emisión y fallback con ticket
+  largo. Para las pruebas históricas se seleccionó `/usr/bin/chromium` mediante
+  un parche del lanzador en el arnés local, sin cambiar su código de negocio.
 - Suite completa anterior de inventario/ventas/pagos/emisión conservada; no se
   han modificado Billing, Payments, Inventory ni sus migraciones.
 - Ruff, sintaxis JavaScript, `manage.py check`, `makemigrations --check` y
@@ -229,13 +273,14 @@ despliegue real.
 
 ## Archivos, riesgos y siguiente paso
 
+- Configuración: `config/settings/base.py`, flag de frontend con valor por defecto 1.
 - Backend: `apps/sales/cart.py`, `models.py`, `services.py`, `checkout.py`,
   `views.py`, `urls.py`, migración `0007` y tags `templatetags/cart_display.py`.
 - Frontend: `static/js/sales_cart.js`, estilos `static/css/sales_tpv.css`,
   `sale_workspace.html`, `sale_line_form.html` y parciales de producto, línea,
   editor y checkout. `sales_tpv.js` se conserva para las funciones existentes.
-- CI: `.github/workflows/ci.yml` añade el módulo al job de navegador existente;
-  no cambia jobs de despliegue.
+- CI: `.github/workflows/ci.yml` añade el módulo al job de navegador existente
+  y las carreras del carrito al job PostgreSQL de Sales; no cambia despliegues.
 - Pruebas: protocolo y fixtures de checkout en `apps/sales/tests/integration/`,
   `apps/sales/tests_postgres_cart.py`, `e2e/browser_optimistic_cart.py`.
 - Medición: `tests/performance/optimistic_cart_matrix.py`. El generador HTTP
@@ -261,6 +306,8 @@ de los 20 s sigue sin estar identificada; estas mediciones no permiten atribuirl
 a red, cola, locks o renderizado en producción.
 
 
-Commits funcionales: `1002cc0` (protocolo, modelos e interfaz) y `752ad68`
-(recuperación de pendientes, orden estable, validación local e integración CI).
+Commits funcionales: `1002cc0` (protocolo, modelos e interfaz), `752ad68`
+(recuperación de pendientes, orden estable, validación local e integración CI)
+y `bc5c182` (coordinación de cabecera, flag de frontend, accesibilidad y gates
+de regresión actualizados).
 El commit de documentación incorpora diseño, instrucciones y muestras.
