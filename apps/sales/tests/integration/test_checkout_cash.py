@@ -27,6 +27,7 @@ class CheckoutCashTests(TestCase):
 
     def post_data(self, method, **extra):
         return {
+            "cart_version": 0,
             "mode": "single",
             "method": method.pk,
             "payment_idempotency_key": uuid.uuid4(),

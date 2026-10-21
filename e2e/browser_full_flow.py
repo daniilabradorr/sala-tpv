@@ -46,11 +46,12 @@ from apps.sales.models import (
 
 
 @override_settings(
+    TPV_OPTIMISTIC_CART=True,
     STORAGES={
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
-    }
+    },
 )
 class BrowserFullFlowTests(StaticLiveServerTestCase):
     """Drive every commercial command through real pages and CSRF-protected forms."""
@@ -169,6 +170,11 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         ).to_be_visible()
         expect(self.page.get_by_role("button", name="Iniciar venta")).to_have_count(0)
         expect(self.page.locator("#product-grid")).to_be_visible()
+        # Visible HTML can precede DOMContentLoaded/HTMX and cart initialization.
+        self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+        self.page.wait_for_function(
+            "Boolean(window.tpvCart?.protocolReady)", timeout=5000
+        )
         self.assertTrue(
             self.page.evaluate(
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
@@ -179,18 +185,28 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             self._db_value(lambda: Sale.objects.get(pk=sale_id).cash_session_id),
             session_id,
         )
+        self.page.evaluate("""() => {
+            window.__e2eHeaderSettles = 0;
+            document.body.addEventListener('htmx:afterSettle', event => {
+                if (event.detail.target?.id === 'workspace-header')
+                    window.__e2eHeaderSettles++;
+            });
+        }""")
         if customer:
             with self.page.expect_response(lambda r: "/header/" in r.url):
                 self.page.locator("#id_customer").select_option(label=customer)
-            expect(self.page.locator("#workspace-header.htmx-settling")).to_have_count(
-                0
-            )
+            self.page.wait_for_function("window.__e2eHeaderSettles >= 1", timeout=5000)
         if document_type == RequestedDocumentTypeChoices.INVOICE:
             self.page.locator("#workspace-header").evaluate(
                 "el => el.dataset.beforeSave = 'true'"
             )
             with self.page.expect_response(lambda r: "/header/" in r.url):
                 self.page.get_by_role("radio", name="Factura", exact=True).check()
+            self.page.wait_for_function(
+                "count => window.__e2eHeaderSettles >= count",
+                arg=2 if customer else 1,
+                timeout=5000,
+            )
             expect(
                 self.page.locator("#workspace-header[data-before-save]")
             ).to_have_count(0)
@@ -204,24 +220,18 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             has_text=product_name
         )
         expect(cart_line).to_be_visible()
-        quantity_input = cart_line.get_by_label("Cantidad")
-        quantity_input.fill(str(quantity))
-        cart_line.evaluate(
-            "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
+        self.page.wait_for_function(
+            "tpvCart.ops.length===0 && !tpvCart.busy && !tpvCart.error"
         )
-        with self.page.expect_response(
-            lambda response: (
-                response.request.method == "POST" and "/quantity/" in response.url
-            )
-        ) as response_info:
-            quantity_input.press("Enter")
-        self.assertLess(response_info.value.status, 400)
-        updated_line = self.page.locator(
-            "#sale-cart .cart-line:not([data-e2e-before-quantity-swap])"
-        ).filter(has_text=product_name)
-        expect(updated_line).to_be_visible()
-        updated_quantity = updated_line.get_by_label("Cantidad")
-        expect(updated_quantity).to_have_value(
+        quantity_input = cart_line.get_by_label("Cantidad")
+        cart_line.evaluate("element => { element.dataset.e2eStableRow = 'true'; }")
+        quantity_input.fill(str(quantity))
+        quantity_input.press("Enter")
+        self.page.wait_for_function(
+            "tpvCart.ops.length===0 && !tpvCart.busy && !tpvCart.error"
+        )
+        expect(cart_line).to_have_attribute("data-e2e-stable-row", "true")
+        expect(quantity_input).to_have_value(
             re.compile(rf"^{re.escape(str(quantity))}(?:[.,]0+)?$")
         )
 
@@ -324,15 +334,27 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.step = "review and close cash session"
         base = f"/cash-register/stores/{self.store.pk}/sessions/{session_id}"
         self._goto(f"{base}/")
+        # Review refreshes this panel after closing the modal. Wait for each
+        # swap to settle before another tab targets the same outerHTML node.
+        self.page.evaluate("""() => {
+            window.__e2eCashTabSettles = 0;
+            document.body.addEventListener('htmx:afterSettle', event => {
+                if (event.detail.target?.id === 'cash-tab-panel')
+                    window.__e2eCashTabSettles++;
+            });
+        }""")
         self.page.get_by_role("link", name="Arqueo", exact=True).click()
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
         self.page.get_by_role("button", name="Guardar arqueo").click()
         expect(self.page.get_by_role("dialog")).not_to_be_visible()
         expect(self.page.locator("#cash-operation-panel")).to_be_empty()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 1", timeout=5000)
         self.page.get_by_role("tab", name="Resumen").click()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 2", timeout=5000)
         expect(self.page.get_by_text("Efectivo", exact=True)).to_be_visible()
         expect(self.page.get_by_text("Tarjeta", exact=True)).to_be_visible()
         self.page.get_by_role("tab", name="Movimientos").click()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 3", timeout=5000)
         expect(self.page.get_by_text("Cobro de venta en efectivo")).to_be_visible()
         with self.page.expect_response(
             lambda response: (

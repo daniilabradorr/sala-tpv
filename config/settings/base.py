@@ -12,6 +12,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY is required")
 DEBUG = os.getenv("DEBUG", "0") == "1"
+TPV_OPTIMISTIC_CART = os.getenv("TPV_OPTIMISTIC_CART", "1") == "1"
 
 ALLOWED_HOSTS = [
     host.strip()

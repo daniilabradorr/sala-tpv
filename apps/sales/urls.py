@@ -7,6 +7,11 @@ app_name = "sales"
 
 urlpatterns = [
     path(
+        "stores/<int:store_id>/sales/<int:sale_pk>/cart-sync/",
+        views.SaleCartSyncView.as_view(),
+        name="sale_cart_sync",
+    ),
+    path(
         "stores/<int:store_id>/sales/start/",
         views.SaleOpenView.as_view(),
         name="sale_start",
