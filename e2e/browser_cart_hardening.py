@@ -441,7 +441,9 @@ class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
     def test_keyboard_wedge_search_and_enter_preserve_units(self):
         product = self.d.products[0]
         self.page.locator("[data-tpv-search]").fill(product.sku)
-        self.page.locator(".product-card").first.wait_for()
+        self.page.wait_for_function(
+            "document.querySelectorAll('.product-card').length === 1"
+        )
         button = self.page.locator(".product-card").first
         button.focus()
         for _ in range(10):

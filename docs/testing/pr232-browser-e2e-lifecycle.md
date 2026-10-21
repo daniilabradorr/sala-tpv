@@ -133,3 +133,24 @@ python manage.py test \
 # Para la suite completa, usar las mismas etiquetas del job browser-e2e de ci.yml.
 ```
 
+
+## Hallazgo adicional al repetir la suite bajo carga
+
+Las tres pasadas locales simultáneas de 134 tests sobre PostgreSQL 16.15
+terminaron sin deadlocks, sin datos residuales y sin conexiones de prueba.
+Una pasó completamente; dos detectaron otro fallo de preparación en
+`test_keyboard_wedge_search_and_enter_preserve_units` (4 y 9 unidades frente a 10).
+Las CI de push y PR habían pasado los 134 tests completos.
+
+El test escribía el SKU y esperaba una primera tarjeta que ya existía entre las
+20 tarjetas iniciales. La búsqueda tiene un debounce de 175 ms y sustituye
+`#product-grid` mediante HTMX. Si esa respuesta llega durante los diez Enter,
+se elimina la tarjeta enfocada y los Enter restantes se envían a `BODY`.
+Se reprodujo reteniendo la respuesta de búsqueda: 20 tarjetas iniciales, primer
+Enter sobre la tarjeta, respuesta liberada, foco en `BODY`, una unidad tras diez
+Enter. No intervienen flush ni datos de otro test.
+
+La preparación ahora espera que aparezca la única tarjeta del SKU filtrado antes
+de enfocarla. Conserva la misma aserción de diez unidades y no añade sleeps,
+timeouts ni cambios en código de producto. Se repiten el test, la suite completa
+y las dos CI automáticas con esta sincronización.
