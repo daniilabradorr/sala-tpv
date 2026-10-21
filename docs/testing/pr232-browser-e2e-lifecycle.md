@@ -34,6 +34,14 @@ Las conexiones Django son locales al hilo; `connections.close_all()` en el hilo
 principal o del servidor no cierra las de sus workers. Es `close_request()` en
 cada worker quien las cierra.
 
+La primera validación de una unión sin cierre de sockets detectó otro recurso
+relevante: `route.fetch()` usa el agente HTTP keepalive compartido de Playwright.
+En Playwright 1.55, cerrar el BrowserContext dispone sus respuestas, pero no
+destruye ese pool global. Se observó un worker idle y su conexión PostgreSQL
+esperando `ClientRead` después del test de cabecera. Por eso la corrección final
+cierra también los sockets aceptados al apagar el servidor, antes de unir los
+workers; esperar sólo threads tampoco basta. No se aumenta ningún timeout.
+
 El cierre del modal aborta su XHR y lanza `queue.refresh()`; ni ese abort ni ver
 el formulario del segundo checkout garantiza que el primer handler haya
 terminado. Esto explica que la ejecución por push pase y la de PR falle con el
@@ -54,8 +62,10 @@ La corrección se limita al arnés común de los tests de carrito y su subclase:
 
 1. Los workers HTTP dejan de ser daemon para que `server_close()` los espere.
 2. Después de `tearDown` y de todos los cleanups de unittest (contextos cerrados),
-   se detiene la aceptación de peticiones y se unen los workers **antes** del
-   flush de Django.
+   se detiene la aceptación de peticiones. Se hace `shutdown(SHUT_RDWR)` de los
+   sockets aceptados y se unen los workers **antes** del flush de Django.
+   El shutdown despierta lectores HTTP idle; no interrumpe el código WSGI que ya
+   está trabajando. La unión espera su salida y el cierre de sus conexiones.
 3. El siguiente test crea otro servidor, conservando la gestión de conexiones
    SQLite compartidas y el cleanup de clase de Django.
 4. La limpieza de rutas admite una página ya cerrada; el contexto se cierra de
@@ -68,7 +78,8 @@ un worker, no se adelanta la limpieza de su base.
 ## Regresión determinista
 
 `test_aborted_checkout_worker_finishes_before_database_flush` retiene un checkout
-real mediante un `Event`, cancela la petición desde el navegador y lo libera al
+real mediante un `Event`, abre además una conexión keepalive con
+`context.request.get()`, cancela la petición desde el navegador y lo libera al
 detener el servidor. Antes del flush comprueba que terminó la vista, que salió
 el worker y, en PostgreSQL, que su PID ya no existe en `pg_stat_activity`.
 Los límites de diez segundos son guardas de fallo de la prueba, no esperas para
@@ -96,6 +107,7 @@ Validación local previa al commit (PostgreSQL 16.15):
 - Ruff lint y formato, Django check y comprobación de migraciones: correctos.
 
 Protocolo adicional de validación completa: tres pasadas de los 134 tests E2E,
+en directorios de trabajo y bases PostgreSQL independientes,
 sin `--keepdb`, verificando sesiones y destrucción de la base después de cada
 pasada, más todos los workflows automáticos de la PR tras el push a `develop`.
 Los resultados finales y los enlaces a Actions se incluyen en la entrega.

@@ -3,8 +3,10 @@
 import json
 import os
 import re
+import socket
 import time
 from pathlib import Path
+from threading import Lock
 from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
@@ -23,6 +25,37 @@ class JoinedWSGIServer(ThreadedWSGIServer):
     # server_close() must join request workers, including close_request() which
     # closes their thread-local database connections. Client abort is not a join.
     daemon_threads = False
+
+    def __init__(self, *args, **kwargs):
+        self._requests = set()
+        self._request_lock = Lock()
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        with self._request_lock:
+            self._requests.add(request)
+        super().process_request(request, client_address)
+
+    def close_request(self, request):
+        try:
+            super().close_request(request)
+        finally:
+            with self._request_lock:
+                self._requests.discard(request)
+
+    def server_close(self):
+        # serve_forever() has stopped accepting connections. Wake idle HTTP/1.1
+        # readers as well: route.fetch() uses Playwright's shared keepalive pool,
+        # whose sockets can outlive BrowserContext.close(). Running WSGI handlers
+        # still finish and close their own DB connections before the join returns.
+        with self._request_lock:
+            requests = tuple(self._requests)
+        for request in requests:
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass  # The worker may already have closed this socket.
+        super().server_close()
 
 
 class JoinedLiveServerThread(LiveServerThread):

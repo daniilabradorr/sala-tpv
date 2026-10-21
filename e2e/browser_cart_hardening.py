@@ -35,6 +35,10 @@ class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
 
         self.add()
         self.settled()
+        # Exercise the shared keepalive pool used by route.fetch(), too.
+        response = self.context.request.get(self.url)
+        self.assertEqual(response.status, 200)
+        response.dispose()
         self.enterContext(patch.object(SaleCheckoutView, "get", delayed))
         self.page.locator("[data-checkout-open]").click()
         self.assertTrue(entered.wait(timeout=10))
