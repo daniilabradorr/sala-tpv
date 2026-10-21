@@ -249,38 +249,53 @@ class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
         self.assertEqual(self.sale.lines.count(), 1)
 
     def test_stale_checkout_read_cannot_fill_reopened_modal(self):
+        from threading import Event
+        from unittest.mock import patch
+        from apps.sales.views import SaleCheckoutView
+
         self.add()
         self.settled()
-        held = []
+        entered, release, finished = Event(), Event(), Event()
+        original = SaleCheckoutView.get
 
-        def hold(route):
-            held.append(route)
-
-        self.page.route("**/checkout/", hold)
-        self.page.locator("[data-checkout-open]").click()
-        deadline = time.monotonic() + 10
-        while not held and time.monotonic() < deadline:
-            self.page.wait_for_timeout(30)
-        self.assertTrue(held)
-        self.page.keyboard.press("Escape")
-        self.page.unroute("**/checkout/")
-        self.page.locator("[data-checkout-open]").click()
-        self.page.locator("#checkout-panel [name=cart_version]").wait_for(
-            state="attached"
-        )
-        for route in held:
-            try:
-                route.fulfill(
-                    status=200,
-                    content_type="text/html",
-                    body='<p id="obsolete-response">Obsoleto</p>',
+        def delayed(view, request, *args, **kwargs):
+            first = not entered.is_set()
+            if first:
+                entered.set()
+                release.wait(timeout=10)
+            response = original(view, request, *args, **kwargs)
+            if first:
+                response.content = (
+                    b'<p id="obsolete-response">Obsoleto</p>' + response.content
                 )
-            except Exception:
-                pass  # Safe GET was locally aborted on close.
-        self.assertEqual(self.page.locator("#obsolete-response").count(), 0)
-        self.assertTrue(
-            self.page.locator("#checkout-dialog").evaluate("element=>element.open")
-        )
+                finished.set()
+            return response
+
+        with patch.object(SaleCheckoutView, "get", delayed):
+            try:
+                self.page.locator("[data-checkout-open]").click()
+                deadline = time.monotonic() + 10
+                while not entered.is_set() and time.monotonic() < deadline:
+                    self.page.wait_for_timeout(20)
+                self.assertTrue(entered.is_set())
+                self.page.keyboard.press("Escape")
+                self.page.wait_for_function("!tpvCart.frozen")
+                release.set()
+                self.page.locator("[data-checkout-open]").click()
+                self.page.locator("#checkout-panel [name=cart_version]").wait_for(
+                    state="attached"
+                )
+                while not finished.is_set() and time.monotonic() < deadline:
+                    self.page.wait_for_timeout(20)
+                self.assertTrue(finished.is_set())
+                self.assertEqual(self.page.locator("#obsolete-response").count(), 0)
+                self.assertTrue(
+                    self.page.locator("#checkout-dialog").evaluate(
+                        "element=>element.open"
+                    )
+                )
+            finally:
+                release.set()
 
     def test_abandon_warning_only_while_changes_are_unverified(self):
         self.page.evaluate("tpvCart.busy=true")
