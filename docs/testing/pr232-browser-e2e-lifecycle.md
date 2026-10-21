@@ -154,3 +154,23 @@ La preparación ahora espera que aparezca la única tarjeta del SKU filtrado ant
 de enfocarla. Conserva la misma aserción de diez unidades y no añade sleeps,
 timeouts ni cambios en código de producto. Se repiten el test, la suite completa
 y las dos CI automáticas con esta sincronización.
+
+## Sincronización del recorrido ERP al revisar caja
+
+La CI por push `39668616218` y una pasada local reprodujeron un fallo distinto
+al leer «Cobro de venta en efectivo», con `htmx:swapError` y
+`Cannot read properties of null (reading 'querySelector')`.
+El POST de arqueo devuelve 204 y dispara cierre de modal y `nx:refresh-region`.
+Cerrar el modal no garantiza que haya terminado ese GET automático del panel.
+El test solicitaba después Resumen y Movimientos, mientras las aserciones de
+Resumen podían satisfacerse con el contenido anterior ya visible.
+Varias respuestas `outerHTML` apuntaban al mismo nodo retirado.
+
+Se reprodujo reteniendo la recarga automática hasta recibir la petición de
+Resumen y liberando ambas respuestas sobre el mismo panel: el test falla por
+los errores JavaScript, sin alterar operaciones económicas.
+`browser_full_flow` ahora espera `htmx:afterSettle` del panel después de la
+recarga automática y de cada cambio de pestaña. Conserva todos los pasos y las
+aserciones de importes, stock, pagos, documentos, PIN y cierre. Las nuevas
+condiciones usan el límite existente de cinco segundos; no se introducen
+sleeps, reintentos ni cambios en los servicios o en el comportamiento de caja.

@@ -319,15 +319,27 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
         self.step = "review and close cash session"
         base = f"/cash-register/stores/{self.store.pk}/sessions/{session_id}"
         self._goto(f"{base}/")
+        # Review refreshes this panel after closing the modal. Wait for each
+        # swap to settle before another tab targets the same outerHTML node.
+        self.page.evaluate("""() => {
+            window.__e2eCashTabSettles = 0;
+            document.body.addEventListener('htmx:afterSettle', event => {
+                if (event.detail.target?.id === 'cash-tab-panel')
+                    window.__e2eCashTabSettles++;
+            });
+        }""")
         self.page.get_by_role("link", name="Arqueo", exact=True).click()
         self.page.get_by_label("Efectivo contado").fill(str(expected_cash))
         self.page.get_by_role("button", name="Guardar arqueo").click()
         expect(self.page.get_by_role("dialog")).not_to_be_visible()
         expect(self.page.locator("#cash-operation-panel")).to_be_empty()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 1", timeout=5000)
         self.page.get_by_role("tab", name="Resumen").click()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 2", timeout=5000)
         expect(self.page.get_by_text("Efectivo", exact=True)).to_be_visible()
         expect(self.page.get_by_text("Tarjeta", exact=True)).to_be_visible()
         self.page.get_by_role("tab", name="Movimientos").click()
+        self.page.wait_for_function("window.__e2eCashTabSettles >= 3", timeout=5000)
         expect(self.page.get_by_text("Cobro de venta en efectivo")).to_be_visible()
         with self.page.expect_response(
             lambda response: (
