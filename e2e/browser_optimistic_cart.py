@@ -9,12 +9,24 @@ from unittest.mock import patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import Client, LiveServerTestCase, override_settings
+from django.test.testcases import LiveServerThread
+from django.core.servers.basehttp import ThreadedWSGIServer
 from django.urls import reverse
 from playwright.sync_api import expect, sync_playwright
 
 from apps.sales.models import CartOperation
 from tests.performance.dataset import Dataset
 from e2e.browser_evidence import BrowserEvidence
+
+
+class JoinedWSGIServer(ThreadedWSGIServer):
+    # server_close() must join request workers, including close_request() which
+    # closes their thread-local database connections. Client abort is not a join.
+    daemon_threads = False
+
+
+class JoinedLiveServerThread(LiveServerThread):
+    server_class = JoinedWSGIServer
 
 
 @override_settings(
@@ -26,6 +38,27 @@ from e2e.browser_evidence import BrowserEvidence
     },
 )
 class OptimisticCartBrowserTests(StaticLiveServerTestCase):
+    server_thread_class = JoinedLiveServerThread
+
+    def _post_teardown(self):
+        # unittest has already run tearDown and cleanups (closing all contexts).
+        # Stop accepting requests and join server workers BEFORE Django flushes.
+        self.server_thread.terminate()
+        super()._post_teardown()
+
+    def _ensure_live_server(self):
+        cls = type(self)
+        if not cls.server_thread.is_alive():
+            # Keep Django's class-scoped connection-sharing and cleanup ownership.
+            cls.server_thread = cls._create_server_thread(
+                cls.server_thread.connections_override
+            )
+            cls.server_thread.daemon = True
+            cls.server_thread.start()
+            cls.server_thread.is_ready.wait()
+            if cls.server_thread.error:
+                raise cls.server_thread.error
+
     @classmethod
     def setUpClass(cls):
         cls.async_guard = patch.dict(os.environ, {"DJANGO_ALLOW_ASYNC_UNSAFE": "true"})
@@ -50,6 +83,7 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
         super().tearDownClass()
 
     def setUp(self):
+        self._ensure_live_server()
         self.d = Dataset(20, label="browser-cart")
         self.sale, _ = self.d.sale(0)
         client = Client()
@@ -89,7 +123,8 @@ class OptimisticCartBrowserTests(StaticLiveServerTestCase):
             for test, _ in result.errors + result.failures
         ):
             self.evidence.capture()
-        self.page.unroute_all(behavior="ignoreErrors")
+        if not self.page.is_closed():
+            self.page.unroute_all(behavior="ignoreErrors")
         self.context.close()
         self.assertEqual(self.errors, [])
 

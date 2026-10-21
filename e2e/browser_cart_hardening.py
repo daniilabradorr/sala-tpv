@@ -7,6 +7,70 @@ from apps.sales.models import CartOperation
 
 
 class HardenedCartBrowserTests(base.OptimisticCartBrowserTests):
+    def test_aborted_checkout_worker_finishes_before_database_flush(self):
+        from threading import Event, current_thread
+        from unittest.mock import patch
+
+        from django.db import connection
+
+        from apps.sales.views import SaleCheckoutView
+
+        entered, release, finished = Event(), Event(), Event()
+        worker = {}
+        original_get = SaleCheckoutView.get
+
+        def delayed(view, request, *args, **kwargs):
+            worker["thread"] = current_thread()
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_backend_pid()")
+                    worker["pid"] = cursor.fetchone()[0]
+            entered.set()
+            try:
+                if not release.wait(timeout=10):
+                    raise AssertionError("Server shutdown did not release checkout")
+                return original_get(view, request, *args, **kwargs)
+            finally:
+                finished.set()
+
+        self.add()
+        self.settled()
+        self.enterContext(patch.object(SaleCheckoutView, "get", delayed))
+        self.page.locator("[data-checkout-open]").click()
+        self.assertTrue(entered.wait(timeout=10))
+        self.page.keyboard.press("Escape")
+        self.context.close()
+        self.assertFalse(finished.is_set())
+
+        server = self.server_thread.httpd
+        original_shutdown = server.shutdown
+
+        def shutdown():
+            original_shutdown()
+            release.set()
+
+        server.shutdown = shutdown
+        original_flush = self._fixture_teardown
+
+        def checked_flush():
+            try:
+                self.assertTrue(finished.is_set(), "flush raced an aborted request")
+                self.assertFalse(worker["thread"].is_alive())
+                if "pid" in worker:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT count(*) FROM pg_stat_activity WHERE pid = %s",
+                            [worker["pid"]],
+                        )
+                        self.assertEqual(cursor.fetchone()[0], 0)
+            finally:
+                # Release the held worker even when the assertion fails.
+                release.set()
+                worker["thread"].join(timeout=10)
+                original_flush()
+
+        self._fixture_teardown = checked_flush
+
     def test_fifty_clicks_one_atomic_request_preserves_snapshots(self):
         requests = []
         self.page.on(
