@@ -174,3 +174,20 @@ recarga automática y de cada cambio de pestaña. Conserva todos los pasos y las
 aserciones de importes, stock, pagos, documentos, PIN y cierre. Las nuevas
 condiciones usan el límite existente de cinco segundos; no se introducen
 sleeps, reintentos ni cambios en los servicios o en el comportamiento de caja.
+
+La siguiente repetición de CI (`39670804960`) reveló otra precondición del mismo
+recorrido ERP: el HTML de la nueva venta ya era visible cuando el test cambiaba
+el cliente, pero no había esperado a DOMContentLoaded (inicialización HTMX) ni
+al protocolo inicial del carrito. Se agotaba la espera de una respuesta de
+cabecera porque el cambio podía ocurrir antes de instalarse el listener.
+El recorrido ahora espera ambos estados, como el arnés de carrito ya hacía,
+antes de interactuar con la venta. Mantiene la espera y aserciones de la
+respuesta real de cabecera; no dispara eventos artificiales ni reintenta el
+cambio. Las condiciones de preparación usan cinco segundos, sin aumentar
+ningún timeout existente.
+
+Después de cada guardado de cabecera también se espera su `htmx:afterSettle`.
+Comprobar simplemente que no existe `.htmx-settling` podía satisfacerse antes
+de empezar el swap. La nueva condición espera la sustitución e inicialización
+reales antes del siguiente cambio, conservando la comprobación de respuesta y
+el marcador de sustitución de la cabecera de factura.
