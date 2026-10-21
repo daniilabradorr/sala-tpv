@@ -1,7 +1,7 @@
-{% if request.htmx %}{% include "sales/partials/_category_chips.html" with category_chips_oob=True %}{% endif %}
+{% load l10n %}{% if request.htmx %}{% include "sales/partials/_category_chips.html" with category_chips_oob=True %}{% endif %}
 <div id="product-grid" class="product-grid" aria-live="polite" aria-busy="false">
   {% for product in products %}
-    <form method="post" action="{% url 'sales:sale_line_add' store.pk sale.pk %}"
+    <form data-name="{{ product.name }}" data-price="{{ product.display_price|unlocalize }}" method="post" action="{% url 'sales:sale_line_add' store.pk sale.pk %}"
           hx-post="{% url 'sales:sale_line_add' store.pk sale.pk %}" hx-target="#sale-cart-content"
           hx-swap="outerHTML" hx-sync="#sale-cart:queue all" hx-disabled-elt="find button">
       {% csrf_token %}<input type="hidden" name="product" value="{{ product.pk }}"><input type="hidden" name="quantity" value="1.000">

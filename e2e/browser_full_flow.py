@@ -46,11 +46,12 @@ from apps.sales.models import (
 
 
 @override_settings(
+    TPV_OPTIMISTIC_CART=True,
     STORAGES={
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
-    }
+    },
 )
 class BrowserFullFlowTests(StaticLiveServerTestCase):
     """Drive every commercial command through real pages and CSRF-protected forms."""
@@ -204,24 +205,18 @@ class BrowserFullFlowTests(StaticLiveServerTestCase):
             has_text=product_name
         )
         expect(cart_line).to_be_visible()
-        quantity_input = cart_line.get_by_label("Cantidad")
-        quantity_input.fill(str(quantity))
-        cart_line.evaluate(
-            "element => { element.dataset.e2eBeforeQuantitySwap = 'true'; }"
+        self.page.wait_for_function(
+            "tpvCart.ops.length===0 && !tpvCart.busy && !tpvCart.error"
         )
-        with self.page.expect_response(
-            lambda response: (
-                response.request.method == "POST" and "/quantity/" in response.url
-            )
-        ) as response_info:
-            quantity_input.press("Enter")
-        self.assertLess(response_info.value.status, 400)
-        updated_line = self.page.locator(
-            "#sale-cart .cart-line:not([data-e2e-before-quantity-swap])"
-        ).filter(has_text=product_name)
-        expect(updated_line).to_be_visible()
-        updated_quantity = updated_line.get_by_label("Cantidad")
-        expect(updated_quantity).to_have_value(
+        quantity_input = cart_line.get_by_label("Cantidad")
+        cart_line.evaluate("element => { element.dataset.e2eStableRow = 'true'; }")
+        quantity_input.fill(str(quantity))
+        quantity_input.press("Enter")
+        self.page.wait_for_function(
+            "tpvCart.ops.length===0 && !tpvCart.busy && !tpvCart.error"
+        )
+        expect(cart_line).to_have_attribute("data-e2e-stable-row", "true")
+        expect(quantity_input).to_have_value(
             re.compile(rf"^{re.escape(str(quantity))}(?:[.,]0+)?$")
         )
 

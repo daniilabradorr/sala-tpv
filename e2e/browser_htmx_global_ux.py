@@ -17,11 +17,12 @@ from apps.onboarding.services import OnboardingService
 
 
 @override_settings(
+    TPV_OPTIMISTIC_CART=False,  # This module verifies the progressive HTMX transport.
     STORAGES={
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
-    }
+    },
 )
 class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
     email = "htmx.e2e@example.com"

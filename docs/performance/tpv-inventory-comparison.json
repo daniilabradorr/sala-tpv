@@ -1,0 +1,550 @@
+{
+  "before_commit": "94a10e3f390596fc9b9f581fbbf44c71df4f9ddb",
+  "after_commit": "dfabec11ec88697fe0a71ca4bb7008a0aa4530e4",
+  "environment": {
+    "database_vendor": "postgresql",
+    "iterations": 10,
+    "warmups": 1,
+    "chromium": "151.0.7922.173",
+    "transport": "HTTP loopback; Gunicorn sync 1 worker",
+    "external_resources": "blocked; same-host baseline"
+  },
+  "scenarios": {
+    "checkout_post_1": {
+      "before": {
+        "http_ms": {
+          "min": 260.1,
+          "p50": 292.55,
+          "p95": 334.8,
+          "max": 334.8
+        },
+        "django_ms": {
+          "min": 249.191,
+          "p50": 282.935,
+          "p95": 323.914,
+          "max": 323.914
+        },
+        "sql_execute_ms": {
+          "min": 107.205,
+          "p50": 137.964,
+          "p95": 155.665,
+          "max": 155.665
+        },
+        "sql_count": [
+          334
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 14.825,
+              "p50": 17.907,
+              "p95": 28.493,
+              "max": 28.493
+            },
+            "queries": [
+              31
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 56.154,
+              "p50": 71.028,
+              "p95": 89.596,
+              "max": 89.596
+            },
+            "queries": [
+              99
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 47.143,
+              "p50": 54.501,
+              "p95": 76.019,
+              "max": 76.019
+            },
+            "queries": [
+              85
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 60.229,
+              "p50": 70.267,
+              "p95": 74.907,
+              "max": 74.907
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.782,
+              "p50": 5.242,
+              "p95": 6.139,
+              "max": 6.139
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "after": {
+        "http_ms": {
+          "min": 250.3,
+          "p50": 267.2,
+          "p95": 323.9,
+          "max": 323.9
+        },
+        "django_ms": {
+          "min": 240.994,
+          "p50": 257.26,
+          "p95": 313.293,
+          "max": 313.293
+        },
+        "sql_execute_ms": {
+          "min": 112.87,
+          "p50": 127.452,
+          "p95": 180.237,
+          "max": 180.237
+        },
+        "sql_count": [
+          325
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 11.697,
+              "p50": 15.174,
+              "p95": 18.73,
+              "max": 18.73
+            },
+            "queries": [
+              22
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 55.863,
+              "p50": 63.401,
+              "p95": 79.583,
+              "max": 79.583
+            },
+            "queries": [
+              90
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 45.848,
+              "p50": 51.877,
+              "p95": 60.723,
+              "max": 60.723
+            },
+            "queries": [
+              85
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 61.301,
+              "p50": 69.883,
+              "p95": 104.223,
+              "max": 104.223
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.398,
+              "p50": 4.886,
+              "p95": 6.659,
+              "max": 6.659
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "http_p50_change_percent": -8.67
+    },
+    "checkout_post_20": {
+      "before": {
+        "http_ms": {
+          "min": 626.3,
+          "p50": 647.55,
+          "p95": 737.3,
+          "max": 737.3
+        },
+        "django_ms": {
+          "min": 615.05,
+          "p50": 637.404,
+          "p95": 724.804,
+          "max": 724.804
+        },
+        "sql_execute_ms": {
+          "min": 299.779,
+          "p50": 314.717,
+          "p95": 371.286,
+          "max": 371.286
+        },
+        "sql_count": [
+          1078
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 282.533,
+              "p50": 310.945,
+              "p95": 362.689,
+              "max": 362.689
+            },
+            "queries": [
+              620
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 344.778,
+              "p50": 377.95,
+              "p95": 441.752,
+              "max": 441.752
+            },
+            "queries": [
+              707
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 119.028,
+              "p50": 128.177,
+              "p95": 145.964,
+              "max": 145.964
+            },
+            "queries": [
+              221
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 55.433,
+              "p50": 59.931,
+              "p95": 75.091,
+              "max": 75.091
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.557,
+              "p50": 5.394,
+              "p95": 8.983,
+              "max": 8.983
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "after": {
+        "http_ms": {
+          "min": 576.7,
+          "p50": 636.9,
+          "p95": 760.9,
+          "max": 760.9
+        },
+        "django_ms": {
+          "min": 560.282,
+          "p50": 625.906,
+          "p95": 747.18,
+          "max": 747.18
+        },
+        "sql_execute_ms": {
+          "min": 271.033,
+          "p50": 305.959,
+          "p95": 376.303,
+          "max": 376.303
+        },
+        "sql_count": [
+          879
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 251.714,
+              "p50": 283.661,
+              "p95": 330.347,
+              "max": 330.347
+            },
+            "queries": [
+              440
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 295.033,
+              "p50": 340.155,
+              "p95": 393.915,
+              "max": 393.915
+            },
+            "queries": [
+              508
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 115.805,
+              "p50": 136.593,
+              "p95": 183.886,
+              "max": 183.886
+            },
+            "queries": [
+              221
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 55.972,
+              "p50": 62.579,
+              "p95": 101.546,
+              "max": 101.546
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.939,
+              "p50": 5.417,
+              "p95": 8.239,
+              "max": 8.239
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "http_p50_change_percent": -1.64
+    },
+    "checkout_post_50": {
+      "before": {
+        "http_ms": {
+          "min": 1197,
+          "p50": 1265.6,
+          "p95": 1925.2,
+          "max": 1925.2
+        },
+        "django_ms": {
+          "min": 1187.679,
+          "p50": 1247.325,
+          "p95": 1908.662,
+          "max": 1908.662
+        },
+        "sql_execute_ms": {
+          "min": 573.82,
+          "p50": 605.346,
+          "p95": 971.028,
+          "max": 971.028
+        },
+        "sql_count": [
+          2248
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 726.329,
+              "p50": 770.343,
+              "p95": 1312.933,
+              "max": 1312.933
+            },
+            "queries": [
+              1550
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 818.442,
+              "p50": 871.586,
+              "p95": 1478.04,
+              "max": 1478.04
+            },
+            "queries": [
+              1667
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 229.525,
+              "p50": 244.568,
+              "p95": 634.671,
+              "max": 634.671
+            },
+            "queries": [
+              431
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 52.183,
+              "p50": 59.578,
+              "p95": 101.442,
+              "max": 101.442
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.588,
+              "p50": 4.946,
+              "p95": 20.407,
+              "max": 20.407
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "after": {
+        "http_ms": {
+          "min": 1081.8,
+          "p50": 1175.0,
+          "p95": 1480.6,
+          "max": 1480.6
+        },
+        "django_ms": {
+          "min": 1071.448,
+          "p50": 1164.986,
+          "p95": 1464.327,
+          "max": 1464.327
+        },
+        "sql_execute_ms": {
+          "min": 529.776,
+          "p50": 570.577,
+          "p95": 739.189,
+          "max": 739.189
+        },
+        "sql_count": [
+          1749
+        ],
+        "stages": {
+          "inventory": {
+            "ms": {
+              "min": 624.968,
+              "p50": 676.031,
+              "p95": 889.815,
+              "max": 889.815
+            },
+            "queries": [
+              1100
+            ]
+          },
+          "complete_sale": {
+            "ms": {
+              "min": 678.557,
+              "p50": 738.58,
+              "p95": 949.653,
+              "max": 949.653
+            },
+            "queries": [
+              1168
+            ]
+          },
+          "billing": {
+            "ms": {
+              "min": 250.243,
+              "p50": 271.4,
+              "p95": 342.87,
+              "max": 342.87
+            },
+            "queries": [
+              431
+            ]
+          },
+          "payment": {
+            "ms": {
+              "min": 58.89,
+              "p50": 70.261,
+              "p95": 77.765,
+              "max": 77.765
+            },
+            "queries": [
+              113
+            ]
+          },
+          "html_render": {
+            "ms": {
+              "min": 4.396,
+              "p50": 4.999,
+              "p95": 8.6,
+              "max": 8.6
+            },
+            "queries": [
+              2
+            ]
+          }
+        }
+      },
+      "http_p50_change_percent": -7.16
+    }
+  },
+  "raw_sha256": {
+    "work/tpv-inventory/before/browser.json": "985fc75cc3e20f75c479a550025367ea2536807ad4a33ff50da7ff78696d3e15",
+    "work/tpv-inventory/after/browser.json": "b11486ca994558d3d050277803a9aef6724ac4f9fc580f4f81247e30b12c75ca",
+    "work/tpv-inventory/before-recheck/browser.json": "7eb61b7b7b96973a55496ca689a370a2f5f821dff5f35b878ee375d8db252bb5"
+  },
+  "baseline_recheck_commit": "94a10e3f390596fc9b9f581fbbf44c71df4f9ddb",
+  "baseline_recheck": {
+    "1": {
+      "http_ms": {
+        "min": 251.5,
+        "p50": 286.55,
+        "p95": 392.4,
+        "max": 392.4
+      },
+      "inventory_p50_ms": 17.019,
+      "inventory_max_ms": 27.742,
+      "sql_count": [
+        334
+      ]
+    },
+    "20": {
+      "http_ms": {
+        "min": 676.4,
+        "p50": 719.55,
+        "p95": 845.9,
+        "max": 845.9
+      },
+      "inventory_p50_ms": 345.702,
+      "inventory_max_ms": 419.644,
+      "sql_count": [
+        1078
+      ]
+    },
+    "50": {
+      "http_ms": {
+        "min": 1263.4,
+        "p50": 1386.1,
+        "p95": 2043.1,
+        "max": 2043.1
+      },
+      "inventory_p50_ms": 846.521,
+      "inventory_max_ms": 1142.188,
+      "sql_count": [
+        2248
+      ]
+    }
+  }
+}

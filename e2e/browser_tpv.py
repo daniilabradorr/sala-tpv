@@ -1,4 +1,4 @@
-"""Real Chromium coverage for the FE-10 TPV catalogue and server cart."""
+"""Real Chromium coverage for the FE-10 catalogue and supported server-cart fallback."""
 
 import re
 from decimal import Decimal
@@ -20,11 +20,12 @@ from apps.sales.tests.factories import (
 
 
 @override_settings(
+    TPV_OPTIMISTIC_CART=False,
     STORAGES={
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
         }
-    }
+    },
 )
 class BrowserTPVTests(StaticLiveServerTestCase):
     email = "tpv.e2e@example.com"

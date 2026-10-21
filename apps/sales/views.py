@@ -12,6 +12,7 @@ Arquitectura:
 - Las views no crean movimientos de inventario.
 """
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
@@ -515,6 +516,7 @@ class SaleDetailView(
                 except ProductTaxResolutionError:
                     product.display_price = None
             context = {
+                "optimistic_cart_enabled": settings.TPV_OPTIMISTIC_CART,
                 "store": self.store,
                 "sale": sale,
                 "products": products,
@@ -752,9 +754,10 @@ class SaleHeaderUpdateView(
         form = SaleHeaderUpdateForm(
             request.POST, business=business, store=store, sale=sale
         )
+        changed_sale = None
         if form.is_valid():
             try:
-                update_sale_header(
+                changed_sale = update_sale_header(
                     business=business,
                     sale=sale,
                     customer=form.cleaned_data["customer"],
@@ -791,6 +794,11 @@ class SaleHeaderUpdateView(
                         }
                     },
                 )
+            if changed_sale is not None:
+                response["X-Sales-Cart-Previous-Version"] = str(
+                    changed_sale._cart_previous_version
+                )
+                response["X-Sales-Cart-Version"] = str(changed_sale.cart_version)
             return response
 
         if form.errors:
@@ -859,6 +867,7 @@ class SaleQuickCustomerCreateView(
                     return redirect(
                         "sales:sale_detail", store_id=store.pk, sale_pk=sale.pk
                     )
+                changed_sale = sale
                 sale = self.get_sale()
                 response = render(
                     request,
@@ -877,6 +886,10 @@ class SaleQuickCustomerCreateView(
                         ),
                     },
                 )
+                response["X-Sales-Cart-Previous-Version"] = str(
+                    changed_sale._cart_previous_version
+                )
+                response["X-Sales-Cart-Version"] = str(changed_sale.cart_version)
                 response["HX-Retarget"] = "#workspace-header"
                 response["HX-Reswap"] = "outerHTML"
                 return add_hx_trigger(
@@ -1136,6 +1149,7 @@ class SaleLineUpdateView(
                 sale=sale,
                 line=line,
                 quantity=form.cleaned_data["quantity"],
+                expected_version=request.POST.get("cart_version"),
                 unit_base_price=(
                     form.cleaned_data.get("unit_base_price")
                     if form.mode != "discount"
@@ -1497,6 +1511,19 @@ class SaleCheckoutView(
     def post(self, request, store_id, sale_pk):
         business, store = self.get_business_and_store()
         sale = self.get_sale()
+        try:
+            expected_version = int(request.POST["cart_version"])
+        except (KeyError, TypeError, ValueError):
+            response = self._render(
+                request,
+                business,
+                store,
+                sale,
+                error=CheckoutConflict("Actualiza el checkout antes de confirmar."),
+            )
+            response.status_code = 409
+            response["X-Netxodo-Allow-Error-Swap"] = "true"
+            return response
         forms_bundle = self._forms(request, business, sale)
         options, form, formset, _method_count = forms_bundle
         mode = request.POST.get("mode", "single")
@@ -1599,6 +1626,7 @@ class SaleCheckoutView(
                 intents=intents,
                 series_id=getattr(form.cleaned_data.get("series"), "pk", None),
                 billing_key=form.cleaned_data["billing_idempotency_key"],
+                expected_version=expected_version,
                 allow_split=bool(pos_settings and pos_settings.allow_split_payments),
             )
         except (ValidationError, ValueError) as error:
@@ -2501,3 +2529,90 @@ class SaleReturnCancelView(
             store_id=store.pk,
             return_pk=return_doc.pk,
         )
+
+
+class SaleCartSyncView(
+    SaleObjectMixin, CanSellInStoreMixin, BusinessRequiredMixin, View
+):
+    """JSON protocol for optimistic edits; HTML routes remain progressive fallbacks."""
+
+    def get(self, request, store_id, sale_pk):
+        from apps.sales.cart import snapshot
+        from django.http import JsonResponse
+
+        business, store = self.get_business_and_store()
+        with transaction.atomic():
+            sale = get_object_or_404(
+                Sale.objects.select_for_update(of=("self",)),
+                pk=sale_pk,
+                business=business,
+                store=store,
+            )
+            from uuid import UUID
+            from apps.sales.models import CartOperation
+
+            pending = []
+            for raw in request.GET.get("pending", "").split(",")[:50]:
+                try:
+                    pending.append(UUID(raw))
+                except ValueError:
+                    continue
+            receipts = (
+                [
+                    {"key": str(op.key), "line": op.line_id_result}
+                    for op in CartOperation.objects.filter(
+                        sale=sale, business=business, key__in=pending
+                    )
+                ]
+                if pending
+                else []
+            )
+            response = JsonResponse(
+                {
+                    "cart": snapshot(sale),
+                    "receipts": receipts,
+                    "protocol": 2,
+                    "user_id": request.user.pk,
+                }
+            )
+        response["X-Sales-Cart-Protocol"] = "2"
+        response["Cache-Control"] = "no-store"
+        return response
+
+    def post(self, request, store_id, sale_pk):
+        import json
+        from django.http import JsonResponse
+        from apps.sales.cart import CartConflict, mutate, mutate_batch
+
+        business, store = self.get_business_and_store()
+        get_object_or_404(Sale, pk=sale_pk, business=business, store=store)
+        expected_user = request.headers.get("X-Sales-Cart-User")
+        if expected_user is not None and expected_user != str(request.user.pk):
+            raise PermissionDenied(
+                "La sesión ha cambiado. Recarga antes de editar la venta."
+            )
+        try:
+            data = json.loads(request.body)
+            if not isinstance(data, dict):
+                raise ValueError
+            handler = mutate_batch if "operations" in data else mutate
+            result = handler(
+                business=business,
+                store=store,
+                sale_id=sale_pk,
+                user=request.user,
+                data=data,
+            )
+            response = JsonResponse(result)
+        except CartConflict as error:
+            response = JsonResponse(
+                {"error": error.messages[0], "code": error.conflict_code}, status=409
+            )
+        except (ValidationError, ValueError, TypeError) as error:
+            message = "Operación no válida."
+            if isinstance(error, ValidationError):
+                message = " ".join(error.messages)
+            response = JsonResponse({"error": message}, status=422)
+        response["X-Sales-Cart-Protocol"] = "2"
+        response["Cache-Control"] = "no-store"
+        return response

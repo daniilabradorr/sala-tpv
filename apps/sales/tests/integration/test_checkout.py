@@ -593,6 +593,7 @@ class CheckoutIntegrationTests(TestCase):
                 "method": self.cash.pk,
                 "cash_received": "20.00",
                 "series": self.series().pk,
+                "cart_version": 0,
                 "payment_idempotency_key": key,
                 "billing_idempotency_key": billing_key,
             },
@@ -608,6 +609,7 @@ class CheckoutIntegrationTests(TestCase):
                 "method": self.card.pk,
                 "cash_received": "100.00",
                 "series": self.series().pk,
+                "cart_version": 0,
                 "payment_idempotency_key": uuid.uuid4(),
                 "billing_idempotency_key": uuid.uuid4(),
             },
@@ -631,6 +633,7 @@ class CheckoutIntegrationTests(TestCase):
             {
                 "mode": "split",
                 "series": series.pk,
+                "cart_version": 0,
                 "payment_idempotency_key": uuid.uuid4(),
                 "billing_idempotency_key": uuid.uuid4(),
                 "payments-TOTAL_FORMS": "2",
@@ -719,6 +722,7 @@ class CheckoutIntegrationTests(TestCase):
             {
                 "mode": "split",
                 "series": self.series().pk,
+                "cart_version": 0,
                 "payment_idempotency_key": uuid.uuid4(),
                 "billing_idempotency_key": uuid.uuid4(),
                 "payments-TOTAL_FORMS": "4",
@@ -769,6 +773,7 @@ class CheckoutIntegrationTests(TestCase):
             "mode": "single",
             "method": self.card.pk,
             "series": series.pk,
+            "cart_version": 0,
             "payment_idempotency_key": uuid.uuid4(),
             "billing_idempotency_key": uuid.uuid4(),
         }
@@ -799,6 +804,7 @@ class CheckoutIntegrationTests(TestCase):
                 "method": self.cash.pk,
                 "cash_received": "not-a-number",
                 "series": series.pk,
+                "cart_version": 0,
                 "payment_idempotency_key": payment_key,
                 "billing_idempotency_key": billing_key,
             },

@@ -1,0 +1,509 @@
+{
+  "code_commit": "752ad68",
+  "environment": "local ephemeral PostgreSQL16, Django5.2.12, Chromium151; same current backend and data for both frontends",
+  "artificial_delay_ms_per_post": 400,
+  "measurement": "action to two animation frames after first cart DOM mutation; upper bound, not exact paint",
+  "baseline": "current HTML+sales_tpv.js, sales_cart.js disabled; not previous backend commit",
+  "summary": [
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 491.55,
+        "p95_nearest_rank": 521.5
+      },
+      "http_ms": {
+        "p50": 469.8,
+        "p95_nearest_rank": 493.1
+      }
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 13.5,
+        "p95_nearest_rank": 20.3
+      },
+      "http_ms": {
+        "p50": 463.95,
+        "p95_nearest_rank": 470.2
+      }
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 506.1,
+        "p95_nearest_rank": 514.4
+      },
+      "http_ms": {
+        "p50": 473.55,
+        "p95_nearest_rank": 477.1
+      }
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 16.5,
+        "p95_nearest_rank": 22.1
+      },
+      "http_ms": {
+        "p50": 462.6,
+        "p95_nearest_rank": 476.5
+      }
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 552.2,
+        "p95_nearest_rank": 586.4
+      },
+      "http_ms": {
+        "p50": 495.0,
+        "p95_nearest_rank": 520.8
+      }
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "n": 10,
+      "frame_bound_ms": {
+        "p50": 23.15,
+        "p95_nearest_rank": 31.2
+      },
+      "http_ms": {
+        "p50": 463.5,
+        "p95_nearest_rank": 484.4
+      }
+    }
+  ],
+  "samples": [
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 0,
+      "frame_bound_ms": 496.8999999985099,
+      "http_ms": 475
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 1,
+      "frame_bound_ms": 492.7000000011176,
+      "http_ms": 471
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 2,
+      "frame_bound_ms": 490.40000000037253,
+      "http_ms": 468.59999999962747
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 3,
+      "frame_bound_ms": 493.59999999962747,
+      "http_ms": 471.30000000074506
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 4,
+      "frame_bound_ms": 468.7000000011176,
+      "http_ms": 452.69999999925494
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 5,
+      "frame_bound_ms": 487.19999999925494,
+      "http_ms": 457.19999999925494
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 6,
+      "frame_bound_ms": 521.5,
+      "http_ms": 493.09999999962747
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 7,
+      "frame_bound_ms": 485.40000000037253,
+      "http_ms": 463
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 8,
+      "frame_bound_ms": 484.2000000011176,
+      "http_ms": 457.80000000074506
+    },
+    {
+      "lines": 1,
+      "mode": "htmx",
+      "sample": 9,
+      "frame_bound_ms": 503.09999999962747,
+      "http_ms": 473.80000000074506
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 0,
+      "frame_bound_ms": 12.699999999254942,
+      "http_ms": 454.7000000011176
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 1,
+      "frame_bound_ms": 11.399999998509884,
+      "http_ms": 464.5
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 2,
+      "frame_bound_ms": 20.300000000745058,
+      "http_ms": 463.40000000037253
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 3,
+      "frame_bound_ms": 16.199999999254942,
+      "http_ms": 457.6000000014901
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 4,
+      "frame_bound_ms": 9.699999999254942,
+      "http_ms": 455.80000000074506
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 5,
+      "frame_bound_ms": 20.300000000745058,
+      "http_ms": 470.19999999925494
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 6,
+      "frame_bound_ms": 9.399999998509884,
+      "http_ms": 469.3999999985099
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 7,
+      "frame_bound_ms": 15.400000000372529,
+      "http_ms": 462.2000000011176
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 8,
+      "frame_bound_ms": 8.699999999254942,
+      "http_ms": 465.69999999925494
+    },
+    {
+      "lines": 1,
+      "mode": "optimistic",
+      "sample": 9,
+      "frame_bound_ms": 14.299999998882413,
+      "http_ms": 466
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 0,
+      "frame_bound_ms": 512.8000000007451,
+      "http_ms": 475.30000000074506
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 1,
+      "frame_bound_ms": 502.40000000037253,
+      "http_ms": 472
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 2,
+      "frame_bound_ms": 509.5,
+      "http_ms": 474.19999999925494
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 3,
+      "frame_bound_ms": 505,
+      "http_ms": 473.59999999962747
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 4,
+      "frame_bound_ms": 514.4000000003725,
+      "http_ms": 474
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 5,
+      "frame_bound_ms": 509.40000000037253,
+      "http_ms": 477.09999999962747
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 6,
+      "frame_bound_ms": 494,
+      "http_ms": 464.59999999962747
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 7,
+      "frame_bound_ms": 504.59999999962747,
+      "http_ms": 473.5
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 8,
+      "frame_bound_ms": 507.19999999925494,
+      "http_ms": 471.7999999988824
+    },
+    {
+      "lines": 20,
+      "mode": "htmx",
+      "sample": 9,
+      "frame_bound_ms": 504.5,
+      "http_ms": 473
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 0,
+      "frame_bound_ms": 12.599999999627471,
+      "http_ms": 458.09999999962747
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 1,
+      "frame_bound_ms": 12.900000000372529,
+      "http_ms": 453.7999999988824
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 2,
+      "frame_bound_ms": 19,
+      "http_ms": 466.2999999988824
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 3,
+      "frame_bound_ms": 13,
+      "http_ms": 465.59999999962747
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 4,
+      "frame_bound_ms": 22.09999999962747,
+      "http_ms": 460.5
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 5,
+      "frame_bound_ms": 19.700000001117587,
+      "http_ms": 464.69999999925494
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 6,
+      "frame_bound_ms": 16.09999999962747,
+      "http_ms": 453.2000000011176
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 7,
+      "frame_bound_ms": 16.90000000037253,
+      "http_ms": 454
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 8,
+      "frame_bound_ms": 14.099999999627471,
+      "http_ms": 476.5
+    },
+    {
+      "lines": 20,
+      "mode": "optimistic",
+      "sample": 9,
+      "frame_bound_ms": 19.200000001117587,
+      "http_ms": 471.2000000011176
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 0,
+      "frame_bound_ms": 561.6000000014901,
+      "http_ms": 499.1000000014901
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 1,
+      "frame_bound_ms": 543.8000000007451,
+      "http_ms": 489.59999999962747
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 2,
+      "frame_bound_ms": 549,
+      "http_ms": 496.30000000074506
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 3,
+      "frame_bound_ms": 551.7999999988824,
+      "http_ms": 490.59999999962747
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 4,
+      "frame_bound_ms": 547.5,
+      "http_ms": 485.69999999925494
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 5,
+      "frame_bound_ms": 568.4000000003725,
+      "http_ms": 501.19999999925494
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 6,
+      "frame_bound_ms": 586.3999999985099,
+      "http_ms": 518.6999999992549
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 7,
+      "frame_bound_ms": 552.5999999996275,
+      "http_ms": 493.7000000011176
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 8,
+      "frame_bound_ms": 577.0999999996275,
+      "http_ms": 520.7999999988824
+    },
+    {
+      "lines": 50,
+      "mode": "htmx",
+      "sample": 9,
+      "frame_bound_ms": 543.0999999996275,
+      "http_ms": 487.09999999962747
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 0,
+      "frame_bound_ms": 27,
+      "http_ms": 479.30000000074506
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 1,
+      "frame_bound_ms": 25.699999999254942,
+      "http_ms": 453.69999999925494
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 2,
+      "frame_bound_ms": 31.200000001117587,
+      "http_ms": 475
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 3,
+      "frame_bound_ms": 22.5,
+      "http_ms": 450.2999999988824
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 4,
+      "frame_bound_ms": 21.699999999254942,
+      "http_ms": 460.7999999988824
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 5,
+      "frame_bound_ms": 21,
+      "http_ms": 462.5
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 6,
+      "frame_bound_ms": 21.300000000745058,
+      "http_ms": 457.5
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 7,
+      "frame_bound_ms": 30.300000000745058,
+      "http_ms": 484.40000000037253
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 8,
+      "frame_bound_ms": 23.09999999962747,
+      "http_ms": 464.5
+    },
+    {
+      "lines": 50,
+      "mode": "optimistic",
+      "sample": 9,
+      "frame_bound_ms": 23.199999999254942,
+      "http_ms": 477.59999999962747
+    }
+  ]
+}
