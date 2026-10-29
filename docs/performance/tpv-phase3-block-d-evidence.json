@@ -1,0 +1,6236 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-29T20:04:57.283415+00:00",
+  "git": {
+    "branch": "fix/tpv-checkout-audit-phase3",
+    "initial_head": "a38898acce06a4360c4a2427895488178225072e",
+    "final_head": "a38898acce06a4360c4a2427895488178225072e",
+    "origin_main": "cdbf88c7df6b5c9d75ccdeda84c8ac8b67b03983",
+    "remote_branch_head_observed_by_ls_remote": "a38898acce06a4360c4a2427895488178225072e",
+    "initial_worktree_clean": true,
+    "staged_changes": false,
+    "commit": false,
+    "push": false,
+    "merge": false,
+    "pr": false,
+    "deployment": false,
+    "changed_paths": [
+      "docs/performance/tpv-phase3-block-d-audit.md",
+      "docs/performance/tpv-phase3-block-d-e2e.md",
+      "docs/performance/tpv-phase3-block-d-evidence.json",
+      "docs/performance/tpv-phase3-block-d-fixes.md",
+      "docs/performance/tpv-phase3-block-d-report.md",
+      "e2e/browser_checkout_frontend_d.py",
+      "e2e/browser_optimistic_cart.py",
+      "e2e/checkout_frontend_d_observer.js",
+      "static/css/sales_tpv.css",
+      "static/js/core/htmx-events.js",
+      "static/js/sales_cart.js",
+      "static/js/sales_tpv.js",
+      "templates/sales/partials/_checkout.html",
+      "templates/sales/partials/_checkout_pending_payment.html"
+    ]
+  },
+  "scope": {
+    "frontend_only": true,
+    "p01_p02_already_implemented": true,
+    "economic_contract_changes": false,
+    "migration_changes": false,
+    "dependency_changes": false,
+    "inventory_billing_optimization": false
+  },
+  "preservation": {
+    "protected_tracked_files": 422,
+    "protected_roots": [
+      "apps/",
+      "config/",
+      "pyproject.toml",
+      "uv.lock"
+    ],
+    "changed_protected_paths": [],
+    "baseline_manifest_sha256": "7b1303c23343d31a50d825a4f4bded961d5c2e007c09a2da33b0a9a351c43a94",
+    "prior_reports_unmodified": true
+  },
+  "environment": {
+    "database": "disposable PostgreSQL16-alpine",
+    "container": "tpv-phase3-d-postgres",
+    "label": "codex.task=tpv-phase3-d",
+    "port": "127.0.0.1:55440",
+    "database_name": "tpv_diag_phase3d",
+    "django_settings": "config.settings.diagnostic_postgres",
+    "chromium": "151.0.7922.173 /usr/bin/chromium",
+    "fixtures": "synthetic only",
+    "production_access": false,
+    "dependencies_installed": false,
+    "shared_database_runners_sequential": true
+  },
+  "commands": [
+    {
+      "command": ".venv/bin/python manage.py test apps.sales apps.payments apps.inventory apps.cash_register apps.billing --noinput --verbosity=1",
+      "passed": 752,
+      "failed": 0,
+      "seconds": 167.42,
+      "log": "financial.log"
+    },
+    {
+      "command": ".venv/bin/python manage.py test e2e.browser_checkout_frontend_d e2e.browser_checkout_authorized e2e.browser_checkout_recovery e2e.browser_checkout e2e.browser_htmx_global_ux --noinput --verbosity=1",
+      "note": "D module had13 methods at this run; three additional methods executed separately next",
+      "passed": 39,
+      "failed": 0,
+      "seconds": 355.484,
+      "log": "checkout-final.log"
+    },
+    {
+      "command": ".venv/bin/python manage.py test e2e.browser_checkout_frontend_d.CheckoutFrontendDTests.test_sampled_contrast_and_native_control_labels e2e.browser_checkout_frontend_d.CheckoutFrontendDTests.test_navigation_during_cart_sync_preserves_and_replays_original_intent e2e.browser_checkout_frontend_d.CheckoutFrontendDTests.test_pending_quantities_flush_before_authoritative_checkout --noinput --verbosity=1",
+      "passed": 3,
+      "failed": 0,
+      "seconds": 11.187,
+      "log": "additional-final.log"
+    },
+    {
+      "command": ".venv/bin/python manage.py test e2e.browser_optimistic_cart e2e.browser_cart_hardening --noinput --verbosity=1",
+      "passed": 42,
+      "errors": 1,
+      "seconds": 95.473,
+      "error": "Collected assets class launch requested an unavailable managed Chromium bundle; not an application assertion failure",
+      "log": "cart-final.log"
+    },
+    {
+      "command": ".venv/bin/python /workspace/work/phase3-d/run_collected_assets.py",
+      "passed": 1,
+      "failed": 0,
+      "seconds": 3.503,
+      "note": "Existing test now accepts TPV_CHROMIUM; temporary collectstatic and CompressedManifestStaticFilesStorage/WhiteNoise,234 copied/700 processed; no product settings changed",
+      "log": "collected-final.log"
+    },
+    {
+      "command": ".venv/bin/python -m pytest --ds=config.settings.diagnostic_postgres -q",
+      "passed": 1596,
+      "failed": 6,
+      "subtests_passed": 525,
+      "warnings": 1,
+      "seconds": 152.88,
+      "log": "pytest-final.log"
+    },
+    {
+      "command": "HEAD git archive; python -m pytest --ds=config.settings.diagnostic_postgres -q <six exact IDs>",
+      "failed": 6,
+      "seconds": 7.44,
+      "same_ids_and_causes": true,
+      "log": "pytest-baseline-six.log"
+    }
+  ],
+  "checks": {
+    "ruff": "PASS",
+    "ruff_format": "PASS;469 files",
+    "django_check": "PASS",
+    "makemigrations_check_dry_run": "PASS;No changes detected",
+    "node_check": "PASS;three modified scripts and observer",
+    "git_diff_check": "PASS"
+  },
+  "unique_validated_e2e_methods": 85,
+  "e2e_counting": "39 checkout +3 supplement +42 development cart +1 collected assets; intermediate reruns excluded",
+  "pytest_comparison": {
+    "same_ids": true,
+    "same_error_messages_normalizing_object_addresses": true,
+    "new_failures": [],
+    "ids": [
+      "apps/catalog/tests/test_tax_resolution.py::ProductTaxResolutionTests::test_inactive_specific_tax_is_an_error",
+      "apps/catalog/tests/test_tax_resolution.py::ProductTaxResolutionTests::test_one_default_per_business_and_defaults_for_two_businesses",
+      "apps/catalog/tests/test_tax_resolution.py::ProductTaxResolutionTests::test_other_business_default_is_never_used",
+      "apps/catalog/tests/unit/test_forms.py::TaxFormTests::test_tax_update_form_exposes_is_active_but_not_business_or_is_default",
+      "apps/catalog/tests/unit/test_services.py::CatalogMediaDeleteTests::test_protected_delete_keeps_media",
+      "apps/catalog/tests/unit/test_services.py::CatalogMediaDeleteTests::test_successful_product_delete_cleans_media_after_commit"
+    ],
+    "baseline_sha": "a38898acce06a4360c4a2427895488178225072e",
+    "baseline_seconds": 7.44,
+    "current_seconds": 152.88,
+    "current_passed": 1596,
+    "current_failed": 6,
+    "current_subtests_passed": 525
+  },
+  "economic_comparison_with_previous_evidence": {
+    "count": 38,
+    "normalized_order_only": true,
+    "ignored_http": true,
+    "differing_keys": []
+  },
+  "http_and_service_cases": {
+    "P01-False-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P01-False-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P01-False-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P01-True-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        409,
+        200
+      ]
+    },
+    "P01-True-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "P01-True-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "P02-close-cash-before": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 422
+    },
+    "P02-close-cash-during": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": 200
+    },
+    "P02-close-card-before": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 422
+    },
+    "P02-close-card-during": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": 200
+    },
+    "P02-False-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P02-False-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P02-False-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "P02-True-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "P02-True-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "P02-True-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        409,
+        200
+      ]
+    },
+    "closure-before_T1": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "closure-during_T1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "closure-after_T1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "closure-between_split": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "partial",
+          "pending": "6.05",
+          "confirmed_amount": "6.05",
+          "payments": 1,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "closure-cash_race": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "closure-card_race": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": 409
+    },
+    "C01-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C01-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C01-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C02-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C02-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C02-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C03-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        409,
+        200
+      ]
+    },
+    "C03-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        409,
+        200
+      ]
+    },
+    "C03-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        409,
+        200
+      ]
+    },
+    "C04-0": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        },
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "0.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        422,
+        200
+      ]
+    },
+    "C04-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        },
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "0.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        422
+      ]
+    },
+    "C04-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        },
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "0.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        422
+      ]
+    },
+    "C05-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        },
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            2
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "998.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        2
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C05-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            2
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        },
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "998.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        2
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C05-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            2
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        },
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "998.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        2
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C06-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C06-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C06-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        200
+      ]
+    },
+    "C07-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        409,
+        422
+      ]
+    },
+    "C07-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        409,
+        422
+      ]
+    },
+    "C07-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        409,
+        422
+      ]
+    },
+    "C08-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "C08-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "C08-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        409
+      ]
+    },
+    "C09-0": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        403
+      ]
+    },
+    "C09-1": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        403
+      ]
+    },
+    "C09-2": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "http": [
+        200,
+        403
+      ]
+    },
+    "C10-0": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        404,
+        403,
+        422
+      ]
+    },
+    "C10-1": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        404,
+        403,
+        422
+      ]
+    },
+    "C10-2": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ],
+      "http": [
+        404,
+        403,
+        422
+      ]
+    },
+    "idempotency-contracts": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1,
+        0
+      ]
+    },
+    "pending-session-service-recovery": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 2
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    }
+  },
+  "browser_case_records": 65,
+  "browser_cases": {
+    "D-errors-focus": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-full-card": {
+      "http": [
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "status": 200
+        }
+      ],
+      "print_calls": 2,
+      "print_no_mutation": true,
+      "new_sale_empty_and_new_keys": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-full-cash": {
+      "http": [
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "status": 200
+        }
+      ],
+      "print_calls": 2,
+      "print_no_mutation": true,
+      "new_sale_empty_and_new_keys": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-full-split": {
+      "http": [
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "status": 200
+        }
+      ],
+      "print_calls": 2,
+      "print_no_mutation": true,
+      "new_sale_empty_and_new_keys": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-full-invoice": {
+      "http": [
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "status": 200
+        }
+      ],
+      "print_calls": 2,
+      "print_no_mutation": true,
+      "new_sale_empty_and_new_keys": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-full-p01": {
+      "http": [
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "status": 200
+        }
+      ],
+      "print_calls": 2,
+      "print_no_mutation": true,
+      "new_sale_empty_and_new_keys": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-double-open-cycles": {
+      "methods": [
+        "GET",
+        "GET",
+        "GET",
+        "GET",
+        "GET",
+        "GET"
+      ],
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-expired-cart-read": {
+      "message": "No se puede recuperar esta venta. Comprueba sesión y permisos. Conserva los cambios pendientes.",
+      "pending_identity_preserved": true,
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-cancel-read": {
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-stale-read": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-piece-change": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "partial",
+          "pending": "3.05",
+          "confirmed_amount": "9.05",
+          "payments": 2,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-performance": {
+      "mode": "warm reopening; 1 line card F2; five fresh sales",
+      "samples": [
+        {
+          "events": [
+            {
+              "name": "checkout-click",
+              "ms": 866.4000000003725
+            },
+            {
+              "name": "flush-start",
+              "ms": 870.7000000001863
+            },
+            {
+              "name": "flush-end",
+              "ms": 940.5
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 940.9000000003725,
+              "method": "GET",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1019.0999999996275,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1019.2000000001863,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "form-visible",
+              "ms": 1020
+            },
+            {
+              "name": "form-painted",
+              "ms": 1032.5999999996275
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1041,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1060,
+              "method": "GET"
+            },
+            {
+              "name": "confirm-click",
+              "ms": 1315.2999999998137
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 1319.4000000003725,
+              "method": "POST",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1591.7000000001863,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1592,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-visible",
+              "ms": 1605.2999999998137
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1613.7000000001863,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-painted",
+              "ms": 1617.5999999996275
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1626.5999999996275,
+              "method": "POST"
+            },
+            {
+              "name": "print-click",
+              "ms": 1707.5
+            }
+          ],
+          "time_origin": 1793303100541.6,
+          "print_events": [
+            {
+              "name": "page-painted",
+              "ms": 156.3999999994412
+            }
+          ],
+          "print_time_origin": 1793303102261.9,
+          "economic_state": {
+            "sales": [
+              {
+                "sale": "completed",
+                "payment_status": "paid",
+                "pending": "0.00",
+                "confirmed_amount": "12.10",
+                "payments": 1,
+                "documents": 1,
+                "numbers": [
+                  1
+                ],
+                "stock_movements": 1,
+                "cash_movements": 0
+              }
+            ],
+            "inventory": [
+              "999.000"
+            ],
+            "sessions": [
+              {
+                "status": "open",
+                "expected": "0.00",
+                "movement_sum": "0"
+              }
+            ],
+            "series_numbers": [
+              1
+            ]
+          }
+        },
+        {
+          "events": [
+            {
+              "name": "checkout-click",
+              "ms": 900.7000000001863
+            },
+            {
+              "name": "flush-start",
+              "ms": 905.1000000005588
+            },
+            {
+              "name": "flush-end",
+              "ms": 970.9000000003725
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 971.2999999998137,
+              "method": "GET",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1050,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1050.2000000001863,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "form-visible",
+              "ms": 1050.9000000003725
+            },
+            {
+              "name": "form-painted",
+              "ms": 1061.4000000003725
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1072.4000000003725,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1092.9000000003725,
+              "method": "GET"
+            },
+            {
+              "name": "confirm-click",
+              "ms": 1349.7000000001863
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 1353.7000000001863,
+              "method": "POST",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1640.2999999998137,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1640.4000000003725,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-visible",
+              "ms": 1648.7000000001863
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1663.4000000003725,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-painted",
+              "ms": 1665.7000000001863
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1677.2999999998137,
+              "method": "POST"
+            },
+            {
+              "name": "print-click",
+              "ms": 1754.2000000001863
+            }
+          ],
+          "time_origin": 1793303103691.9,
+          "print_events": [
+            {
+              "name": "page-painted",
+              "ms": 145.1000000005588
+            }
+          ],
+          "print_time_origin": 1793303105456.3,
+          "economic_state": {
+            "sales": [
+              {
+                "sale": "completed",
+                "payment_status": "paid",
+                "pending": "0.00",
+                "confirmed_amount": "12.10",
+                "payments": 1,
+                "documents": 1,
+                "numbers": [
+                  2
+                ],
+                "stock_movements": 1,
+                "cash_movements": 0
+              }
+            ],
+            "inventory": [
+              "998.000"
+            ],
+            "sessions": [
+              {
+                "status": "open",
+                "expected": "0.00",
+                "movement_sum": "0"
+              }
+            ],
+            "series_numbers": [
+              2
+            ]
+          }
+        },
+        {
+          "events": [
+            {
+              "name": "checkout-click",
+              "ms": 924.8999999994412
+            },
+            {
+              "name": "flush-start",
+              "ms": 930
+            },
+            {
+              "name": "flush-end",
+              "ms": 997.2999999998137
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 997.5999999996275,
+              "method": "GET",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1075.2000000001863,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1075.2999999998137,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "form-visible",
+              "ms": 1076
+            },
+            {
+              "name": "form-painted",
+              "ms": 1087
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1097.5999999996275,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1117,
+              "method": "GET"
+            },
+            {
+              "name": "confirm-click",
+              "ms": 1390.2000000001863
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 1394.7000000001863,
+              "method": "POST",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1708.7000000001863,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1709.2000000001863,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-visible",
+              "ms": 1725.7000000001863
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1732.2000000001863,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-painted",
+              "ms": 1733.7999999998137
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1746,
+              "method": "POST"
+            },
+            {
+              "name": "print-click",
+              "ms": 1830.0999999996275
+            }
+          ],
+          "time_origin": 1793303106901.2,
+          "print_events": [
+            {
+              "name": "page-painted",
+              "ms": 159.59999999962747
+            }
+          ],
+          "print_time_origin": 1793303108742.4,
+          "economic_state": {
+            "sales": [
+              {
+                "sale": "completed",
+                "payment_status": "paid",
+                "pending": "0.00",
+                "confirmed_amount": "12.10",
+                "payments": 1,
+                "documents": 1,
+                "numbers": [
+                  3
+                ],
+                "stock_movements": 1,
+                "cash_movements": 0
+              }
+            ],
+            "inventory": [
+              "997.000"
+            ],
+            "sessions": [
+              {
+                "status": "open",
+                "expected": "0.00",
+                "movement_sum": "0"
+              }
+            ],
+            "series_numbers": [
+              3
+            ]
+          }
+        },
+        {
+          "events": [
+            {
+              "name": "checkout-click",
+              "ms": 884.6000000005588
+            },
+            {
+              "name": "flush-start",
+              "ms": 888.7000000001863
+            },
+            {
+              "name": "flush-end",
+              "ms": 952.8000000007451
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 953.3000000007451,
+              "method": "GET",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1030.800000000745,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1030.9000000003725,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "form-visible",
+              "ms": 1031.7000000001863
+            },
+            {
+              "name": "form-painted",
+              "ms": 1042.4000000003725
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1053.5,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1074.300000000745,
+              "method": "GET"
+            },
+            {
+              "name": "confirm-click",
+              "ms": 1331.6000000005588
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 1336,
+              "method": "POST",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1629.6000000005588,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1630,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-visible",
+              "ms": 1641.6000000005588
+            },
+            {
+              "name": "success-painted",
+              "ms": 1644.9000000003725
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1652.800000000745,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1674.2000000001863,
+              "method": "POST"
+            },
+            {
+              "name": "print-click",
+              "ms": 1747.9000000003725
+            }
+          ],
+          "time_origin": 1793303110193.7,
+          "print_events": [
+            {
+              "name": "page-painted",
+              "ms": 150.30000000074506
+            }
+          ],
+          "print_time_origin": 1793303111951.8,
+          "economic_state": {
+            "sales": [
+              {
+                "sale": "completed",
+                "payment_status": "paid",
+                "pending": "0.00",
+                "confirmed_amount": "12.10",
+                "payments": 1,
+                "documents": 1,
+                "numbers": [
+                  4
+                ],
+                "stock_movements": 1,
+                "cash_movements": 0
+              }
+            ],
+            "inventory": [
+              "996.000"
+            ],
+            "sessions": [
+              {
+                "status": "open",
+                "expected": "0.00",
+                "movement_sum": "0"
+              }
+            ],
+            "series_numbers": [
+              4
+            ]
+          }
+        },
+        {
+          "events": [
+            {
+              "name": "checkout-click",
+              "ms": 922.6999999992549
+            },
+            {
+              "name": "flush-start",
+              "ms": 927.0999999996275
+            },
+            {
+              "name": "flush-end",
+              "ms": 987.7999999998137
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 988.1999999992549,
+              "method": "GET",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1066.699999999255,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1066.7999999998137,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "form-visible",
+              "ms": 1067.5
+            },
+            {
+              "name": "form-painted",
+              "ms": 1077.7999999998137
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1089.199999999255,
+              "method": "GET",
+              "status": 200
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1111.199999999255,
+              "method": "GET"
+            },
+            {
+              "name": "confirm-click",
+              "ms": 1352.3999999994412
+            },
+            {
+              "name": "beforeRequest",
+              "ms": 1356.3999999994412,
+              "method": "POST",
+              "status": 0
+            },
+            {
+              "name": "afterSwap",
+              "ms": 1617.7999999998137,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "afterRequest",
+              "ms": 1618,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-visible",
+              "ms": 1626.7999999998137
+            },
+            {
+              "name": "afterSettle",
+              "ms": 1639.8999999994412,
+              "method": "POST",
+              "status": 200
+            },
+            {
+              "name": "success-painted",
+              "ms": 1645.5999999996275
+            },
+            {
+              "name": "settled-painted",
+              "ms": 1661.699999999255,
+              "method": "POST"
+            },
+            {
+              "name": "print-click",
+              "ms": 1736.2999999998137
+            }
+          ],
+          "time_origin": 1793303113206.5,
+          "print_events": [
+            {
+              "name": "page-painted",
+              "ms": 148.79999999981374
+            }
+          ],
+          "print_time_origin": 1793303114952.1,
+          "economic_state": {
+            "sales": [
+              {
+                "sale": "completed",
+                "payment_status": "paid",
+                "pending": "0.00",
+                "confirmed_amount": "12.10",
+                "payments": 1,
+                "documents": 1,
+                "numbers": [
+                  5
+                ],
+                "stock_movements": 1,
+                "cash_movements": 0
+              }
+            ],
+            "inventory": [
+              "995.000"
+            ],
+            "sessions": [
+              {
+                "status": "open",
+                "expected": "0.00",
+                "movement_sum": "0"
+              }
+            ],
+            "series_numbers": [
+              5
+            ]
+          }
+        }
+      ]
+    },
+    "D-processing-requests": {
+      "requests": [
+        "POST"
+      ],
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "D-timeout-before-t1": {
+      "before": {
+        "sales": [
+          {
+            "sale": "open",
+            "payment_status": "unpaid",
+            "pending": "12.10",
+            "confirmed_amount": "0",
+            "payments": 0,
+            "documents": 0,
+            "numbers": [],
+            "stock_movements": 0,
+            "cash_movements": 0
+          }
+        ],
+        "inventory": [
+          "1000.000"
+        ],
+        "sessions": [
+          {
+            "status": "open",
+            "expected": "0.00",
+            "movement_sum": "0"
+          }
+        ],
+        "series_numbers": [
+          0
+        ]
+      },
+      "after": {
+        "sales": [
+          {
+            "sale": "completed",
+            "payment_status": "paid",
+            "pending": "0.00",
+            "confirmed_amount": "12.10",
+            "payments": 1,
+            "documents": 1,
+            "numbers": [
+              1
+            ],
+            "stock_movements": 1,
+            "cash_movements": 0
+          }
+        ],
+        "inventory": [
+          "999.000"
+        ],
+        "sessions": [
+          {
+            "status": "open",
+            "expected": "0.00",
+            "movement_sum": "0"
+          }
+        ],
+        "series_numbers": [
+          1
+        ]
+      },
+      "posts": 1,
+      "default_timeout_ms": 60000,
+      "injected_timeout_ms": 250
+    },
+    "D-two-browser-tabs": {
+      "http": [
+        409,
+        200
+      ],
+      "before": {
+        "sales": [
+          {
+            "sale": "open",
+            "payment_status": "unpaid",
+            "pending": "24.20",
+            "confirmed_amount": "0",
+            "payments": 0,
+            "documents": 0,
+            "numbers": [],
+            "stock_movements": 0,
+            "cash_movements": 0
+          }
+        ],
+        "inventory": [
+          "1000.000"
+        ],
+        "sessions": [
+          {
+            "status": "open",
+            "expected": "0.00",
+            "movement_sum": "0"
+          }
+        ],
+        "series_numbers": [
+          0
+        ]
+      },
+      "after": {
+        "sales": [
+          {
+            "sale": "completed",
+            "payment_status": "paid",
+            "pending": "0.00",
+            "confirmed_amount": "24.20",
+            "payments": 1,
+            "documents": 1,
+            "numbers": [
+              1
+            ],
+            "stock_movements": 2,
+            "cash_movements": 0
+          }
+        ],
+        "inventory": [
+          "998.000"
+        ],
+        "sessions": [
+          {
+            "status": "open",
+            "expected": "0.00",
+            "movement_sum": "0"
+          }
+        ],
+        "series_numbers": [
+          1
+        ]
+      }
+    },
+    "D-version": {
+      "http": 409,
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-permission": {
+      "http": 403,
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-responsive-keyboard": {
+      "samples": [
+        {
+          "width": 390,
+          "height": 844,
+          "css_zoom": 1,
+          "overflow_px": 0,
+          "confirm_height_px": 54,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        },
+        {
+          "width": 844,
+          "height": 390,
+          "css_zoom": 1,
+          "overflow_px": 0,
+          "confirm_height_px": 54,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        },
+        {
+          "width": 820,
+          "height": 1180,
+          "css_zoom": 1,
+          "overflow_px": 0,
+          "confirm_height_px": 54,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        },
+        {
+          "width": 1180,
+          "height": 820,
+          "css_zoom": 1,
+          "overflow_px": 0,
+          "confirm_height_px": 54,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        },
+        {
+          "width": 1440,
+          "height": 900,
+          "css_zoom": 1,
+          "overflow_px": 0,
+          "confirm_height_px": 54,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        },
+        {
+          "width": 820,
+          "height": 1180,
+          "css_zoom": 2,
+          "overflow_px": 0,
+          "confirm_height_px": 108,
+          "sales": [
+            {
+              "sale": "open",
+              "payment_status": "unpaid",
+              "pending": "12.10",
+              "confirmed_amount": "0",
+              "payments": 0,
+              "documents": 0,
+              "numbers": [],
+              "stock_movements": 0,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "1000.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            0
+          ]
+        }
+      ]
+    },
+    "P01-browser-1440": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "P01-browser-820": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "P01-browser-390": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "P02-browser-unpaid_cash-1440": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-partial_card-1440": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-lost_partial-1440": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 3,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-after_T1-1440": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-unpaid_cash-820": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-partial_card-820": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-lost_partial-820": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 3,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-after_T1-820": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-unpaid_cash-390": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-partial_card-390": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-lost_partial-390": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 3,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        },
+        {
+          "status": "closed",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "P02-browser-after_T1-390": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        },
+        {
+          "status": "closed",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ],
+      "printed": true,
+      "new_sale_in_valid_session": true
+    },
+    "browser-journal-fail-closed": {
+      "posts_aborted_before_server": 1,
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "browser-double-processing": {
+      "posts": 1,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "browser-after_T1-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "999.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    },
+    "browser-after_T2-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            2
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "998.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        2
+      ]
+    },
+    "browser-after_T3-1440": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            3
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "997.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        3
+      ]
+    },
+    "browser-render_500-1440": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            4
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "996.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        4
+      ]
+    },
+    "browser-timeout-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            5
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "995.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        5
+      ]
+    },
+    "browser-abort-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            6
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "994.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        6
+      ]
+    },
+    "browser-split_partial-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            7
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "993.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        7
+      ]
+    },
+    "browser-reload-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            8
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "992.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        8
+      ]
+    },
+    "browser-reopen-1440": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            9
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "991.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        9
+      ]
+    },
+    "browser-after_T1-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            10
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "990.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        10
+      ]
+    },
+    "browser-after_T2-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            11
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "989.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        11
+      ]
+    },
+    "browser-after_T3-820": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            12
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "988.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        12
+      ]
+    },
+    "browser-render_500-820": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            13
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "987.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        13
+      ]
+    },
+    "browser-timeout-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            14
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "986.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        14
+      ]
+    },
+    "browser-abort-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            15
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "985.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "6.05",
+          "movement_sum": "6.05"
+        }
+      ],
+      "series_numbers": [
+        15
+      ]
+    },
+    "browser-split_partial-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            16
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "984.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        16
+      ]
+    },
+    "browser-reload-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            17
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "983.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        17
+      ]
+    },
+    "browser-reopen-820": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            18
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "982.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        18
+      ]
+    },
+    "browser-after_T1-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            19
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "981.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        19
+      ]
+    },
+    "browser-after_T2-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            20
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "980.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        20
+      ]
+    },
+    "browser-after_T3-390": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            21
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "979.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        21
+      ]
+    },
+    "browser-render_500-390": {
+      "posts": 1,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            22
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "978.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        22
+      ]
+    },
+    "browser-timeout-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            23
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "977.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        23
+      ]
+    },
+    "browser-abort-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            24
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "976.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "12.10",
+          "movement_sum": "12.10"
+        }
+      ],
+      "series_numbers": [
+        24
+      ]
+    },
+    "browser-split_partial-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 2,
+          "documents": 1,
+          "numbers": [
+            25
+          ],
+          "stock_movements": 1,
+          "cash_movements": 1
+        }
+      ],
+      "inventory": [
+        "975.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "18.15",
+          "movement_sum": "18.15"
+        }
+      ],
+      "series_numbers": [
+        25
+      ]
+    },
+    "browser-reload-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            26
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "974.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "18.15",
+          "movement_sum": "18.15"
+        }
+      ],
+      "series_numbers": [
+        26
+      ]
+    },
+    "browser-reopen-390": {
+      "posts": 2,
+      "identity_preserved": true,
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "12.10",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            27
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "973.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "18.15",
+          "movement_sum": "18.15"
+        }
+      ],
+      "series_numbers": [
+        27
+      ]
+    },
+    "D-contrast-labels": {
+      "samples": [
+        {
+          "selector": ".checkout-total strong",
+          "foreground": "rgb(255, 255, 255)",
+          "background": "rgb(13, 35, 65)",
+          "ratio": 15.74
+        },
+        {
+          "selector": ".checkout-confirm",
+          "foreground": "rgb(0, 0, 0)",
+          "background": "rgb(239, 239, 239)",
+          "ratio": 18.26
+        }
+      ],
+      "unlabelled_visible_fields": [],
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "12.10",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-navigation-pending": {
+      "navigation_dismissed_then_accepted": true,
+      "original_operation_replayed_once": true,
+      "sales": [
+        {
+          "sale": "open",
+          "payment_status": "unpaid",
+          "pending": "24.20",
+          "confirmed_amount": "0",
+          "payments": 0,
+          "documents": 0,
+          "numbers": [],
+          "stock_movements": 0,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "1000.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        0
+      ]
+    },
+    "D-pending-quantities": {
+      "sales": [
+        {
+          "sale": "completed",
+          "payment_status": "paid",
+          "pending": "0.00",
+          "confirmed_amount": "36.30",
+          "payments": 1,
+          "documents": 1,
+          "numbers": [
+            1
+          ],
+          "stock_movements": 1,
+          "cash_movements": 0
+        }
+      ],
+      "inventory": [
+        "997.000"
+      ],
+      "sessions": [
+        {
+          "status": "open",
+          "expected": "0.00",
+          "movement_sum": "0"
+        }
+      ],
+      "series_numbers": [
+        1
+      ]
+    }
+  },
+  "frontend_timings": {
+    "protocol": "five warm fresh1-line cardF2 sales per version; test-only observer; before assets from HEAD static/js; same normal template and environment; no concurrent runner; final paint two rAF after settle",
+    "statistics_ms": {
+      "before": {
+        "click_to_flush_ms": {
+          "n": 5,
+          "min": 4.0,
+          "median": 4.0,
+          "max": 5.8,
+          "samples": [
+            4.0,
+            4.0,
+            4.0,
+            4.4,
+            5.8
+          ]
+        },
+        "flush_ms": {
+          "n": 5,
+          "min": 28.1,
+          "median": 64.0,
+          "max": 73.2,
+          "samples": [
+            73.2,
+            61.8,
+            69.6,
+            64.0,
+            28.1
+          ]
+        },
+        "get_request_ms": {
+          "n": 5,
+          "min": 77.6,
+          "median": 80.3,
+          "max": 83.0,
+          "samples": [
+            77.6,
+            80.5,
+            78.3,
+            80.3,
+            83.0
+          ]
+        },
+        "click_to_visible_ms": {
+          "n": 5,
+          "min": 118.2,
+          "median": 149.7,
+          "max": 157.4,
+          "samples": [
+            157.4,
+            147.6,
+            153.0,
+            149.7,
+            118.2
+          ]
+        },
+        "click_to_settled_painted_ms": {
+          "n": 5,
+          "min": 155.2,
+          "median": 191.1,
+          "max": 193.2,
+          "samples": [
+            192.8,
+            191.1,
+            193.2,
+            190.4,
+            155.2
+          ]
+        },
+        "confirm_to_request_ms": {
+          "n": 5,
+          "min": 3.4,
+          "median": 3.8,
+          "max": 5.6,
+          "samples": [
+            5.6,
+            3.4,
+            3.6,
+            4.5,
+            3.8
+          ]
+        },
+        "post_request_ms": {
+          "n": 5,
+          "min": 268.2,
+          "median": 287.5,
+          "max": 332,
+          "samples": [
+            312.3,
+            284.2,
+            287.5,
+            268.2,
+            332
+          ]
+        },
+        "post_to_swap_ms": {
+          "n": 5,
+          "min": 268.0,
+          "median": 287.3,
+          "max": 331.2,
+          "samples": [
+            312.1,
+            283.9,
+            287.3,
+            268.0,
+            331.2
+          ]
+        },
+        "swap_to_settle_ms": {
+          "n": 5,
+          "min": 21.6,
+          "median": 21.9,
+          "max": 22.3,
+          "samples": [
+            21.9,
+            21.6,
+            22.0,
+            21.6,
+            22.3
+          ]
+        },
+        "settle_to_painted_ms": {
+          "n": 5,
+          "min": 15.0,
+          "median": 17.9,
+          "max": 20.2,
+          "samples": [
+            17.9,
+            19.6,
+            15.0,
+            16.4,
+            20.2
+          ]
+        },
+        "confirm_to_settled_painted_ms": {
+          "n": 5,
+          "min": 310.5,
+          "median": 328.5,
+          "max": 377.5,
+          "samples": [
+            357.5,
+            328.5,
+            327.9,
+            310.5,
+            377.5
+          ]
+        },
+        "print_click_to_painted_ms": {
+          "n": 5,
+          "min": 141.1,
+          "median": 159.1,
+          "max": 168.2,
+          "samples": [
+            156.7,
+            141.1,
+            159.1,
+            160.3,
+            168.2
+          ]
+        }
+      },
+      "after": {
+        "click_to_flush_ms": {
+          "n": 5,
+          "min": 4.1,
+          "median": 4.4,
+          "max": 5.1,
+          "samples": [
+            4.3,
+            4.4,
+            5.1,
+            4.1,
+            4.4
+          ]
+        },
+        "flush_ms": {
+          "n": 5,
+          "min": 60.7,
+          "median": 65.8,
+          "max": 69.8,
+          "samples": [
+            69.8,
+            65.8,
+            67.3,
+            64.1,
+            60.7
+          ]
+        },
+        "get_request_ms": {
+          "n": 5,
+          "min": 77.6,
+          "median": 78.3,
+          "max": 78.9,
+          "samples": [
+            78.3,
+            78.9,
+            77.7,
+            77.6,
+            78.6
+          ]
+        },
+        "click_to_visible_ms": {
+          "n": 5,
+          "min": 144.8,
+          "median": 150.2,
+          "max": 153.6,
+          "samples": [
+            153.6,
+            150.2,
+            151.1,
+            147.1,
+            144.8
+          ]
+        },
+        "click_to_settled_painted_ms": {
+          "n": 5,
+          "min": 188.5,
+          "median": 192.1,
+          "max": 193.6,
+          "samples": [
+            193.6,
+            192.2,
+            192.1,
+            189.7,
+            188.5
+          ]
+        },
+        "confirm_to_request_ms": {
+          "n": 5,
+          "min": 4.0,
+          "median": 4.1,
+          "max": 4.5,
+          "samples": [
+            4.1,
+            4.0,
+            4.5,
+            4.4,
+            4.0
+          ]
+        },
+        "post_request_ms": {
+          "n": 5,
+          "min": 261.6,
+          "median": 286.7,
+          "max": 314.5,
+          "samples": [
+            272.6,
+            286.7,
+            314.5,
+            294,
+            261.6
+          ]
+        },
+        "post_to_swap_ms": {
+          "n": 5,
+          "min": 261.4,
+          "median": 286.6,
+          "max": 314.0,
+          "samples": [
+            272.3,
+            286.6,
+            314.0,
+            293.6,
+            261.4
+          ]
+        },
+        "swap_to_settle_ms": {
+          "n": 5,
+          "min": 22.0,
+          "median": 23.1,
+          "max": 23.5,
+          "samples": [
+            22.0,
+            23.1,
+            23.5,
+            23.2,
+            22.1
+          ]
+        },
+        "settle_to_painted_ms": {
+          "n": 5,
+          "min": 12.9,
+          "median": 13.9,
+          "max": 21.8,
+          "samples": [
+            12.9,
+            13.9,
+            13.8,
+            21.4,
+            21.8
+          ]
+        },
+        "confirm_to_settled_painted_ms": {
+          "n": 5,
+          "min": 309.3,
+          "median": 327.6,
+          "max": 355.8,
+          "samples": [
+            311.3,
+            327.6,
+            355.8,
+            342.6,
+            309.3
+          ]
+        },
+        "print_click_to_painted_ms": {
+          "n": 5,
+          "min": 155.3,
+          "median": 160.5,
+          "max": 170.7,
+          "samples": [
+            169.2,
+            155.3,
+            170.7,
+            160.5,
+            158.1
+          ]
+        }
+      }
+    },
+    "baseline_samples": [
+      {
+        "events": [
+          {
+            "name": "checkout-click",
+            "ms": 910.0999999996275
+          },
+          {
+            "name": "flush-start",
+            "ms": 914.0999999996275
+          },
+          {
+            "name": "flush-end",
+            "ms": 987.2999999998137
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 988.7999999998137,
+            "method": "GET",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1066.4000000003725,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1066.4000000003725,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-visible",
+            "ms": 1067.5
+          },
+          {
+            "name": "form-painted",
+            "ms": 1070.2999999998137
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1088.5999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1102.9000000003725,
+            "method": "GET"
+          },
+          {
+            "name": "confirm-click",
+            "ms": 1362.2000000001863
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 1367.7999999998137,
+            "method": "POST",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1679.9000000003725,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1680.0999999996275,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-visible",
+            "ms": 1694.5999999996275
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1701.7999999998137,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-painted",
+            "ms": 1707.0999999996275
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1719.7000000001863,
+            "method": "POST"
+          },
+          {
+            "name": "print-click",
+            "ms": 1796
+          }
+        ],
+        "time_origin": 1793302720064.1,
+        "print_events": [
+          {
+            "name": "page-painted",
+            "ms": 147.29999999981374
+          }
+        ],
+        "print_time_origin": 1793302721869.5,
+        "economic_state": {
+          "sales": [
+            {
+              "sale": "completed",
+              "payment_status": "paid",
+              "pending": "0.00",
+              "confirmed_amount": "12.10",
+              "payments": 1,
+              "documents": 1,
+              "numbers": [
+                1
+              ],
+              "stock_movements": 1,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "999.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            1
+          ]
+        }
+      },
+      {
+        "events": [
+          {
+            "name": "checkout-click",
+            "ms": 766.7999999998137
+          },
+          {
+            "name": "flush-start",
+            "ms": 770.7999999998137
+          },
+          {
+            "name": "flush-end",
+            "ms": 832.5999999996275
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 833.1999999992549,
+            "method": "GET",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 913.5999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 913.6999999992549,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-visible",
+            "ms": 914.3999999994412
+          },
+          {
+            "name": "form-painted",
+            "ms": 925.5
+          },
+          {
+            "name": "afterSettle",
+            "ms": 936.8999999994412,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "settled-painted",
+            "ms": 957.8999999994412,
+            "method": "GET"
+          },
+          {
+            "name": "confirm-click",
+            "ms": 1212.5
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 1215.8999999994412,
+            "method": "POST",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1499.7999999998137,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1500.0999999996275,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-visible",
+            "ms": 1508.199999999255
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1521.3999999994412,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-painted",
+            "ms": 1525
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1541,
+            "method": "POST"
+          },
+          {
+            "name": "print-click",
+            "ms": 1616.3999999994412
+          }
+        ],
+        "time_origin": 1793302723359,
+        "print_events": [
+          {
+            "name": "page-painted",
+            "ms": 130.6000000005588
+          }
+        ],
+        "print_time_origin": 1793302724985.9,
+        "economic_state": {
+          "sales": [
+            {
+              "sale": "completed",
+              "payment_status": "paid",
+              "pending": "0.00",
+              "confirmed_amount": "12.10",
+              "payments": 1,
+              "documents": 1,
+              "numbers": [
+                2
+              ],
+              "stock_movements": 1,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "998.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            2
+          ]
+        }
+      },
+      {
+        "events": [
+          {
+            "name": "checkout-click",
+            "ms": 914.9000000003725
+          },
+          {
+            "name": "flush-start",
+            "ms": 918.9000000003725
+          },
+          {
+            "name": "flush-end",
+            "ms": 988.5
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 988.9000000003725,
+            "method": "GET",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1067.0999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1067.2000000001863,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-visible",
+            "ms": 1067.9000000003725
+          },
+          {
+            "name": "form-painted",
+            "ms": 1076.2999999998137
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1089.5999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1108.0999999996275,
+            "method": "GET"
+          },
+          {
+            "name": "confirm-click",
+            "ms": 1347.7000000001863
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 1351.2999999998137,
+            "method": "POST",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1638.5999999996275,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1638.7999999998137,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-visible",
+            "ms": 1648.2000000001863
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1660.5999999996275,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-painted",
+            "ms": 1665.2999999998137
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1675.5999999996275,
+            "method": "POST"
+          },
+          {
+            "name": "print-click",
+            "ms": 1748.7000000001863
+          }
+        ],
+        "time_origin": 1793302726458.6,
+        "print_events": [
+          {
+            "name": "page-painted",
+            "ms": 147.59999999962747
+          }
+        ],
+        "print_time_origin": 1793302728218.8,
+        "economic_state": {
+          "sales": [
+            {
+              "sale": "completed",
+              "payment_status": "paid",
+              "pending": "0.00",
+              "confirmed_amount": "12.10",
+              "payments": 1,
+              "documents": 1,
+              "numbers": [
+                3
+              ],
+              "stock_movements": 1,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "997.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            3
+          ]
+        }
+      },
+      {
+        "events": [
+          {
+            "name": "checkout-click",
+            "ms": 818.5
+          },
+          {
+            "name": "flush-start",
+            "ms": 822.9000000003725
+          },
+          {
+            "name": "flush-end",
+            "ms": 886.9000000003725
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 887.2999999998137,
+            "method": "GET",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 967.5,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 967.5999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-visible",
+            "ms": 968.2000000001863
+          },
+          {
+            "name": "form-painted",
+            "ms": 979.5
+          },
+          {
+            "name": "afterSettle",
+            "ms": 990.5,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1008.9000000003725,
+            "method": "GET"
+          },
+          {
+            "name": "confirm-click",
+            "ms": 1265.0999999996275
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 1269.5999999996275,
+            "method": "POST",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1537.5999999996275,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1537.7999999998137,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-visible",
+            "ms": 1546.2999999998137
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1559.2000000001863,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-painted",
+            "ms": 1560.2999999998137
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1575.5999999996275,
+            "method": "POST"
+          },
+          {
+            "name": "print-click",
+            "ms": 1648.5
+          }
+        ],
+        "time_origin": 1793302729707.5,
+        "print_events": [
+          {
+            "name": "page-painted",
+            "ms": 147.5
+          }
+        ],
+        "print_time_origin": 1793302731368.8,
+        "economic_state": {
+          "sales": [
+            {
+              "sale": "completed",
+              "payment_status": "paid",
+              "pending": "0.00",
+              "confirmed_amount": "12.10",
+              "payments": 1,
+              "documents": 1,
+              "numbers": [
+                4
+              ],
+              "stock_movements": 1,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "996.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            4
+          ]
+        }
+      },
+      {
+        "events": [
+          {
+            "name": "checkout-click",
+            "ms": 625.2999999998137
+          },
+          {
+            "name": "flush-start",
+            "ms": 631.0999999996275
+          },
+          {
+            "name": "flush-end",
+            "ms": 659.2000000001863
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 659.7000000001863,
+            "method": "GET",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 742.5999999996275,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 742.7000000001863,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-visible",
+            "ms": 743.5
+          },
+          {
+            "name": "afterSettle",
+            "ms": 765.5,
+            "method": "GET",
+            "status": 200
+          },
+          {
+            "name": "form-painted",
+            "ms": 766.0999999996275
+          },
+          {
+            "name": "settled-painted",
+            "ms": 780.5,
+            "method": "GET"
+          },
+          {
+            "name": "confirm-click",
+            "ms": 853.2000000001863
+          },
+          {
+            "name": "beforeRequest",
+            "ms": 857,
+            "method": "POST",
+            "status": 0
+          },
+          {
+            "name": "afterSwap",
+            "ms": 1188.2000000001863,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "afterRequest",
+            "ms": 1189,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-visible",
+            "ms": 1199.5
+          },
+          {
+            "name": "afterSettle",
+            "ms": 1210.5,
+            "method": "POST",
+            "status": 200
+          },
+          {
+            "name": "success-painted",
+            "ms": 1219.5999999996275
+          },
+          {
+            "name": "settled-painted",
+            "ms": 1230.7000000001863,
+            "method": "POST"
+          },
+          {
+            "name": "print-click",
+            "ms": 1312.0999999996275
+          }
+        ],
+        "time_origin": 1793302732902.6,
+        "print_events": [
+          {
+            "name": "page-painted",
+            "ms": 158.59999999962747
+          }
+        ],
+        "print_time_origin": 1793302734224.3,
+        "economic_state": {
+          "sales": [
+            {
+              "sale": "completed",
+              "payment_status": "paid",
+              "pending": "0.00",
+              "confirmed_amount": "12.10",
+              "payments": 1,
+              "documents": 1,
+              "numbers": [
+                5
+              ],
+              "stock_movements": 1,
+              "cash_movements": 0
+            }
+          ],
+          "inventory": [
+            "995.000"
+          ],
+          "sessions": [
+            {
+              "status": "open",
+              "expected": "0.00",
+              "movement_sum": "0"
+            }
+          ],
+          "series_numbers": [
+            5
+          ]
+        }
+      }
+    ],
+    "post_samples_location": "browser_cases.D-performance.samples",
+    "network_limit": "beforeRequest to afterRequest includes server/transport/HTMX, not pure network; stages overlap",
+    "claim": "No significant improvement or explanation of original20s; n5 exploratory, no p95/cold start"
+  },
+  "demonstrated_before_fix": {
+    "stale_get": "newer success overwritten by delayed old GET from htmx.ajax source body",
+    "processing_requests": [
+      "POST",
+      "GET",
+      "POST"
+    ],
+    "after_guard_requests": [
+      "POST"
+    ],
+    "native_form_and_hx_sync": "normal form path already protected",
+    "error_focus": "422 summary not focused; P02 standalone session selector not focused",
+    "p02_change": "no preview output in original DOM; new test verifies7.00 change for3.00 piece tender10.00",
+    "expired_read": "Unexpected token < ... not valid JSON before redirect/content-type guard",
+    "late_close": "Escape then Enter: dialog open, queue frozen false, loading panel stuck; fixed by ignoring queued old close on reopened dialog",
+    "intentional_get_cancel": "passed before fix; no speculative suppression of mutation aborts"
+  },
+  "intermediate_runs_not_counted_as_final_passes": [
+    "probe refinements and pre-fix expected failures",
+    "intermediate overly broad sales_tpv edit corrected before final runs",
+    "P02 fixture assertion initially read old form before response; now awaits new intent",
+    "observer v1 missed checkout-click due document capture stop; v2 remeasured baseline",
+    "cart compiled-assets initial launch error; rerun with installed Chromium and manifest settings passed"
+  ],
+  "limitations": [
+    "Chromium/headless synthetic tests only; no production",
+    "window.print stub returns without paper; no native print-dialog/physical printer assertion",
+    "touch and CSS200% zoom emulated; no real mobile/Safari/Firefox",
+    "no physical terminal/provider fiscal/SIGKILL/database outage/load/long-term heap test",
+    "frontend master specification unavailable",
+    "in-memory journal fallback does not survive reload when storage denied",
+    "six catalog pytest failures remain open",
+    "no causal attribution of original20s"
+  ],
+  "cleanup": {
+    "other_client_connections_before_stop": 0,
+    "test_databases_before_stop": [],
+    "dedicated_container_label_verified": true,
+    "container_stopped_and_removed": true,
+    "removal_verification": "checked again after Docker asynchronous --rm removal"
+  },
+  "local_logs_root": "/workspace/work/phase3-d",
+  "final_review": {
+    "files_reviewed": 14,
+    "expected_paths_only": true,
+    "credential_pattern_findings": [],
+    "manual_diff_review": true,
+    "staged_changes": false,
+    "protected_files_unchanged": 422,
+    "trailing_whitespace_findings": []
+  },
+  "subsequent_publication_authorization": {
+    "date_europe_madrid": "2026-10-29",
+    "branch": "fix/tpv-checkout-audit-phase3",
+    "commit_and_push_authorized_by_user": true,
+    "prior_git_flags_describe_audit_closure_before_this_authorization": true,
+    "merge_pr_deployment_authorized": false
+  }
+}

@@ -280,6 +280,14 @@
     output.textContent = money(difference < 0n ? -difference : difference);
   }
   function updateCashChange(checkout) {
+    const recovery = checkout.querySelector('[data-payment-recovery-form]');
+    if (recovery) {
+      const preview = recovery.querySelector('[data-recovery-change]');
+      const cash = recovery.querySelector('[name="method"]')?.selectedOptions[0]?.dataset.methodCash === "true";
+      if (preview) preview.hidden = !cash;
+      cashFeedback(recovery.querySelector('[name="cash_received"]'), cents(recovery.querySelector('[name="amount"]')?.value || "0"),
+        recovery.querySelector('[data-recovery-cash-label]'), recovery.querySelector('[data-recovery-cash-change]'));
+    }
     cashFeedback(checkout.querySelector('[name="cash_received"]'), pendingAmount(checkout),
       checkout.querySelector("[data-cash-label]"), checkout.querySelector("[data-cash-change]"));
     checkout.querySelectorAll("[data-split-part]:not([hidden])").forEach((part) => {
@@ -323,6 +331,18 @@
   function initializeCheckout(checkout) {
     if (checkout.dataset.checkoutReady) return;
     checkout.dataset.checkoutReady = "true";
+    checkout.querySelectorAll('[data-error-field]').forEach(error => {
+      const form = error.closest('form');
+      if (!form) return;
+      [...form.elements].filter(field => field.name === error.dataset.errorField).forEach(field => {
+        field.setAttribute('aria-invalid', 'true');
+        const descriptions = new Set((field.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean));
+        descriptions.add(error.id);
+        field.setAttribute('aria-describedby', [...descriptions].join(' '));
+      });
+    });
+    const summary = checkout.querySelector('form [data-checkout-error-summary]');
+    if (summary) summary.closest('form').setAttribute('aria-describedby', summary.id);
     syncCheckoutMode(checkout);
     syncPaymentMethodFields(checkout);
     updateCashChange(checkout);
@@ -409,14 +429,20 @@
     document.querySelector('#line-editor-dialog[open] [autofocus]')?.focus();
   });
 
+  function focusCheckout() {
+    const checkout = document.querySelector('#checkout-panel [data-checkout]');
+    if (!checkout?.getClientRects().length) return;
+    const summary = checkout.querySelector('[data-checkout-error-summary]');
+    if (summary) { summary.focus(); return; }
+    if (checkout.contains(document.activeElement) && !document.activeElement.matches('[data-checkout-close]')) return;
+    const cash = checkout.querySelector('[name="method"]:checked')?.dataset.methodCash === "true";
+    const focus = checkout.querySelector('[name="recovery_cash_session"]')
+      || (cash ? checkout.querySelector('[name="cash_received"]') : null)
+      || checkout.querySelector('[name="method"]:checked, [name="method"], [type="submit"]');
+    focus?.focus();
+  }
   document.addEventListener("htmx:afterSettle", (event) => {
-    if (event.detail.target?.id !== "checkout-panel") return;
-    const checkout = document.querySelector("#checkout-dialog[open] [data-checkout]");
-    if (checkout) {
-      const cash = checkout.querySelector('[name="method"]:checked')?.dataset.methodCash === "true";
-      const focus = cash ? checkout.querySelector('[name="cash_received"]') : checkout.querySelector('[name="method"]:checked, [name="method"], [type="submit"]');
-      focus?.focus();
-    }
+    if (event.detail.target?.id === "checkout-panel") focusCheckout();
   });
 
   document.addEventListener("htmx:oobAfterSwap", () => {
@@ -430,4 +456,5 @@
   syncCartSummary();
   normalizeResponsiveTicket();
   document.querySelectorAll("[data-checkout]").forEach(initializeCheckout);
+  focusCheckout();
 })();

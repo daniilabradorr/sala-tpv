@@ -10,12 +10,13 @@
   {% csrf_token %}
   <input type="hidden" name="cart_version" value="{{ sale.cart_version }}">
   {{ form.mode }}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
-  {% if form.errors %}<div class="tpv-errors" role="alert" data-checkout-error-summary><strong>Revisa la recuperación.</strong>{% for field in form %}{% for error in field.errors %}<p>{{ error }}</p>{% endfor %}{% endfor %}{{ form.non_field_errors }}</div>{% endif %}
+  {% if form.errors %}<div class="tpv-errors" role="alert" id="checkout-recovery-errors" tabindex="-1" data-checkout-error-summary><strong>Revisa la recuperación.</strong>{% for field in form %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">{{ error }}</p>{% endfor %}{% endfor %}{{ form.non_field_errors }}</div>{% endif %}
   <p class="recovery-note" data-recovery-intent-note>Esta confirmación registra una parte pendiente. Los pagos anteriores conservan su sesión e identidad.</p>
   <div class="form-field">{{ form.recovery_cash_session.label_tag }}{{ form.recovery_cash_session }}<small>La sesión histórica de la venta se conserva.</small></div>
-  <div class="form-field"><label for="{{ form.method.id_for_label }}">Método de la parte pendiente</label>{{ form.method }}</div>
+  <div class="form-field"><label for="{{ form.method.id_for_label }}">Método de la parte pendiente</label><select name="{{ form.method.html_name }}" id="{{ form.method.id_for_label }}" required><option value="">---------</option>{% for method in methods %}<option value="{{ method.pk }}" data-method-cash="{{ method.affects_cash_register|yesno:'true,false' }}" {% if form.method.value|stringformat:'s' == method.pk|stringformat:'s' %}selected{% endif %}>{{ method.name }}</option>{% endfor %}</select></div>
   <div class="form-field"><label for="{{ form.amount.id_for_label }}">Importe pendiente que se registra ahora</label>{{ form.amount }}</div>
   <div class="form-field"><label for="{{ form.cash_received.id_for_label }}">Efectivo entregado, si corresponde</label>{{ form.cash_received }}</div>
+  <p class="cash-change" data-recovery-change hidden aria-live="polite"><span data-recovery-cash-label>Cambio</span><strong data-recovery-cash-change>0,00 €</strong></p>
   <div class="form-field"><label for="{{ form.external_reference.id_for_label }}">Referencia, si corresponde</label>{{ form.external_reference }}</div>
   {% if series|length == 1 %}<p>Serie documental: {{ series.0 }}</p><input type="hidden" name="series" value="{{ series.0.pk }}">{% elif series|length > 1 %}<div class="form-field">{{ form.series.label_tag }}{{ form.series }}</div>{% endif %}
   <label>{{ form.recovery_confirm }} {{ form.recovery_confirm.label }}</label>

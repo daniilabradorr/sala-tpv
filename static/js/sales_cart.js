@@ -417,7 +417,8 @@
         endpoint + (pending ? "?pending=" + encodeURIComponent(pending) : ""),
         { credentials: "same-origin", cache: "no-store", signal: controller.signal },
       );
-      if (!r.ok) throw new Error("No se puede recuperar esta venta. Comprueba sesión y permisos.");
+      if (!r.ok || r.redirected || !r.headers.get("Content-Type")?.toLowerCase().startsWith("application/json"))
+        throw new Error("No se puede recuperar esta venta. Comprueba sesión y permisos. Conserva los cambios pendientes.");
       return await r.json();
     } catch (error) {
       if (error.name === "AbortError")
@@ -959,6 +960,9 @@
     true,
   );
   document.querySelector("#checkout-dialog").addEventListener("close", () => {
+    // Native close is queued: Escape followed by Enter can already have opened
+    // this same dialog again. That old event must not abort the new opening.
+    if (document.querySelector("#checkout-dialog").open) return;
     checkoutAttempt?.abort();
     checkoutAttempt = null;
     checkoutRequested = false;

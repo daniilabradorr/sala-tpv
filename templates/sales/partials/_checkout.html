@@ -11,7 +11,7 @@
     <li class="{% if document %}done{% elif sale.payment_status == 'paid' %}warning{% endif %}">{% if document %}Documento emitido{% elif sale.payment_status == 'paid' %}Documento pendiente{% else %}Documento fiscal{% endif %}</li>
   </ol>
 
-  {% if checkout_errors %}<div class="tpv-errors" role="alert"><strong>No se ha podido completar el proceso.</strong>{% for message in checkout_errors %}<span>{{ message }}</span>{% endfor %}</div>{% endif %}
+  {% if checkout_errors %}<div class="tpv-errors" role="alert" id="checkout-process-errors" tabindex="-1" data-checkout-error-summary><strong>No se ha podido completar el proceso.</strong>{% for message in checkout_errors %}<span>{{ message }}</span>{% endfor %}</div>{% endif %}
 
   {% if complete %}
     <div class="checkout-success">
@@ -44,11 +44,11 @@
     {% if sale.status == 'open' or sale.status == 'completed' %}
     <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" hx-sync="this:drop" data-checkout-form data-nx-critical-form>
       {% if form.errors or not form.billing_only and form.mode.value == 'split' and payment_formset.errors or not form.billing_only and form.mode.value == 'split' and payment_formset.non_form_errors %}
-      <div class="tpv-errors" role="alert" data-checkout-error-summary>
+      <div class="tpv-errors" role="alert" id="checkout-form-errors" tabindex="-1" data-checkout-error-summary>
         <strong>Revisa los datos de la operación.</strong>
-        {% for field in form %}{% for error in field.errors %}<p>{{ error }}</p>{% endfor %}{% endfor %}
+        {% for field in form %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">{{ error }}</p>{% endfor %}{% endfor %}
         {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
-        {% if not form.billing_only and form.mode.value == 'split' %}{% for part in payment_formset %}{% for field in part %}{% for error in field.errors %}<p>Parte {{ forloop.parentloop.parentloop.counter }} · {{ error }}</p>{% endfor %}{% endfor %}{% endfor %}
+        {% if not form.billing_only and form.mode.value == 'split' %}{% for part in payment_formset %}{% for field in part %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">Parte {{ forloop.parentloop.parentloop.counter }} · {{ error }}</p>{% endfor %}{% endfor %}{% endfor %}
         {% for error in payment_formset.non_form_errors %}<p>{{ error }}</p>{% endfor %}{% endif %}
         <a href="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-get="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML">Consultar estado actualizado</a>
       </div>

@@ -3,9 +3,34 @@ import { rememberCheckout, checkoutUnknown, offerCheckoutRead, prepareCheckoutRe
 let initialized = false;
 const mutating = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const requestSurfaces = new WeakMap();
+// Ownership is visual only. Never cancel an economic POST or infer rollback.
+const checkoutPanels = new WeakMap();
+const checkoutRequests = new WeakMap();
 const requestElement = (detail) => detail.elt || detail.requestConfig?.elt;
 const targetElement = (detail) => detail.target || detail.requestConfig?.target;
 const requestVerb = (detail) => (detail.requestConfig?.verb || detail.verb || "GET").toUpperCase();
+const beginCheckoutRequest = (event) => {
+  const detail = event.detail, target = targetElement(detail);
+  if (target?.id !== "checkout-panel") return true;
+  const previous = checkoutPanels.get(target);
+  const mutation = mutating.has(requestVerb(detail));
+  if (previous?.processing || (mutation && target.querySelector('[data-checkout-form][data-nx-unknown="true"]'))) {
+    event.preventDefault();
+    return false;
+  }
+  const revision = (previous?.revision || 0) + 1;
+  checkoutPanels.set(target, { revision, processing: mutation });
+  checkoutRequests.set(detail.xhr, { target, revision });
+  // Bounded browser waiting; timeout still means an unknown server outcome.
+  // Existing explicit per-request deadlines take precedence.
+  if (mutation && !detail.xhr.timeout) detail.xhr.timeout = 60000;
+  return true;
+};
+const staleCheckoutRequest = (detail) => {
+  const request = checkoutRequests.get(detail.xhr);
+  if (!request) return targetElement(detail)?.id === "checkout-panel";
+  return !request.target.isConnected || checkoutPanels.get(request.target)?.revision !== request.revision;
+};
 const criticalForm = (detail) => requestElement(detail)?.closest?.("[data-nx-critical-form]");
 const requestSurface = (detail) => criticalForm(detail)?.closest("[data-nx-modal], [data-nx-drawer]") || targetElement(detail)?.closest?.("[data-nx-modal], [data-nx-drawer]");
 const setBusy = (detail, busy) => {
@@ -59,7 +84,12 @@ const restoreFeedbackHost = ({ hide = false } = {}) => {
   host.append(region);
   region.classList.remove("nx-feedback--in-surface");
 };
-const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail, false); };
+const finishRequest = (detail) => {
+  if (staleCheckoutRequest(detail)) return;
+  setBusy(detail, false); setProcessing(detail, false);
+  const request = checkoutRequests.get(detail.xhr);
+  if (request) checkoutPanels.get(request.target).processing = false;
+};
 export const initHtmxEvents = () => {
   if (initialized) return;
   document.addEventListener("submit", (event) => {
@@ -78,7 +108,10 @@ export const initHtmxEvents = () => {
       if (token) event.detail.headers["X-CSRFToken"] = token;
     }
   });
-  document.body.addEventListener("htmx:beforeRequest", (event) => { rememberCheckout(event.detail); setBusy(event.detail, true); setProcessing(event.detail, true); });
+  document.body.addEventListener("htmx:beforeRequest", (event) => {
+    if (!beginCheckoutRequest(event)) return;
+    rememberCheckout(event.detail); setBusy(event.detail, true); setProcessing(event.detail, true);
+  });
   document.body.addEventListener("htmx:afterRequest", (event) => { finishRequest(event.detail); checkoutResponseFinished(event.detail); });
   document.body.addEventListener("htmx:afterSwap", (event) => {
     if (checkoutReadFinished(event.detail) || checkoutResponseFinished(event.detail)) restoreFeedbackHost({ hide: true });
@@ -89,6 +122,11 @@ export const initHtmxEvents = () => {
         && region.dataset.surface === surface?.id) restoreFeedbackHost({ hide: true });
   });
   const transportError = (event) => {
+    if (staleCheckoutRequest(event.detail)) {
+      // Retain a disconnected POST's identity without replacing newer feedback.
+      if (mutating.has(requestVerb(event.detail))) checkoutUnknown(event.detail);
+      return;
+    }
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
     const surface = resolvedRequestSurface(event.detail);
     finishRequest(event.detail);
@@ -102,6 +140,10 @@ export const initHtmxEvents = () => {
   };
   for (const type of ["htmx:sendError", "htmx:timeout", "htmx:sendAbort"]) document.body.addEventListener(type, transportError);
   document.body.addEventListener("htmx:beforeSwap", (event) => {
+    if (staleCheckoutRequest(event.detail)) {
+      event.detail.shouldSwap = false; event.detail.isError = false;
+      return;
+    }
     prepareCheckoutRead(event.detail);
     const status = event.detail.xhr.status;
     if (status === 422) { event.detail.shouldSwap = true; event.detail.isError = false; return; }
