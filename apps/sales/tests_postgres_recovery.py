@@ -285,7 +285,7 @@ class CheckoutHTTPIntegrityTests(StaticLiveServerTestCase):
                     ):
                         outcomes = [clients[0].post(sale, bodies[0])]
                     outcomes.append(clients[1].post(sale, bodies[0]))
-                    self.assertEqual(outcomes, [409, 409])
+                    self.assertEqual(outcomes, [409, 422])
                 elif case == 8:
                     first = clients[0].post(sale, bodies[0])
                     self.assertEqual(first, 200)

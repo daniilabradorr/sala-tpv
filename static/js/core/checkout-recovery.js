@@ -2,7 +2,7 @@
 const attempts = new WeakMap();
 const reads = new WeakMap();
 const prefix = 'netxodo:checkout-recovery:v1:';
-const allowed = /^(mode|method|cash_received|external_reference|series|cart_version|payment_idempotency_key|billing_idempotency_key|payments-(TOTAL_FORMS|INITIAL_FORMS|MIN_NUM_FORMS|MAX_NUM_FORMS|\d+-(method|amount|cash_received|external_reference|idempotency_key|DELETE)))$/;
+const allowed = /^(mode|method|amount|recovery_cash_session|recovery_confirm|cash_received|external_reference|series|cart_version|payment_idempotency_key|billing_idempotency_key|payments-(TOTAL_FORMS|INITIAL_FORMS|MIN_NUM_FORMS|MAX_NUM_FORMS|\d+-(method|amount|cash_received|external_reference|idempotency_key|DELETE)))$/;
 const memory = new Map();
 const checkoutForm = detail => (detail.elt || detail.requestConfig?.elt)?.closest?.('[data-checkout-form]');
 const readKey = checkout => checkout?.dataset.checkoutRecoveryKey;
@@ -141,6 +141,42 @@ export const prepareCheckoutRead = detail => {
     warning.textContent = 'No se puede recuperar la operación guardada. Consulta la venta y solicita ayuda antes de volver a cobrar.';
     checkout.append(warning);
   } else {
+    if (checkout.dataset.paymentRecovery === 'true') {
+      // An explicit new-session confirmation is not a replay of all old parts.
+      // Keep every confirmed UUID in history; restore only one pending intent.
+      const fields = Object.fromEntries(record.fields);
+      const confirmed = new Set([...checkout.querySelectorAll('[data-confirmed-payment-key]')].map(row => row.dataset.confirmedPaymentKey));
+      const set = (name, value) => {
+        const field = [...form.elements].find(element => element.name === name);
+        if (field && value !== undefined) field.value = value;
+      };
+      set('billing_idempotency_key', fields.billing_idempotency_key);
+      if (fields.recovery_cash_session) {
+        if (confirmed.has(fields.payment_idempotency_key)) {
+          // That piece is already durable. The server's fresh form represents
+          // only the remaining balance, never a second copy of the paid piece.
+          forget(key);
+        } else {
+          for (const name of ['payment_idempotency_key', 'cart_version', 'method', 'amount', 'cash_received', 'external_reference', 'recovery_cash_session']) set(name, fields[name]);
+        }
+      } else {
+        const pending = fields.mode === 'split' ? record.fields.filter(([name, value]) => /^payments-\d+-idempotency_key$/.test(name) && !confirmed.has(value) && !fields[name.replace('idempotency_key', 'DELETE')]) :
+          (confirmed.has(fields.payment_idempotency_key) ? [] : [['payment_idempotency_key', fields.payment_idempotency_key]]);
+        if (pending.length === 1 && pending[0][1]) {
+          const source = pending[0][0].replace(/(payment_)?idempotency_key$/, '');
+          set('payment_idempotency_key', pending[0][1]);
+          for (const name of ['method', 'amount', 'cash_received', 'external_reference']) set(name, fields[source + name]);
+          set('cart_version', fields.cart_version);
+        }
+      }
+      // The destination and acknowledgment remain visible. Never auto-POST or
+      // carry an old checkbox into a new cash-session choice.
+      const acknowledgment = form.elements.namedItem('recovery_confirm');
+      if (acknowledgment) acknowledgment.checked = false;
+      reads.set(detail.xhr, {key, complete: false});
+      detail.serverResponse = template.innerHTML;
+      return;
+    }
     // Replay the same intent only after an explicit authorized GET. Do not turn
     // a split into a new single payment, rewrite cart_version, or generate UUIDs.
     const csrf = form.querySelector('[name="csrfmiddlewaretoken"]');
@@ -190,7 +226,7 @@ export const checkoutResponseFinished = detail => {
   if ((status === 409 && detail.xhr.getResponseHeader('X-Netxodo-Allow-Error-Swap') === 'true') || status === 422 ||
       (status === 200 && detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation'))) forget(attempt.key);
   const originalKey = attempt.fields.find(([name]) => name === 'payment_idempotency_key')?.[1];
-  const confirmed = status === 200 && originalKey && detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation') === originalKey;
+  const confirmed = status === 200 && originalKey && (detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation') === originalKey || detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Payment') === originalKey);
   if (confirmed) forget(attempt.key);
   else if (status === 200 && !detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation')) {
     // A known paid/document-pending response also needs its original Billing

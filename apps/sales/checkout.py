@@ -119,6 +119,88 @@ def billing_recovery_ready(sale):
     return balance["paid_total"] > 0 and balance["pending_amount"] == Decimal("0.00")
 
 
+def pending_payment_recovery(sale):
+    """Read-only eligibility; never reassign a completed Sale's cash context."""
+    return (
+        sale.status == SaleStatusChoices.COMPLETED
+        and sale.cash_session_id is not None
+        and CashSession.objects.filter(
+            pk=sale.cash_session_id,
+            business_id=sale.business_id,
+            store_id=sale.store_id,
+            status=CashSession.Status.CLOSED,
+            closed_at__isnull=False,
+        ).exists()
+        and _get_sale_payment_balance(sale)["pending_amount"] > 0
+    )
+
+
+def checkout_pending_amount(sale):
+    return _get_sale_payment_balance(sale)["pending_amount"]
+
+
+@transaction.atomic
+def recover_pending_checkout_payment(
+    *, business, sale, user, intent, cash_session_id, expected_version
+):
+    """One T2 only: Sale guard + existing Payments service, never Inventory/T3.
+
+    The nested Payments atomic belongs to this same single-payment transaction.
+    Lock order remains Sale -> destination CashSession, as in Payments.
+    """
+    locked = Sale.objects.select_for_update(of=("self",)).get(
+        pk=sale.pk, business=business, store_id=sale.store_id
+    )
+    if not can_sell_in_store(user, locked.store):
+        raise ValidationError("No tienes permiso para recuperar este cobro.")
+    if (
+        locked.cart_version != expected_version
+        or locked.status != SaleStatusChoices.COMPLETED
+    ):
+        raise CheckoutConflict(
+            "La venta ha cambiado. Consulta el estado antes de recuperar el cobro."
+        )
+    historical_closed = CashSession.objects.filter(
+        pk=locked.cash_session_id,
+        business=business,
+        store_id=locked.store_id,
+        status=CashSession.Status.CLOSED,
+        closed_at__isnull=False,
+    ).exists()
+    if not historical_closed or cash_session_id == locked.cash_session_id:
+        raise CheckoutConflict(
+            "Esta recuperación requiere la sesión histórica cerrada y otra sesión válida."
+        )
+    existing = Payment.objects.filter(
+        business=business, idempotency_key=intent.idempotency_key
+    ).exists()
+    balance = _get_sale_payment_balance(locked)
+    if not existing and (
+        intent.amount <= 0 or intent.amount > balance["pending_amount"]
+    ):
+        raise CheckoutConflict(
+            "El importe pendiente ha cambiado. Consulta los pagos confirmados."
+        )
+    # Existing keys still pass the service's full compatibility/auth checks.
+    # A confirmed historical part can never be moved into this new session.
+    payment = register_sale_payment(
+        business=business,
+        sale_id=locked.pk,
+        method_id=intent.method_id,
+        amount=intent.amount,
+        user=user,
+        idempotency_key=intent.idempotency_key,
+        cash_session_id=cash_session_id,
+        external_reference=intent.external_reference,
+        notes=f"Recuperación de checkout. Sesión histórica #{locked.cash_session_id}; sesión de cobro #{cash_session_id}.",
+    )
+    if payment.status != PaymentRecordStatus.COMPLETED:
+        raise CheckoutConflict(
+            "Esta clave corresponde a un pago no confirmado o cancelado. Consulta el estado antes de crear otra intención."
+        )
+    return payment
+
+
 def _preflight(*, business, sale, intents, series_id, allow_split):
     if sale.status not in (SaleStatusChoices.OPEN, SaleStatusChoices.COMPLETED):
         raise CheckoutConflict("La venta no se puede procesar desde su estado actual.")
