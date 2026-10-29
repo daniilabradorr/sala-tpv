@@ -548,8 +548,9 @@ class CheckoutIdentityContractTests(TransactionTestCase):
         client.force_login(d.user)
         http = payload(d, sale)
         http["series"] = series.pk
+        http["billing_idempotency_key"] = str(document.idempotency_key)
         response = client.post(url(sale), http, HTTP_HX_REQUEST="true")
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 200)
         method.is_active = False
         method.save(update_fields=["is_active"])
         with self.assertRaises(ValidationError):

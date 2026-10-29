@@ -50,19 +50,32 @@ class CheckoutForm(forms.Form):
     series = forms.ModelChoiceField(BillingSeries.objects.none(), required=False)
 
     def __init__(
-        self, *args, methods, series, method_choices=None, series_choices=None, **kwargs
+        self,
+        *args,
+        methods,
+        series,
+        method_choices=None,
+        series_choices=None,
+        billing_only=False,
+        **kwargs,
     ):
         kwargs.setdefault("initial", {})
         kwargs["initial"].setdefault("mode", "single")
         kwargs["initial"].setdefault("payment_idempotency_key", uuid.uuid4())
         kwargs["initial"].setdefault("billing_idempotency_key", uuid.uuid4())
         super().__init__(*args, **kwargs)
+        self.billing_only = billing_only
         self.fields["method"].queryset = methods
         self.fields["series"].queryset = series
         if method_choices is not None:
             self.fields["method"].choices = method_choices
         if series_choices is not None:
             self.fields["series"].choices = series_choices
+        if billing_only:
+            # Historical receipt hints only. They cannot produce PaymentIntents.
+            # UUIDs and the tenant-scoped fiscal series keep their validation.
+            for name in ("mode", "method", "cash_received", "external_reference"):
+                self.fields[name] = forms.CharField(required=False)
 
 
 class CheckoutPaymentPartForm(forms.Form):

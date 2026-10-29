@@ -20,7 +20,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views import View
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db import transaction
 
 from apps.core.htmx import add_hx_trigger
@@ -28,6 +28,7 @@ from apps.customers.forms import CustomerCreateForm
 from apps.customers.services import CustomerService
 
 from apps.billing.models import (
+    BillingSeries,
     BillingDocumentStatusChoices,
     BillingDocumentTypeChoices,
 )
@@ -66,6 +67,7 @@ from apps.sales.checkout import (
     CheckoutConflict,
     checkout_options,
     checkout_state,
+    billing_recovery_ready,
     run_checkout,
 )
 from apps.sales.selectors import (
@@ -1396,6 +1398,15 @@ class SaleCheckoutView(
 
     def _forms(self, request, business, sale):
         options = checkout_options(business=business, sale=sale)
+        billing_only = billing_recovery_ready(sale)
+        if billing_only:
+            document = checkout_state(business=business, sale=sale, refresh=False)[
+                "document"
+            ]
+            if document is not None:
+                options["series"] = options["series"] | BillingSeries.objects.filter(
+                    pk=document.series_id, business=business
+                )
         methods = options["methods"]
         available_methods = list(methods)
         method_count = len(available_methods)
@@ -1414,6 +1425,7 @@ class SaleCheckoutView(
             method_choices=[("", "---------")]
             + [(m.pk, str(m)) for m in available_methods],
             series_choices=[("", "---------")] + [(c.pk, str(c)) for c in candidates],
+            billing_only=billing_only,
         )
         formset = CheckoutPaymentFormSet(
             data,
@@ -1527,7 +1539,9 @@ class SaleCheckoutView(
         forms_bundle = self._forms(request, business, sale)
         options, form, formset, _method_count = forms_bundle
         mode = request.POST.get("mode", "single")
-        valid = form.is_valid() and (mode != "split" or formset.is_valid())
+        valid = form.is_valid() and (
+            form.billing_only or mode != "split" or formset.is_valid()
+        )
         if not valid:
             response = self._render(
                 request, business, store, sale, forms_bundle=forms_bundle
@@ -1537,7 +1551,9 @@ class SaleCheckoutView(
             return response
         pos_settings = POSSettings.objects.filter(business=business).first()
         intents = []
-        if sale.pending_amount > 0 or sale.payment_status == "paid":
+        if not form.billing_only and (
+            sale.pending_amount > 0 or sale.payment_status == "paid"
+        ):
             if mode == "split":
                 intents = [
                     PaymentIntent(
@@ -1590,6 +1606,50 @@ class SaleCheckoutView(
                 ]
 
         def confirmed_cash_presentation():
+            if form.billing_only:
+                # Optional historical tender is display-only, matched against a
+                # persisted payment. Never construct an economic intent from it.
+                changes, tenders = [], []
+                prefixes = (
+                    [""] if mode != "split" else [f"payments-{i}-" for i in range(50)]
+                )
+                seen = set()
+                for payment in Payment.objects.select_related("method").filter(
+                    business=business, sale=sale, status="completed"
+                ):
+                    for prefix in prefixes:
+                        key_name = prefix + (
+                            "idempotency_key" if prefix else "payment_idempotency_key"
+                        )
+                        if (
+                            str(payment.idempotency_key) != request.POST.get(key_name)
+                            or payment.pk in seen
+                        ):
+                            continue
+                        try:
+                            raw_tender = request.POST.get(
+                                prefix + "cash_received", ""
+                            ).strip()
+                            tender = (
+                                Decimal(raw_tender) if raw_tender else payment.amount
+                            )
+                        except (InvalidOperation, ValueError):
+                            continue
+                        if (
+                            payment.method.affects_cash_register
+                            and str(payment.method_id)
+                            == request.POST.get(prefix + "method")
+                            and tender.is_finite()
+                            and tender <= Decimal("999999999999.99")
+                            and tender >= payment.amount
+                        ):
+                            seen.add(payment.pk)
+                            changes.append(tender - payment.amount)
+                            tenders.append(tender)
+                return {
+                    "cash_change": sum(changes, Decimal("0.00")) if changes else None,
+                    "cash_received": sum(tenders, Decimal("0.00")) if tenders else None,
+                }
             payments = {
                 str(payment.idempotency_key): payment
                 for payment in Payment.objects.select_related("method").filter(
@@ -1628,6 +1688,7 @@ class SaleCheckoutView(
                 billing_key=form.cleaned_data["billing_idempotency_key"],
                 expected_version=expected_version,
                 allow_split=bool(pos_settings and pos_settings.allow_split_payments),
+                billing_only=form.billing_only,
             )
         except (ValidationError, ValueError) as error:
             # Re-read persisted state so partial success is represented truthfully.

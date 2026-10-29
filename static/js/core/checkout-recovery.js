@@ -191,6 +191,12 @@ export const checkoutResponseFinished = detail => {
       (status === 200 && detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation'))) forget(attempt.key);
   const originalKey = attempt.fields.find(([name]) => name === 'payment_idempotency_key')?.[1];
   const confirmed = status === 200 && originalKey && detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation') === originalKey;
+  if (confirmed) forget(attempt.key);
+  else if (status === 200 && !detail.xhr.getResponseHeader('X-Netxodo-Confirmed-Operation')) {
+    // A known paid/document-pending response also needs its original Billing
+    // identity if the cashier closes/reopens the checkout or reloads the page.
+    keep({key: attempt.key, action: attempt.action, fields: attempt.fields});
+  }
   const region = document.getElementById('nx-feedback');
   const ownsFeedback = region?.dataset.checkoutRecoveryKey === attempt.key;
   if (confirmed && ownsFeedback) region.querySelector('[data-nx-checkout-status]')?.remove();

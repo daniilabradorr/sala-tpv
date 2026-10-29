@@ -1,4 +1,4 @@
-"""Presentation regressions; H01's economic routing remains unchanged."""
+"""Presentation regressions retained, with H01 routing authorized by P01."""
 
 from unittest.mock import patch
 
@@ -17,43 +17,23 @@ class CheckoutRecoveryPresentationTests(TestCase):
         self.sale, _ = self.dataset.sale(1)
         self.client.force_login(self.dataset.user)
 
-    def test_h01_remains_rejected_but_error_is_visible_without_javascript(self):
+    def test_h01_recovers_with_inactive_method_without_another_payment(self):
         body = payload(self.dataset, self.sale)
         with patch(
             "apps.sales.checkout.issue_sale_document",
             side_effect=ValidationError("Fallo fiscal sintético"),
         ):
             self.client.post(url(self.sale), body)
-        self.sale.refresh_from_db()
-        self.assertEqual(self.sale.payment_status, "paid")
         card = next(m for m in self.dataset.methods if m.code == "card")
         card.is_active = False
-        card.save()
-        response = self.client.post(url(self.sale), body, HTTP_HX_REQUEST="true")
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("method", response.context["form"].errors)
-        self.assertContains(response, "data-checkout-error-summary", status_code=422)
-        self.assertContains(
-            response, "El cobro se ha registrado correctamente.", status_code=422
-        )
-        self.assertContains(response, "Consultar estado actualizado", status_code=422)
+        card.save(update_fields=["is_active"])
+        with patch("apps.sales.checkout.register_sale_payment") as payment:
+            response = self.client.post(url(self.sale), body, HTTP_HX_REQUEST="true")
+        self.assertContains(response, "VENTA COMPLETADA")
+        payment.assert_not_called()
         self.assertEqual(Payment.objects.filter(sale=self.sale).count(), 1)
-        self.assertFalse(BillingDocument.objects.filter(sale=self.sale).exists())
-        # Existing GET and billing-only request, not a new routing contract.
-        fresh = self.client.get(url(self.sale))
-        body.update(
-            method="",
-            payment_idempotency_key=str(
-                fresh.context["form"]["payment_idempotency_key"].value()
-            ),
-            billing_idempotency_key=str(
-                fresh.context["form"]["billing_idempotency_key"].value()
-            ),
-        )
-        success = self.client.post(url(self.sale), body)
-        self.assertContains(success, "VENTA COMPLETADA")
-        self.assertEqual(Payment.objects.filter(sale=self.sale).count(), 1)
-        self.assertEqual(BillingDocument.objects.filter(sale=self.sale).count(), 1)
+        document = BillingDocument.objects.get(sale=self.sale)
+        self.assertEqual(str(document.idempotency_key), body["billing_idempotency_key"])
 
     def test_get_declares_only_authoritative_display_state(self):
         response = self.client.get(url(self.sale), HTTP_HX_REQUEST="true")

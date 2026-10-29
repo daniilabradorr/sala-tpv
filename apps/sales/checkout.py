@@ -14,12 +14,13 @@ from django.utils import timezone
 
 from apps.billing.models import BillingDocumentStatusChoices, BillingDocumentTypeChoices
 from apps.billing.selectors import active_billing_series, billing_documents_for_sale
-from apps.billing.services import issue_sale_document
+from apps.billing.services import issue_sale_document, BillingAlreadyIssued
 from apps.cash_register.models import CashSession
 from apps.business_config.models import POSSettings
 from apps.payments.models import Payment, PaymentStatusChoices as PaymentRecordStatus
 from apps.payments.selectors import get_active_payment_methods, get_sale_payments
-from apps.payments.services import register_sale_payment
+from apps.payments.services import register_sale_payment, _get_sale_payment_balance
+from apps.users.helpers import can_sell_in_store
 from apps.sales.models import (
     Sale,
     PaymentStatusChoices,
@@ -104,6 +105,18 @@ def checkout_options(*, business, sale):
         "series": series,
         "document_type": document_type,
     }
+
+
+def billing_recovery_ready(sale):
+    """Server-side routing hint; run_checkout repeats it under the Sale lock."""
+    if not (
+        sale.status == SaleStatusChoices.COMPLETED
+        and sale.payment_status == PaymentStatusChoices.PAID
+        and sale.pending_amount == Decimal("0.00")
+    ):
+        return False
+    balance = _get_sale_payment_balance(sale)
+    return balance["paid_total"] > 0 and balance["pending_amount"] == Decimal("0.00")
 
 
 def _preflight(*, business, sale, intents, series_id, allow_split):
@@ -225,6 +238,7 @@ def run_checkout(
     billing_key,
     allow_split,
     expected_version=None,
+    billing_only=False,
 ):
     """Advance durable steps; an exception never rolls earlier modules back."""
     with transaction.atomic():
@@ -235,8 +249,25 @@ def run_checkout(
             raise CheckoutConflict(
                 "El carrito ha cambiado. Actualiza y revisa el total antes de cobrar."
             )
+        if billing_only:
+            if not can_sell_in_store(user, sale.store):
+                raise ValidationError("No tienes permiso para recuperar esta emisión.")
+            if intents or not billing_recovery_ready(sale):
+                raise CheckoutConflict(
+                    "El saldo o estado de la venta ha cambiado. Consulta antes de emitir."
+                )
         state = checkout_state(business=business, sale=sale)
         if state["complete"]:
+            if billing_only and (
+                str(billing_key) != str(state["document"].idempotency_key)
+                or (
+                    series_id is not None
+                    and int(series_id) != state["document"].series_id
+                )
+            ):
+                raise CheckoutConflict(
+                    "El documento ya está emitido con otra intención. Consulta el documento existente."
+                )
             return state
         chosen_series = _preflight(
             business=business,
@@ -304,12 +335,21 @@ def run_checkout(
                 ) from error
             raise
         sale.refresh_from_db()
-    if sale.pending_amount == 0 and initial_document(sale, business) is None:
-        issue_sale_document(
-            business=business,
-            sale_id=sale.pk,
-            series_id=chosen_series,
-            issued_by=user,
-            idempotency_key=billing_key,
-        )
+    if sale.pending_amount == 0 and (
+        billing_only or initial_document(sale, business) is None
+    ):
+        try:
+            issue_sale_document(
+                business=business,
+                sale_id=sale.pk,
+                series_id=chosen_series,
+                issued_by=user,
+                idempotency_key=billing_key,
+            )
+        except BillingAlreadyIssued as error:
+            if billing_only:
+                raise CheckoutConflict(
+                    "El documento ya se ha emitido. Consulta su estado."
+                ) from error
+            raise
     return checkout_state(business=business, sale=sale)
