@@ -1,3 +1,5 @@
+import { rememberCheckout, checkoutUnknown, offerCheckoutRead, prepareCheckoutRead, checkoutReadFinished, checkoutResponseFinished, resumeCheckoutUncertainty } from "./checkout-recovery.js";
+
 let initialized = false;
 const mutating = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const requestSurfaces = new WeakMap();
@@ -27,13 +29,15 @@ const setProcessing = (detail, processing) => {
   const button = detail.requestConfig?.triggeringEvent?.submitter || form?.querySelector('[type="submit"]');
   if (!button?.isConnected) return;
   if (processing) { button.dataset.nxOriginalText = button.textContent; button.disabled = true; if (button.dataset.loadingText) button.textContent = button.dataset.loadingText; }
-  else { button.disabled = false; if (button.dataset.nxOriginalText) button.textContent = button.dataset.nxOriginalText; }
+  else { button.disabled = form?.dataset.nxUnknown === "true"; if (button.dataset.nxOriginalText) button.textContent = button.dataset.nxOriginalText; }
 };
 const resolvedRequestSurface = (detail) =>
   requestSurface(detail) || (detail.xhr ? requestSurfaces.get(detail.xhr) : null);
 const feedback = (message, action = "", surface = null, operation = "") => {
   const region = document.getElementById("nx-feedback"); if (!region) return;
   const host = document.querySelector("[data-nx-feedback-host]");
+  region.querySelector("[data-nx-checkout-status]")?.remove();
+  delete region.dataset.checkoutRecoveryKey;
   if (surface?.isConnected) {
     surface.prepend(region);
     region.classList.add("nx-feedback--in-surface");
@@ -59,7 +63,7 @@ const finishRequest = (detail) => { setBusy(detail, false); setProcessing(detail
 export const initHtmxEvents = () => {
   if (initialized) return;
   document.addEventListener("submit", (event) => {
-    if (event.target.matches("[data-nx-critical-form]") && event.target.dataset.nxProcessing === "true") {
+    if (event.target.matches("[data-nx-critical-form]") && (event.target.dataset.nxProcessing === "true" || event.target.dataset.nxUnknown === "true")) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -74,24 +78,31 @@ export const initHtmxEvents = () => {
       if (token) event.detail.headers["X-CSRFToken"] = token;
     }
   });
-  document.body.addEventListener("htmx:beforeRequest", (event) => { setBusy(event.detail, true); setProcessing(event.detail, true); });
-  document.body.addEventListener("htmx:afterRequest", (event) => finishRequest(event.detail));
+  document.body.addEventListener("htmx:beforeRequest", (event) => { rememberCheckout(event.detail); setBusy(event.detail, true); setProcessing(event.detail, true); });
+  document.body.addEventListener("htmx:afterRequest", (event) => { finishRequest(event.detail); checkoutResponseFinished(event.detail); });
   document.body.addEventListener("htmx:afterSwap", (event) => {
+    if (checkoutReadFinished(event.detail) || checkoutResponseFinished(event.detail)) restoreFeedbackHost({ hide: true });
     const confirmed = event.detail.xhr?.getResponseHeader("X-Netxodo-Confirmed-Operation");
     const region = document.getElementById("nx-feedback");
     const surface = resolvedRequestSurface(event.detail);
     if (confirmed && region?.dataset.operation === confirmed
         && region.dataset.surface === surface?.id) restoreFeedbackHost({ hide: true });
   });
-  document.body.addEventListener("htmx:sendError", (event) => {
+  const transportError = (event) => {
     const uncertain = mutating.has(requestVerb(event.detail)) || Boolean(criticalForm(event.detail));
     const surface = resolvedRequestSurface(event.detail);
     finishRequest(event.detail);
     if (uncertain) feedback("No podemos confirmar el resultado de la operación.", "Comprueba el estado antes de repetir.", surface,
       String(event.detail.requestConfig?.parameters?.payment_idempotency_key || ""));
     else feedback("No se ha podido cargar la información.", "Comprueba la conexión e inténtalo de nuevo.", surface);
-  });
+    if (uncertain) {
+      checkoutUnknown(event.detail);
+      offerCheckoutRead(document.getElementById("nx-feedback"), event.detail);
+    }
+  };
+  for (const type of ["htmx:sendError", "htmx:timeout", "htmx:sendAbort"]) document.body.addEventListener(type, transportError);
   document.body.addEventListener("htmx:beforeSwap", (event) => {
+    prepareCheckoutRead(event.detail);
     const status = event.detail.xhr.status;
     if (status === 422) { event.detail.shouldSwap = true; event.detail.isError = false; return; }
     if (status === 409 && event.detail.xhr.getResponseHeader("X-Netxodo-Allow-Error-Swap") === "true") {
@@ -105,6 +116,10 @@ export const initHtmxEvents = () => {
       feedback(uncertain ? "No podemos confirmar el resultado de la operación." : message,
         uncertain ? "Comprueba el estado antes de repetir." : "", resolvedRequestSurface(event.detail),
         uncertain ? String(event.detail.requestConfig?.parameters?.payment_idempotency_key || "") : "");
+      if (uncertain) {
+        checkoutUnknown(event.detail);
+        offerCheckoutRead(document.getElementById("nx-feedback"), event.detail);
+      }
     }
   });
   document.body.addEventListener("htmx:responseError", (event) => finishRequest(event.detail));
@@ -115,5 +130,6 @@ export const initHtmxEvents = () => {
   });
   document.addEventListener("click", (event) => { if (event.target.closest("[data-nx-feedback-close]")) restoreFeedbackHost({ hide: true }); });
   document.addEventListener("close", (event) => { if (event.target.matches?.("[data-nx-modal], [data-nx-drawer]")) restoreFeedbackHost(); }, true);
+  resumeCheckoutUncertainty();
   initialized = true;
 };
