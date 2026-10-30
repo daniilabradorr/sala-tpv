@@ -4,6 +4,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.audit.constants import AuditEventType, AuditModule
 from apps.audit.services import log_event
 from apps.business_config.models import POSSettings
@@ -308,6 +309,7 @@ def register_sale_payment(
     _validate_user(business=business, store=sale.store, user=user)
     if sale.status != SaleStatusChoices.COMPLETED:
         raise ValidationError({"sale": "Solo se pueden cobrar ventas completadas."})
+    ensure_eur_for_business(business.pk)
     method = _method(business=business, method_id=method_id)
     amount = _amount(amount)
     existing = _existing(
@@ -448,6 +450,7 @@ def register_refund(
     )
     if returned.status != SaleReturnStatusChoices.COMPLETED:
         raise ValidationError({"sale_return": "La devolución debe estar completada."})
+    ensure_eur_for_business(business.pk)
     method = _method(business=business, method_id=method_id, refund=True)
     amount = _amount(amount)
     existing = _existing(
@@ -572,6 +575,7 @@ def register_sale_on_account(*, business, sale_id, user):
         )
     if sale.customer_id is None:
         raise ValidationError({"sale": "La venta debe tener un cliente."})
+    ensure_eur_for_business(business.pk)
     existing = CustomerAccountEntry.objects.filter(
         business=business,
         sale=sale,
@@ -642,6 +646,7 @@ def cancel_payment(*, business, payment_id, user, pin=None):
         return payment
     if payment.status != PaymentStatusChoices.PENDING:
         raise ValidationError({"payment": "Solo se pueden cancelar pagos pendientes."})
+    ensure_eur_for_business(business.pk)
     previous_status = payment.status
     payment.status = PaymentStatusChoices.CANCELLED
     payment.save(update_fields=["status", "updated_at"])

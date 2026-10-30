@@ -22,6 +22,10 @@ class BusinessProfileForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["currency_code"].help_text = (
+            "Solo EUR para nuevas configuraciones. Una moneda histórica distinta "
+            "se conserva y bloquea las nuevas operaciones monetarias."
+        )
         wire_field_accessibility(self)
 
     def clean_logo_upload(self):

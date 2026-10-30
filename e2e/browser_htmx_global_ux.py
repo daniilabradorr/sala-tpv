@@ -7,6 +7,8 @@ Run with::
 
 import re
 
+import os
+
 from django.conf import settings
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.test import override_settings
@@ -53,7 +55,9 @@ class BrowserHtmxGlobalUxTests(StaticLiveServerTestCase):
         self.product = seeded.products[0]
 
     def _browser_page(self, playwright, width=1440):
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+        )
         context = browser.new_context(viewport={"width": width, "height": 900})
         page = context.new_page()
         errors = []

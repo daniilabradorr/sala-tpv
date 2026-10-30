@@ -1,6 +1,8 @@
 """Real Chromium coverage for the FE-11 modal checkout."""
 
 import re
+import os
+
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -107,7 +109,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
     def test_global_start_is_direct_responsive_and_safe_to_refresh_or_go_back(self):
         sale_ids = []
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             for width in (1440, 390):
                 page = browser.new_page(viewport={"width": width, "height": 900})
                 self._login(page)
@@ -161,7 +165,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_palette_start_by_keyboard(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page()
             self._login(page)
             page.keyboard.press("Control+k")
@@ -180,7 +186,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_global_start_works_without_javascript(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(
                 java_script_enabled=False, viewport={"width": 1440, "height": 900}
             )
@@ -218,7 +226,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_card_checkout_completes_with_dominant_new_sale_action(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
@@ -240,7 +250,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def _assert_checkout_print_flow(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             context = browser.new_context(viewport={"width": 1440, "height": 900})
             context.add_init_script(
                 "window.printCalls = 0; window.print = () => { window.printCalls += 1; };"
@@ -302,7 +314,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_cash_checkout_and_change_preview(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
@@ -328,7 +342,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_split_checkout_creates_two_completed_payments(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
@@ -373,7 +389,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_invalid_split_stays_open_and_preserves_idempotency_keys(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             self._login_and_sale(page)
             dialog = self._open_checkout(page, 1440)
@@ -415,7 +433,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_checkout_responsive_escape_and_focus_contract(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             for viewport in (
                 {"width": 1440, "height": 900},
                 {"width": 900, "height": 900},
@@ -447,7 +467,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_checkout_shell_precedes_held_get_and_processing_precedes_response(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             try:
                 self._login_and_sale(page)
@@ -504,7 +526,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_cash_blank_insufficient_change_and_small_viewports(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 for viewport, tender in (
                     ({"width": 1440, "height": 900}, ""),
@@ -588,7 +612,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         )
         product.save()
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             try:
                 self._login_and_sale(page)
@@ -633,14 +659,14 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                     });
                 }""")
                 expect(page.locator("#nx-feedback")).to_be_visible()
-                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                dialog.locator("[data-nx-checkout-status]").click()
                 expect(
                     dialog.get_by_role("heading", name="VENTA COMPLETADA")
                 ).to_be_visible()
-                expect(dialog.locator(".success-summary")).to_contain_text("10,00 €")
+                expect(dialog.locator(".success-summary")).to_contain_text("40,00 €")
                 expect(page.locator("#nx-feedback")).not_to_be_visible()
                 self.assertEqual(len(requests), 1)
-                self.assertEqual(len(all_posts), 2)
+                self.assertEqual(len(all_posts), 1)
                 self.assertTrue(
                     all(f"payment_idempotency_key={key}" in body for body in all_posts)
                 )
@@ -653,7 +679,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_server_500_keeps_modal_and_same_keys_for_safe_retry(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             try:
                 self._login_and_sale(page)
@@ -685,7 +713,7 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                     dialog.locator('[name="payment_idempotency_key"]')
                 ).to_have_value(key)
                 page.unroute("**/checkout/", uncertain)
-                dialog.get_by_role("button", name=re.compile("CONFIRMAR COBRO")).click()
+                dialog.locator("[data-nx-checkout-status]").click()
                 expect(
                     dialog.get_by_role("heading", name="VENTA COMPLETADA")
                 ).to_be_visible()
@@ -704,7 +732,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         )
         product.save()
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 375, "height": 812})
             try:
                 self._login_and_sale(page)
@@ -770,7 +800,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
         )
         self.session.delete()
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             try:
                 self._login(page)
@@ -808,7 +840,9 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
 
     def test_uncertain_checkout_validation_422_preserves_feedback_data_and_keys(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             try:
                 self._login_and_sale(page)
@@ -834,17 +868,18 @@ class BrowserCheckoutTests(StaticLiveServerTestCase):
                     route.abort("failed")
 
                 page.route("**/checkout/", disconnected)
+                dialog.locator('[name="cash_received"]').fill("0.01")
                 dialog.locator(".checkout-confirm").click()
                 expect(page.locator("#nx-feedback")).to_be_visible()
                 page.unroute("**/checkout/", disconnected)
-                dialog.locator('[name="cash_received"]').fill("0.01")
+                dialog.locator("[data-nx-checkout-status]").click()
                 with page.expect_response(
                     lambda r: r.request.method == "POST" and "/checkout/" in r.url
                 ) as invalid:
                     dialog.locator(".checkout-confirm").click()
                 self.assertEqual(invalid.value.status, 422)
                 expect(dialog.locator(".tpv-errors")).to_contain_text("insuficiente")
-                expect(page.locator("#nx-feedback")).to_be_visible()
+                expect(page.locator("#nx-feedback")).to_be_hidden()
                 expect(dialog.locator('[name="cash_received"]')).to_have_value("0.01")
                 expect(
                     dialog.locator('[name="payment_idempotency_key"]')

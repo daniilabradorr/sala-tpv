@@ -39,6 +39,7 @@
                 <main id="main-content" class="site-main" tabindex="-1">
                     <div class="content-container">
                         {% include "includes/messages.html" %}
+                        {% include "includes/currency_warning.html" %}
                         {% block content %}{% endblock %}
                     </div>
                 </main>
@@ -50,6 +51,7 @@
             <main id="main-content" class="public-main" tabindex="-1">
                 <div class="public-container">
                     {% include "includes/messages.html" %}
+                        {% include "includes/currency_warning.html" %}
                     {% block public_content %}{% block content_anonymous %}{% endblock %}{% endblock %}
                 </div>
             </main>

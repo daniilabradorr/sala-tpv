@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from apps.audit.constants import AuditEventType, AuditModule
 from apps.audit.services import log_event
+from apps.business_config.currency import ensure_eur_for_business
 from apps.business_config.models import POSSettings
 from apps.cash_register.models import CashSession
 from apps.catalog.models import Product
@@ -201,6 +202,8 @@ def _validate_can_sell(*, business, store, user):
 
     if not can_sell_in_store(user, store):
         raise ValidationError({"user": "No tienes permiso para vender en esta tienda."})
+
+    ensure_eur_for_business(business.pk)
 
 
 def _validate_sensitive_action(

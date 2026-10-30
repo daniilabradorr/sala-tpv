@@ -36,6 +36,20 @@ class TPVQueryGrowthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response, queries.captured_queries
 
+    def assert_write_query_budget(self, queries, *, original_budget, currency_budget):
+        # E-P01 adds authoritative currency reads. Keep the previous ceiling
+        # for all other queries and bound this new integrity cost separately.
+        currency_reads = [
+            q
+            for q in queries
+            if q["sql"].startswith(
+                'SELECT "business_config_businessprofile"."currency_code"'
+            )
+        ]
+        self.assertGreater(len(currency_reads), 0)
+        self.assertLessEqual(len(currency_reads), currency_budget)
+        self.assertLessEqual(len(queries) - len(currency_reads), original_budget)
+
     def test_paged_grid_queries_do_not_grow_with_catalog(self):
         sale, _ = self.dataset.sale(5)
         counts = []
@@ -61,8 +75,8 @@ class TPVQueryGrowthTests(TestCase):
             for _ in range(connection.queries_log.maxlen)
         )
         result = measure(self.client, ("GET", path, {}, True))
-        self.assertEqual(result["queries"]["count"], 11)
-        self.assertEqual(result["queries"]["unique_exact"], 11)
+        self.assertEqual(result["queries"]["count"], 12)  # 11 + E-P01 warning lookup
+        self.assertEqual(result["queries"]["unique_exact"], 12)
 
     def test_cart_selector_and_render_remain_two_queries_through_fifty_lines(self):
         for size in (1, 5, 20, 50):
@@ -94,7 +108,7 @@ class TPVQueryGrowthTests(TestCase):
             },
         )
         self.assertTemplateUsed(response, "sales/partials/_workspace_header.html")
-        self.assertLessEqual(len(queries), 40)
+        self.assert_write_query_budget(queries, original_budget=40, currency_budget=3)
         for query in queries:
             self.assertNotIn('"catalog_product"', query["sql"])
             self.assertNotIn('"sales_saleline"', query["sql"])
@@ -114,7 +128,9 @@ class TPVQueryGrowthTests(TestCase):
                 data={"quantity": "1.5"},
             )
             self.assertTemplateUsed(response, "sales/partials/_line_mutation.html")
-            self.assertLessEqual(len(queries), 65)
+            self.assert_write_query_budget(
+                queries, original_budget=65, currency_budget=4
+            )
             counts.append(len(queries))
             lines[0].refresh_from_db()
             self.assertEqual(str(lines[0].quantity), "1.500")

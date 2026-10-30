@@ -224,7 +224,7 @@ class CatalogMediaDeleteTests(TestCase):
         from django.core.files.storage import FileSystemStorage
 
         from apps.core.media.services import replace_media
-        from apps.core.tests.test_media import image_upload
+        from apps.core.test_media import image_upload
 
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

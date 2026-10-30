@@ -1,0 +1,25 @@
+<div class="recovery-note" role="status">
+  <strong>La sesión original está cerrada. El stock ya está registrado.</strong>
+  <span>Conservamos los cobros confirmados. Elige una sesión abierta y registra únicamente el importe aún pendiente.</span>
+  <p>Pendiente actual: <strong>{{ recovery_pending_amount|floatformat:2 }} €</strong></p>
+</div>
+<ul aria-label="Cobros confirmados">
+  {% for payment in payments %}<li data-confirmed-payment-key="{{ payment.idempotency_key }}">{{ payment.method.name }} · {{ payment.amount|floatformat:2 }} € · sesión #{{ payment.cash_session_id|default_if_none:'sin sesión' }}</li>{% empty %}<li>No consta ningún cobro confirmado.</li>{% endfor %}
+</ul>
+<form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" hx-sync="this:drop" data-checkout-form data-payment-recovery-form data-nx-critical-form>
+  {% csrf_token %}
+  <input type="hidden" name="cart_version" value="{{ sale.cart_version }}">
+  {{ form.mode }}{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
+  {% if form.errors %}<div class="tpv-errors" role="alert" id="checkout-recovery-errors" tabindex="-1" data-checkout-error-summary><strong>Revisa la recuperación.</strong>{% for field in form %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">{{ error }}</p>{% endfor %}{% endfor %}{{ form.non_field_errors }}</div>{% endif %}
+  <p class="recovery-note" data-recovery-intent-note>Esta confirmación registra una parte pendiente. Los pagos anteriores conservan su sesión e identidad.</p>
+  <div class="form-field">{{ form.recovery_cash_session.label_tag }}{{ form.recovery_cash_session }}<small>La sesión histórica de la venta se conserva.</small></div>
+  <div class="form-field"><label for="{{ form.method.id_for_label }}">Método de la parte pendiente</label><select name="{{ form.method.html_name }}" id="{{ form.method.id_for_label }}" required><option value="">---------</option>{% for method in methods %}<option value="{{ method.pk }}" data-method-cash="{{ method.affects_cash_register|yesno:'true,false' }}" {% if form.method.value|stringformat:'s' == method.pk|stringformat:'s' %}selected{% endif %}>{{ method.name }}</option>{% endfor %}</select></div>
+  <div class="form-field"><label for="{{ form.amount.id_for_label }}">Importe pendiente que se registra ahora</label>{{ form.amount }}</div>
+  <div class="form-field"><label for="{{ form.cash_received.id_for_label }}">Efectivo entregado, si corresponde</label>{{ form.cash_received }}</div>
+  <p class="cash-change" data-recovery-change hidden aria-live="polite"><span data-recovery-cash-label>Cambio</span><strong data-recovery-cash-change>0,00 €</strong></p>
+  <div class="form-field"><label for="{{ form.external_reference.id_for_label }}">Referencia, si corresponde</label>{{ form.external_reference }}</div>
+  {% if series|length == 1 %}<p>Serie documental: {{ series.0 }}</p><input type="hidden" name="series" value="{{ series.0.pk }}">{% elif series|length > 1 %}<div class="form-field">{{ form.series.label_tag }}{{ form.series }}</div>{% endif %}
+  <label>{{ form.recovery_confirm }} {{ form.recovery_confirm.label }}</label>
+  <button class="checkout-confirm" type="submit" data-loading-text="Procesando…">CONFIRMAR PARTE PENDIENTE</button>
+  <a href="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-get="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML">Consultar estado actualizado</a>
+</form>

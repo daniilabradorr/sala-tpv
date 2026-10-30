@@ -39,8 +39,13 @@ class ProductTaxResolutionTests(TestCase):
         self.assertEqual(resolve_product_tax(product), default)
 
     def test_inactive_specific_tax_is_an_error(self):
-        tax = create_tax(business=self.business, is_active=False)
+        tax = create_tax(business=self.business)
         product = create_product(business=self.business, tax=tax)
+        # Exercise deactivation after assignment; new invalid assignments are
+        # already rejected by Product.full_clean() before the resolver runs.
+        tax.is_active = False
+        tax.save(update_fields=["is_active"])
+        create_tax(business=self.business, code="DEFAULT", is_default=True)
         with self.assertRaises(ProductTaxResolutionError):
             resolve_product_tax(product)
 
@@ -53,7 +58,7 @@ class ProductTaxResolutionTests(TestCase):
             resolve_product_tax(product)
 
     def test_other_business_default_is_never_used(self):
-        create_tax(business=create_business(), is_default=True)
+        create_tax(business=create_business(slug="other-tax-business"), is_default=True)
         product = create_product(business=self.business)
         with self.assertRaises(ProductTaxResolutionError):
             resolve_product_tax(product)
@@ -68,7 +73,7 @@ class ProductTaxResolutionTests(TestCase):
                 rate=10,
                 is_default=True,
             )
-        other = create_business()
+        other = create_business(slug="second-default-business")
         self.assertTrue(create_tax(business=other, is_default=True).is_default)
 
     def test_deprecated_profile_rate_cannot_change_resolved_tax(self):
@@ -84,3 +89,9 @@ class ProductTaxResolutionTests(TestCase):
         product = create_product(business=self.business)
         self.assertEqual(resolve_product_tax(product), default)
         self.assertEqual(self.business.pos_settings.resolve_tax_rate(), default.rate)
+
+    def test_new_product_cannot_assign_inactive_specific_tax(self):
+        tax = create_tax(business=self.business, is_active=False)
+        with self.assertRaises(ValidationError) as error:
+            create_product(business=self.business, tax=tax)
+        self.assertIn("tax", error.exception.message_dict)

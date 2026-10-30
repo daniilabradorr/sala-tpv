@@ -1,4 +1,4 @@
-<section class="checkout card" aria-labelledby="checkout-title" aria-live="polite" data-checkout data-pending="{{ sale.pending_amount }}">
+<section class="checkout card" aria-labelledby="checkout-title" aria-live="polite" data-checkout data-checkout-recovery-key="{{ request.user.pk }}:{{ sale.business_id }}:{{ store.pk }}:{{ sale.pk }}" data-checkout-complete="{{ complete|yesno:'true,false' }}" data-sale-status="{{ sale.status }}" data-payment-status="{% if payment_recovery %}{% if payments %}partial{% else %}unpaid{% endif %}{% else %}{{ sale.payment_status }}{% endif %}" data-pending="{% if payment_recovery %}{{ recovery_pending_amount }}{% else %}{{ sale.pending_amount }}{% endif %}" data-payment-recovery="{{ payment_recovery|yesno:'true,false' }}">
   <header class="checkout-heading">
     <div><span class="eyebrow">Venta #{{ sale.pk }}</span><h2 id="checkout-title">COBRAR</h2></div>
     <button type="button" class="checkout-close" data-checkout-close data-nx-modal-close aria-label="Cerrar cobro">×</button>
@@ -6,12 +6,12 @@
 
   <div class="checkout-total" aria-label="Total de la venta"><span>TOTAL</span><strong>{{ sale.total_amount|floatformat:2 }} €</strong></div>
   <ol class="checkout-progress" aria-label="Estado del checkout">
-    <li class="{% if sale.is_completed %}done{% endif %}">Venta {% if sale.is_completed %}completada{% else %}abierta{% endif %}</li>
-    <li class="{% if sale.payment_status == 'paid' %}done{% endif %}">{% if sale.payment_status == 'paid' %}Cobro registrado{% else %}Cobro pendiente{% endif %}</li>
+    <li class="{% if sale.is_completed %}done{% endif %}">Venta {{ sale.get_status_display|lower }}</li>
+    <li class="{% if not payment_recovery and sale.payment_status == 'paid' %}done{% endif %}">{% if payment_recovery %}Cobro pendiente{% elif sale.payment_status == 'paid' %}Cobro registrado{% else %}Cobro pendiente{% endif %}</li>
     <li class="{% if document %}done{% elif sale.payment_status == 'paid' %}warning{% endif %}">{% if document %}Documento emitido{% elif sale.payment_status == 'paid' %}Documento pendiente{% else %}Documento fiscal{% endif %}</li>
   </ol>
 
-  {% if checkout_errors %}<div class="tpv-errors" role="alert"><strong>No se ha podido completar el proceso.</strong>{% for message in checkout_errors %}<span>{{ message }}</span>{% endfor %}</div>{% endif %}
+  {% if checkout_errors %}<div class="tpv-errors" role="alert" id="checkout-process-errors" tabindex="-1" data-checkout-error-summary><strong>No se ha podido completar el proceso.</strong>{% for message in checkout_errors %}<span>{{ message }}</span>{% endfor %}</div>{% endif %}
 
   {% if complete %}
     <div class="checkout-success">
@@ -25,7 +25,7 @@
       </dl>
       {% include "sales/partials/_document_preview.html" %}
       <div class="success-actions">
-        {% if can_sell %}<form novalidate method="post" action="{% if sale.cash_session_id %}{% url 'sales:sale_start_for_session' store.pk sale.cash_session_id %}{% else %}{% url 'sales:sale_start' store.pk %}{% endif %}" data-nx-sale-start>{% csrf_token %}<button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
+        {% if can_sell %}<form novalidate method="post" action="{% if sale.cash_session_id and sale.cash_session.is_open and sale.cash_session.cash_register.is_active %}{% url 'sales:sale_start_for_session' store.pk sale.cash_session_id %}{% else %}{% url 'sales:sale_start' store.pk %}{% endif %}" data-nx-sale-start>{% csrf_token %}<button class="button success-primary" type="submit">NUEVA VENTA</button></form>{% endif %}
         {% if document.status == 'issued' %}<a class="button button-secondary" href="{% url 'billing:document_print' store.pk document.pk %}?autoprint=1" target="_blank" rel="noopener" hx-boost="false" aria-label="IMPRIMIR (abre una nueva pestaña)">IMPRIMIR</a>{% endif %}
         <div class="success-secondary">
           {% if sale.cash_session_id %}<a href="{% url 'cash_register:session_detail' store.pk sale.cash_session_id %}">Volver a caja</a>{% else %}<a href="{% url 'sales:sale_detail' store.pk sale.pk %}">Volver a venta</a>{% endif %}
@@ -34,11 +34,25 @@
       </div>
     </div>
   {% else %}
+    {% if payment_recovery %}
+      {% include "sales/partials/_checkout_pending_payment.html" %}
+    {% else %}
     {% if sale.payment_status == 'paid' %}
       <div class="recovery-note" role="status"><strong>El cobro se ha registrado correctamente.</strong><span>No se ha podido completar la emisión del documento. Reinténtala sin volver a cobrar.</span>{% if cash_change != None %}<span>Cambio {{ cash_change|floatformat:2 }} €</span>{% endif %}</div>
     {% elif sale.is_completed %}<div class="recovery-note"><strong>Venta completada.</strong><span>El cobro continúa pendiente.</span></div>{% endif %}
 
+    {% if sale.status == 'open' or sale.status == 'completed' %}
     <form method="post" action="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-post="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML" hx-disabled-elt="button[type=submit]" hx-sync="this:drop" data-checkout-form data-nx-critical-form>
+      {% if form.errors or not form.billing_only and form.mode.value == 'split' and payment_formset.errors or not form.billing_only and form.mode.value == 'split' and payment_formset.non_form_errors %}
+      <div class="tpv-errors" role="alert" id="checkout-form-errors" tabindex="-1" data-checkout-error-summary>
+        <strong>Revisa los datos de la operación.</strong>
+        {% for field in form %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">{{ error }}</p>{% endfor %}{% endfor %}
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        {% if not form.billing_only and form.mode.value == 'split' %}{% for part in payment_formset %}{% for field in part %}{% for error in field.errors %}<p id="checkout-error-{{ field.html_name }}-{{ forloop.counter }}" data-error-field="{{ field.html_name }}">Parte {{ forloop.parentloop.parentloop.counter }} · {{ error }}</p>{% endfor %}{% endfor %}{% endfor %}
+        {% for error in payment_formset.non_form_errors %}<p>{{ error }}</p>{% endfor %}{% endif %}
+        <a href="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-get="{% url 'sales:sale_checkout' store.pk sale.pk %}" hx-target="#checkout-panel" hx-swap="innerHTML">Consultar estado actualizado</a>
+      </div>
+      {% endif %}
       {% csrf_token %}<input type="hidden" name="cart_version" value="{{ sale.cart_version }}">{{ form.payment_idempotency_key }}{{ form.billing_idempotency_key }}
       <section class="checkout-document" aria-label="Documento fiscal">
         <span><strong>Documento</strong> {% if document_type == 'F1' %}Factura{% else %}Ticket{% endif %}</span>
@@ -103,5 +117,7 @@
       {% if form.non_field_errors %}<div class="field-error" role="alert">{% for error in form.non_field_errors %}{{ error }}{% endfor %}</div>{% endif %}
       <button class="checkout-confirm" type="submit" data-loading-text="Procesando…">{% if sale.payment_status == 'paid' %}REINTENTAR EMISIÓN{% else %}CONFIRMAR COBRO · {{ sale.pending_amount|floatformat:2 }} €{% endif %}</button>
     </form>
+    {% else %}<p class="recovery-note" role="status">Esta venta no admite cobros desde su estado actual. Consulta el historial antes de continuar.</p>{% endif %}
+    {% endif %}
   {% endif %}
 </section>

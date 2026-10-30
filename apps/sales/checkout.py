@@ -14,12 +14,14 @@ from django.utils import timezone
 
 from apps.billing.models import BillingDocumentStatusChoices, BillingDocumentTypeChoices
 from apps.billing.selectors import active_billing_series, billing_documents_for_sale
-from apps.billing.services import issue_sale_document
+from apps.billing.services import issue_sale_document, BillingAlreadyIssued
 from apps.cash_register.models import CashSession
+from apps.business_config.currency import ensure_eur_for_business
 from apps.business_config.models import POSSettings
 from apps.payments.models import Payment, PaymentStatusChoices as PaymentRecordStatus
 from apps.payments.selectors import get_active_payment_methods, get_sale_payments
-from apps.payments.services import register_sale_payment
+from apps.payments.services import register_sale_payment, _get_sale_payment_balance
+from apps.users.helpers import can_sell_in_store
 from apps.sales.models import (
     Sale,
     PaymentStatusChoices,
@@ -106,7 +108,102 @@ def checkout_options(*, business, sale):
     }
 
 
+def billing_recovery_ready(sale):
+    """Server-side routing hint; run_checkout repeats it under the Sale lock."""
+    if not (
+        sale.status == SaleStatusChoices.COMPLETED
+        and sale.payment_status == PaymentStatusChoices.PAID
+        and sale.pending_amount == Decimal("0.00")
+    ):
+        return False
+    balance = _get_sale_payment_balance(sale)
+    return balance["paid_total"] > 0 and balance["pending_amount"] == Decimal("0.00")
+
+
+def pending_payment_recovery(sale):
+    """Read-only eligibility; never reassign a completed Sale's cash context."""
+    return (
+        sale.status == SaleStatusChoices.COMPLETED
+        and sale.cash_session_id is not None
+        and CashSession.objects.filter(
+            pk=sale.cash_session_id,
+            business_id=sale.business_id,
+            store_id=sale.store_id,
+            status=CashSession.Status.CLOSED,
+            closed_at__isnull=False,
+        ).exists()
+        and _get_sale_payment_balance(sale)["pending_amount"] > 0
+    )
+
+
+def checkout_pending_amount(sale):
+    return _get_sale_payment_balance(sale)["pending_amount"]
+
+
+@transaction.atomic
+def recover_pending_checkout_payment(
+    *, business, sale, user, intent, cash_session_id, expected_version
+):
+    """One T2 only: Sale guard + existing Payments service, never Inventory/T3.
+
+    The nested Payments atomic belongs to this same single-payment transaction.
+    Lock order remains Sale -> destination CashSession, as in Payments.
+    """
+    locked = Sale.objects.select_for_update(of=("self",)).get(
+        pk=sale.pk, business=business, store_id=sale.store_id
+    )
+    if not can_sell_in_store(user, locked.store):
+        raise ValidationError("No tienes permiso para recuperar este cobro.")
+    if (
+        locked.cart_version != expected_version
+        or locked.status != SaleStatusChoices.COMPLETED
+    ):
+        raise CheckoutConflict(
+            "La venta ha cambiado. Consulta el estado antes de recuperar el cobro."
+        )
+    historical_closed = CashSession.objects.filter(
+        pk=locked.cash_session_id,
+        business=business,
+        store_id=locked.store_id,
+        status=CashSession.Status.CLOSED,
+        closed_at__isnull=False,
+    ).exists()
+    if not historical_closed or cash_session_id == locked.cash_session_id:
+        raise CheckoutConflict(
+            "Esta recuperación requiere la sesión histórica cerrada y otra sesión válida."
+        )
+    existing = Payment.objects.filter(
+        business=business, idempotency_key=intent.idempotency_key
+    ).exists()
+    balance = _get_sale_payment_balance(locked)
+    if not existing and (
+        intent.amount <= 0 or intent.amount > balance["pending_amount"]
+    ):
+        raise CheckoutConflict(
+            "El importe pendiente ha cambiado. Consulta los pagos confirmados."
+        )
+    # Existing keys still pass the service's full compatibility/auth checks.
+    # A confirmed historical part can never be moved into this new session.
+    payment = register_sale_payment(
+        business=business,
+        sale_id=locked.pk,
+        method_id=intent.method_id,
+        amount=intent.amount,
+        user=user,
+        idempotency_key=intent.idempotency_key,
+        cash_session_id=cash_session_id,
+        external_reference=intent.external_reference,
+        notes=f"Recuperación de checkout. Sesión histórica #{locked.cash_session_id}; sesión de cobro #{cash_session_id}.",
+    )
+    if payment.status != PaymentRecordStatus.COMPLETED:
+        raise CheckoutConflict(
+            "Esta clave corresponde a un pago no confirmado o cancelado. Consulta el estado antes de crear otra intención."
+        )
+    return payment
+
+
 def _preflight(*, business, sale, intents, series_id, allow_split):
+    ensure_eur_for_business(business.pk)
     if sale.status not in (SaleStatusChoices.OPEN, SaleStatusChoices.COMPLETED):
         raise CheckoutConflict("La venta no se puede procesar desde su estado actual.")
     if sale.status == SaleStatusChoices.OPEN and not sale.lines.exists():
@@ -225,6 +322,7 @@ def run_checkout(
     billing_key,
     allow_split,
     expected_version=None,
+    billing_only=False,
 ):
     """Advance durable steps; an exception never rolls earlier modules back."""
     with transaction.atomic():
@@ -235,8 +333,25 @@ def run_checkout(
             raise CheckoutConflict(
                 "El carrito ha cambiado. Actualiza y revisa el total antes de cobrar."
             )
+        if billing_only:
+            if not can_sell_in_store(user, sale.store):
+                raise ValidationError("No tienes permiso para recuperar esta emisión.")
+            if intents or not billing_recovery_ready(sale):
+                raise CheckoutConflict(
+                    "El saldo o estado de la venta ha cambiado. Consulta antes de emitir."
+                )
         state = checkout_state(business=business, sale=sale)
         if state["complete"]:
+            if billing_only and (
+                str(billing_key) != str(state["document"].idempotency_key)
+                or (
+                    series_id is not None
+                    and int(series_id) != state["document"].series_id
+                )
+            ):
+                raise CheckoutConflict(
+                    "El documento ya está emitido con otra intención. Consulta el documento existente."
+                )
             return state
         chosen_series = _preflight(
             business=business,
@@ -304,12 +419,21 @@ def run_checkout(
                 ) from error
             raise
         sale.refresh_from_db()
-    if sale.pending_amount == 0 and initial_document(sale, business) is None:
-        issue_sale_document(
-            business=business,
-            sale_id=sale.pk,
-            series_id=chosen_series,
-            issued_by=user,
-            idempotency_key=billing_key,
-        )
+    if sale.pending_amount == 0 and (
+        billing_only or initial_document(sale, business) is None
+    ):
+        try:
+            issue_sale_document(
+                business=business,
+                sale_id=sale.pk,
+                series_id=chosen_series,
+                issued_by=user,
+                idempotency_key=billing_key,
+            )
+        except BillingAlreadyIssued as error:
+            if billing_only:
+                raise CheckoutConflict(
+                    "El documento ya se ha emitido. Consulta su estado."
+                ) from error
+            raise
     return checkout_state(business=business, sale=sale)
