@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
+
+from apps.business_config.currency import CURRENCY_BLOCK_MESSAGE
 
 from apps.business_config.forms import BusinessProfileForm, POSSettingsForm
 from apps.business_config.models import BusinessProfile, POSSettings
@@ -7,6 +10,18 @@ from apps.business_config.models import BusinessProfile, POSSettings
 @admin.register(BusinessProfile)
 class BusinessProfileAdmin(admin.ModelAdmin):
     form = BusinessProfileForm
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.currency_code != "EUR":
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # Admin bulk deletion skips Model.delete. Check the entire selection
+        # before deleting anything, keeping the existing EUR deletion contract.
+        if queryset.exclude(currency_code="EUR").exists():
+            raise PermissionDenied(CURRENCY_BLOCK_MESSAGE)
+        return super().delete_queryset(request, queryset)
 
     list_display = (
         "business",

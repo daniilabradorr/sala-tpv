@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import Business, TimeStampedModel
 
 
@@ -238,6 +239,7 @@ class CustomerAccount(TimeStampedModel):
         return self.credit_limit - current_debt
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         if self.customer_id and self.business_id:
@@ -378,6 +380,7 @@ class CustomerAccountEntry(TimeStampedModel):
         return self.entry_type == EntryTypeChoices.ADJUSTMENT
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         if self.account_id and self.business_id:

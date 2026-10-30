@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.audit.constants import AuditEventType, AuditModule
 from apps.audit.services import log_event
 from apps.billing.models import (
@@ -738,6 +739,7 @@ def issue_sale_document(*, business, sale_id, series_id, issued_by, idempotency_
     existing = resolver(_attempt_for_key(business=business, key=key))
     if existing is not None:
         return existing
+    ensure_eur_for_business(business.pk)
 
     _validate_sale(sale)
     document_type = _document_type_for_sale(sale)
@@ -855,6 +857,7 @@ def substitute_simplified_document(
     existing = resolver(_attempt_for_key(business=business, key=key))
     if existing is not None:
         return existing
+    ensure_eur_for_business(business.pk)
 
     _validate_sale(sale)
     _validate_customer(business=business, customer=customer)
@@ -1439,6 +1442,7 @@ def issue_sale_return_rectification(
     )
     if existing is not None:
         return existing
+    ensure_eur_for_business(business.pk)
     if BillingDocument.objects.filter(
         business=business,
         sale_return=sale_return,

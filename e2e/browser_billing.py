@@ -1,5 +1,6 @@
 """Real Chromium coverage for the FE-18 Billing workspace."""
 
+import os
 import re
 import uuid
 from decimal import Decimal
@@ -183,7 +184,9 @@ class BrowserBillingTests(StaticLiveServerTestCase):
     def test_f2_receipt_wraps_long_lines_and_hides_controls_in_print(self):
         document = self.print_document("F2")
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 context = browser.new_context(viewport={"width": 1280, "height": 900})
                 context.add_init_script(
@@ -241,7 +244,9 @@ class BrowserBillingTests(StaticLiveServerTestCase):
     def test_f1_many_lines_remain_visible_and_have_pagination_rules(self):
         document = self.print_document("F1", line_count=70)
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
                 self.login(page)
@@ -323,7 +328,9 @@ class BrowserBillingTests(StaticLiveServerTestCase):
 
     def test_detail_print_opens_new_tab_without_leaving_document(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 context = browser.new_context(viewport={"width": 1440, "height": 900})
                 context.add_init_script(
@@ -380,7 +387,9 @@ class BrowserBillingTests(StaticLiveServerTestCase):
 
     def test_series_workspace_create_edit_and_responsive(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 page = browser.new_page(viewport={"width": 375, "height": 812})
                 self.login(page)
@@ -439,7 +448,9 @@ class BrowserBillingTests(StaticLiveServerTestCase):
 
     def test_documents_filters_snapshot_tabs_substitution_and_responsive(self):
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             try:
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
                 self.login(page)

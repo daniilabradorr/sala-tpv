@@ -885,6 +885,19 @@ class Product(TimeStampedModel):
 
         super().clean()
 
+        from apps.business_config.currency import ensure_eur_for_business
+
+        previous_prices = (
+            type(self)
+            .objects.filter(pk=self.pk)
+            .values_list("base_price", "cost_price")
+            .first()
+            if self.pk
+            else None
+        )
+        if previous_prices != (self.base_price, self.cost_price):
+            ensure_eur_for_business(self.business_id)
+
         if self.base_price is None:
             raise ValidationError(
                 {"base_price": "Debes indicar el precio base sin IVA."}

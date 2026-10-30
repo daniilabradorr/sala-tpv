@@ -74,6 +74,7 @@ class BillingStoreContextMixin:
             raise PermissionDenied("La interfaz de facturación requiere un negocio.")
         if self.store.business_id != business.id:
             raise Http404
+        self.request.netxodo_currency_business_id = business.id
         return business
 
     def get_sale(self):

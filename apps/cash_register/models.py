@@ -7,6 +7,7 @@ from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import Business, TimeStampedModel
 from apps.stores.models import Store
 
@@ -351,6 +352,7 @@ class CashSession(TimeStampedModel):
         return f"{self.cash_register} · {self.get_status_display()}"
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
 
         errors = {}
@@ -684,6 +686,7 @@ class CashMovement(TimeStampedModel):
         )
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
 
         errors = {}
@@ -917,6 +920,7 @@ class CashCount(TimeStampedModel):
         )
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
 
         errors = {}

@@ -619,7 +619,9 @@ class CollectedCartAssetsBrowserTests(LiveServerTestCase):
         client = Client()
         client.force_login(dataset.user)
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=os.getenv("TPV_CHROMIUM") or None, headless=True
+            )
             context = browser.new_context()
             context.add_cookies(
                 [

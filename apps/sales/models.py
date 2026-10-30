@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import Business, TimeStampedModel
 from apps.stores.models import Store
 
@@ -299,6 +300,7 @@ class Sale(TimeStampedModel):
         }
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         """
         Protege las relaciones y las reglas básicas de la cabecera.
 
@@ -636,6 +638,7 @@ class SaleLine(TimeStampedModel):
         return self.gross_base_amount - self.discount_amount
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         """
         Protege las relaciones y valores esenciales.
 
@@ -854,6 +857,7 @@ class SaleReturn(TimeStampedModel):
         return self.status == SaleReturnStatusChoices.DRAFT
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         """Valida la coherencia básica de la devolución."""
         super().clean()
 
@@ -1033,6 +1037,7 @@ class SaleReturnLine(TimeStampedModel):
         return f"Devolución de {self.original_line.product_name} × {self.quantity}"
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         """
         Valida la relación con la devolución y la venta original.
 

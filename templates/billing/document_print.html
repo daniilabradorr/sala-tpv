@@ -13,6 +13,7 @@
     <a href="{% url 'billing:document_detail' store_id=store.pk document_pk=document.pk %}">← Volver al documento</a>
     <button type="button" data-print-document>IMPRIMIR</button>
   </nav>
+  {% include "includes/currency_warning.html" %}
   <main class="document-print document-print--{{ document.document_type }}">
     {% if document.document_type == 'F2' %}
       {% include "billing/print/_f2_receipt.html" %}
