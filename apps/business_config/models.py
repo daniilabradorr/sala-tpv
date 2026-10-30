@@ -88,6 +88,18 @@ class BusinessProfile(TimeStampedModel):
             ),
         ]
 
+    def clean(self):
+        super().clean()
+        from apps.business_config.currency import validate_profile_currency
+
+        validate_profile_currency(self)
+
+    def delete(self, *args, **kwargs):
+        from apps.business_config.currency import ensure_eur_for_business
+
+        ensure_eur_for_business(self.business_id)
+        return super().delete(*args, **kwargs)
+
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)

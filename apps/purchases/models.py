@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import Business, TimeStampedModel
 
 
@@ -184,6 +185,7 @@ class Purchase(TimeStampedModel):
         return self.is_draft
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         self.reference = (self.reference or "").strip()
@@ -310,6 +312,7 @@ class PurchaseLine(TimeStampedModel):
         return f"{self.product_name} × {self.quantity_ordered}"
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         self.product_name = (self.product_name or "").strip()
@@ -404,6 +407,7 @@ class PurchaseReceipt(TimeStampedModel):
         return f"Recepción {self.pk or 'nueva'} · {self.purchase}"
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         self.notes = (self.notes or "").strip()
@@ -493,6 +497,7 @@ class PurchaseReceiptLine(TimeStampedModel):
         return f"{self.purchase_line} × {self.quantity_received}"
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         if (

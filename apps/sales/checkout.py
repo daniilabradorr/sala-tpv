@@ -16,6 +16,7 @@ from apps.billing.models import BillingDocumentStatusChoices, BillingDocumentTyp
 from apps.billing.selectors import active_billing_series, billing_documents_for_sale
 from apps.billing.services import issue_sale_document, BillingAlreadyIssued
 from apps.cash_register.models import CashSession
+from apps.business_config.currency import ensure_eur_for_business
 from apps.business_config.models import POSSettings
 from apps.payments.models import Payment, PaymentStatusChoices as PaymentRecordStatus
 from apps.payments.selectors import get_active_payment_methods, get_sale_payments
@@ -202,6 +203,7 @@ def recover_pending_checkout_payment(
 
 
 def _preflight(*, business, sale, intents, series_id, allow_split):
+    ensure_eur_for_business(business.pk)
     if sale.status not in (SaleStatusChoices.OPEN, SaleStatusChoices.COMPLETED):
         raise CheckoutConflict("La venta no se puede procesar desde su estado actual.")
     if sale.status == SaleStatusChoices.OPEN and not sale.lines.exists():

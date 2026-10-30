@@ -883,6 +883,11 @@ class StockMovement(TimeStampedModel):
         """
         super().clean()
 
+        if self.unit_cost is not None:
+            from apps.business_config.currency import ensure_eur_for_business
+
+            ensure_eur_for_business(self.business_id)
+
         errors = {}
 
         if self.inventory_item_id:

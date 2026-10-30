@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import TimeStampedModel
 
 
@@ -397,6 +398,7 @@ class BillingDocument(TimeStampedModel):
         )
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         self.series_text = (self.series_text or "").strip().upper()
@@ -656,6 +658,7 @@ class BillingDocumentLine(IssuedDocumentChildMixin, TimeStampedModel):
         ]
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         self.product_name = (self.product_name or "").strip()
         self.sku = (self.sku or "").strip().upper()
@@ -721,6 +724,7 @@ class BillingTaxBreakdown(IssuedDocumentChildMixin, TimeStampedModel):
         ]
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         if (
             self.billing_document_id
@@ -769,6 +773,7 @@ class BillingDocumentRelation(TimeStampedModel):
         ]
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         super().clean()
         errors = {}
         if self.source_document_id:

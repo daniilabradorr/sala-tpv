@@ -50,3 +50,19 @@ def app_shell(request):
         "shell_user_initials": _initials(user),
         "shell_user_name": _display_name(user),
     }
+
+
+def currency_policy(request):
+    from apps.business_config.currency import (
+        HISTORICAL_CURRENCY_WARNING,
+        business_currency,
+    )
+
+    user = getattr(request, "user", None)
+    business_id = getattr(
+        request, "netxodo_currency_business_id", getattr(user, "business_id", None)
+    )
+    if user is not None and user.is_authenticated and business_id is not None:
+        if business_currency(business_id) != "EUR":
+            return {"historical_currency_warning": HISTORICAL_CURRENCY_WARNING}
+    return {}

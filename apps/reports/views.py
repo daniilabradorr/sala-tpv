@@ -208,6 +208,13 @@ class SalesExportView(ReportsContextMixin, View):
         )
         response.write("\ufeff")
         writer = csv.writer(response, delimiter=";")
+        from apps.business_config.currency import (
+            business_currency,
+            HISTORICAL_CURRENCY_WARNING,
+        )
+
+        if business_currency(self.get_business().pk) != "EUR":
+            writer.writerow(["Aviso de moneda histórica", HISTORICAL_CURRENCY_WARNING])
         writer.writerow(["Resumen"])
         writer.writerow(["Métrica", "Valor"])
         for key in (

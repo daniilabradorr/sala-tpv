@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
+from apps.business_config.currency import ensure_eur_for_business
 from apps.core.models import Business, TimeStampedModel
 from apps.stores.models import Store
 
@@ -460,6 +461,7 @@ class Payment(TimeStampedModel):
         return self.status == PaymentStatusChoices.CANCELLED
 
     def clean(self):
+        ensure_eur_for_business(self.business_id)
         """
         Protege las invariantes estructurales del Payment.
 

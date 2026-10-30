@@ -167,7 +167,7 @@ class TaxFormTests(TestCase):
         self.assertNotIn("is_default", form.fields)
         self.assertNotIn("is_active", form.fields)
 
-    def test_tax_update_form_exposes_is_active_but_not_business_or_is_default(self):
+    def test_tax_update_form_excludes_lifecycle_and_tenant_fields(self):
         tax = create_tax(
             business=self.business,
             code="IVA_21",
@@ -178,9 +178,21 @@ class TaxFormTests(TestCase):
             business=self.business,
         )
 
-        self.assertIn("is_active", form.fields)
+        self.assertNotIn("is_active", form.fields)
         self.assertNotIn("business", form.fields)
         self.assertNotIn("is_default", form.fields)
+
+    def test_tax_update_cannot_activate_by_posting_extra_lifecycle_field(self):
+        tax = create_tax(business=self.business, code="IVA_21", is_active=False)
+        form = TaxUpdateForm(
+            data={**self.valid_tax_data(), "is_active": "on"},
+            instance=tax,
+            business=self.business,
+        )
+        self.assertTrue(form.is_valid(), form.errors.as_data())
+        form.save()
+        tax.refresh_from_db()
+        self.assertFalse(tax.is_active)
 
     def test_tax_form_normalizes_code_to_uppercase(self):
         form = TaxCreateForm(
