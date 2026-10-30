@@ -8,7 +8,7 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -61,7 +61,7 @@ jobs:
         run: uv run python manage.py test
 
   billing-postgres-concurrency:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -106,7 +106,7 @@ jobs:
         run: uv run python manage.py test apps.billing.tests_concurrency --verbosity 2
 
   sales-postgres-locking:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -158,7 +158,7 @@ jobs:
           --verbosity 2
 
   payments-postgres-locking:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -206,7 +206,7 @@ jobs:
           --verbosity 2
 
   purchases-postgres-locking:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -254,7 +254,7 @@ jobs:
           --verbosity 2
 
   cash-postgres-concurrency:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -302,7 +302,7 @@ jobs:
           --verbosity 2
 
   browser-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
